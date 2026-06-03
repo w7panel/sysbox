@@ -119,6 +119,23 @@ install_binaries() {
     cp "${bin_dir}/sysbox-fs/build/sysbox-fs" /usr/bin/sysbox-fs
     cp "${bin_dir}/sysbox-mgr/build/sysbox-mgr" /usr/bin/sysbox-mgr
 
+    # 安装 systemd 服务文件（如果未安装）
+    local sysbox_svc_dir="${SYSBOX_DIR}/sysbox-pkgr/systemd"
+    if [[ ! -f /usr/lib/systemd/system/sysbox-fs.service ]]; then
+        info "安装 systemd 服务文件..."
+        cp "${sysbox_svc_dir}/sysbox.service" /usr/lib/systemd/system/
+        cp "${sysbox_svc_dir}/sysbox-fs.service" /usr/lib/systemd/system/
+        cp "${sysbox_svc_dir}/sysbox-mgr.service" /usr/lib/systemd/system/
+        systemctl daemon-reload
+    fi
+
+    # 安装 sysbox 辅助脚本
+    if [[ ! -f /usr/bin/sysbox ]]; then
+        info "安装 sysbox 辅助脚本..."
+        cp "${SYSBOX_DIR}/scr/sysbox" /usr/bin/sysbox
+        chmod +x /usr/bin/sysbox
+    fi
+
     info "启动 Sysbox 服务..."
     systemctl start sysbox-fs sysbox-mgr
 
