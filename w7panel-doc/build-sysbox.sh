@@ -54,7 +54,56 @@ install_deps() {
         ln -sf "$(go env GOPATH)/bin/protoc-gen-go" /usr/local/bin/protoc-gen-go
     fi
 
-    info "依赖安装完成"
+    info "编译依赖安装完成"
+}
+
+# ─── 函数: 安装运行依赖 (sysbox-mgr 需要) ──────────────────────────
+install_runtime_deps() {
+    local missing=0
+
+    # rsync — sysbox-mgr 容器创建时 preflight 检测必需
+    if ! command -v rsync &>/dev/null; then
+        info "安装 rsync (sysbox-mgr 运行依赖)..."
+        apt-get install -y -qq rsync 2>&1 | tail -1
+    fi
+    if command -v rsync &>/dev/null; then
+        info "  rsync: $(rsync --version 2>&1 | head -1) ✅"
+    else
+        warn "  rsync: 未安装 ❌"
+        missing=1
+    fi
+
+    # iptables — 容器网络隔离必需
+    if ! command -v iptables &>/dev/null; then
+        info "安装 iptables (容器网络依赖)..."
+        apt-get install -y -qq iptables 2>&1 | tail -1
+    fi
+    if command -v iptables &>/dev/null; then
+        info "  iptables: $(iptables --version 2>&1) ✅"
+    else
+        warn "  iptables: 未安装 ❌"
+        missing=1
+    fi
+
+    # fuse — sysbox-fs FUSE 挂载必需
+    if ! command -v fusermount &>/dev/null && ! command -v fusermount3 &>/dev/null; then
+        info "安装 fuse (sysbox-fs FUSE 依赖)..."
+        apt-get install -y -qq fuse fuse3 2>&1 | tail -1
+    fi
+    if command -v fusermount3 &>/dev/null; then
+        info "  fuse: $(fusermount3 --version 2>&1) ✅"
+    elif command -v fusermount &>/dev/null; then
+        info "  fuse: $(fusermount --version 2>&1) ✅"
+    else
+        warn "  fuse: 未安装 ❌"
+        missing=1
+    fi
+
+    if [[ $missing -eq 1 ]]; then
+        warn "部分运行依赖缺失，Sysbox 可能无法正常工作"
+    else
+        info "运行依赖检查全部通过 ✅"
+    fi
 }
 
 # ─── 函数: 克隆源码 ─────────────────────────────────────────────────
@@ -151,7 +200,7 @@ install_binaries() {
 
     # 打印版本
     echo ""
-    /usr/bin/sysbox-runc --version 2>&1 | head -4
+    /usr/bin/sysbox-runc --version 2>&1 || /usr/bin/sysbox-runc version 2>&1 || true
 }
 
 # ─── 函数: 配置 K3s containerd ─────────────────────────────────────
@@ -247,7 +296,7 @@ verify() {
 
     echo ""
     info "2. Sysbox-runc 版本:"
-    /usr/bin/sysbox-runc --version 2>&1 | head -3
+    /usr/bin/sysbox-runc --version 2>&1 || /usr/bin/sysbox-runc version 2>&1 || true
 
     echo ""
     info "3. containerd 运行时注册:"
@@ -279,6 +328,7 @@ main() {
 
     case "${1:-}" in
         --install)
+            install_runtime_deps
             install_binaries
             verify
             ;;
@@ -293,6 +343,7 @@ main() {
             install_deps
             clone_source
             build
+            install_runtime_deps
             install_binaries
             config_k3s
             verify
