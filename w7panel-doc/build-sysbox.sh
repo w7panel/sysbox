@@ -198,9 +198,11 @@ install_binaries() {
         exit 1
     fi
 
-    # 打印版本
+    # 打印版本（主分支编译的 sysbox-runc 不支持 --version 标志）
     echo ""
-    /usr/bin/sysbox-runc --version 2>&1 || /usr/bin/sysbox-runc version 2>&1 || true
+    strings /usr/bin/sysbox-runc | grep -E "^[0-9]+\.[0-9]+\.[0-9]" | head -1
+    ls -lh /usr/bin/sysbox-runc /usr/bin/sysbox-fs /usr/bin/sysbox-mgr \
+        | awk '{printf "  %s %s (%s)\n", $NF, $5, $6 " " $7}'
 }
 
 # ─── 函数: 配置 K3s containerd ─────────────────────────────────────
@@ -295,8 +297,8 @@ verify() {
     systemctl is-active sysbox-fs sysbox-mgr
 
     echo ""
-    info "2. Sysbox-runc 版本:"
-    /usr/bin/sysbox-runc --version 2>&1 || /usr/bin/sysbox-runc version 2>&1 || true
+    info "2. Sysbox 版本:"
+    strings /usr/bin/sysbox-runc | grep -E "^[0-9]+\.[0-9]+\.[0-9]" | head -1
 
     echo ""
     info "3. containerd 运行时注册:"
