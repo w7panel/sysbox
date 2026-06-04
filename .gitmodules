@@ -18,4 +18,4 @@
 	url = https://github.com/nestybox/sysbox-pkgr
 [submodule "sysbox-dockerfiles"]
 	path = sysbox-dockerfiles
-	url = https://github.com/nestybox/sysbox-dockerfiles
+	url = https://github.com/nestybox/dockerfiles
