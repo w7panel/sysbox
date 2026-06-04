@@ -11,6 +11,7 @@
 #   GOPROXY   Go 模块代理 (默认: https://goproxy.cn,direct)
 #   SYSBOX_DIR  源码目录 (默认: /tmp/sysbox)
 #
+# 仓库: https://github.com/w7panel/sysbox (w7panel 分支)
 # 已知限制:
 #   - Kernel 6.x 上系统容器 (需挂载 sysfs) 不可用
 #   - 简单容器 (ubuntu:22.04 + sleep) 可正常运行
@@ -113,10 +114,36 @@ clone_source() {
         return
     fi
 
-    info "克隆 sysbox 源码 (通过 gh-proxy 代理)..."
-    git clone --recursive \
-        "https://gh-proxy.org/https://github.com/nestybox/sysbox.git" \
+    info "克隆 sysbox 源码 (w7panel 分支, 通过 gh-proxy 代理)..."
+
+    # 先克隆主仓库（不含子模块）
+    git clone -b w7panel \
+        "https://gh-proxy.org/https://github.com/w7panel/sysbox.git" \
         "${SYSBOX_DIR}"
+
+    # 修改子模块 URL，全部走 gh-proxy 代理
+    pushd "${SYSBOX_DIR}" >/dev/null
+    sed -i 's|https://github.com/|https://gh-proxy.org/https://github.com/|g' .gitmodules
+
+    # 先初始化所有第一级子模块
+    git submodule update --init --depth 1
+
+    # sysbox-fs 的 bazil 子模块使用相对路径 ../fuse.git，
+    # 从 w7panel/sysbox-fs 解析为 w7panel/fuse，但实际应为 nestybox/fuse
+    if [[ -f sysbox-fs/.gitmodules ]]; then
+        info "修正 sysbox-fs/bazil 子模块 URL (nestybox/fuse)..."
+        git -C sysbox-fs config submodule.bazil.url \
+            "https://gh-proxy.org/https://github.com/nestybox/fuse.git"
+    fi
+
+    # 递归克隆嵌套子模块
+    GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=echo \
+        git submodule update --init --recursive --depth 1
+
+    # 恢复原始子模块 URL
+    sed -i 's|https://gh-proxy.org/https://github.com/|https://github.com/|g' .gitmodules
+    popd >/dev/null
+
     info "克隆完成"
 }
 
@@ -256,7 +283,7 @@ state = "/run/k3s/containerd"
   runtime_type = "io.containerd.runc.v2"
 
 [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.sysbox-runc.options]
-  SystemdCgroup = false
+  SystemdCgroup = true
   BinaryName = "/usr/bin/sysbox-runc"
 
 [plugins.'io.containerd.cri.v1.images'.registry]

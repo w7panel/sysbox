@@ -115,9 +115,13 @@ Sysbox 是一个开源的"系统容器"运行时，由以下 **4 个核心组件
   runtime_type = "io.containerd.runc.v2"
 
 [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.sysbox-runc.options]
-  SystemdCgroup = false
+  SystemdCgroup = true
   BinaryName = "/usr/bin/sysbox-runc"
 ```
+
+> **关于 `SystemdCgroup` 说明**：旧版 sysbox 文档要求设为 `false`，这是针对 systemd < v244 的兼容性要求。
+> 现代 systemd（v244+）+ cgroup v2 支持 `Delegate=yes`，设为 `true` 后 systemd 会将 cgroup 控制器委托给
+> sysbox-runc，不影响 user namespace 隔离功能，同时使 kubelet 写入的 memory limit 能正常生效。
 
 **为什么只配 sysbox-runc？**
 - `runtime_type = "io.containerd.runc.v2"` — 告诉 containerd 这是一个兼容 runc v2 接口的运行时
@@ -424,7 +428,7 @@ state = "/run/k3s/containerd"
   runtime_type = "io.containerd.runc.v2"
 
 [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.sysbox-runc.options]
-  SystemdCgroup = false
+  SystemdCgroup = true
   BinaryName = "/usr/bin/sysbox-runc"
 
 [plugins.'io.containerd.cri.v1.images'.registry]
