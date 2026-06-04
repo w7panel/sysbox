@@ -6,16 +6,16 @@
 	url = https://github.com/w7panel/sysbox-runc
 [submodule "sysbox-ipc"]
 	path = sysbox-ipc
-	url = ../sysbox-ipc.git
+	url = https://github.com/nestybox/sysbox-ipc
 [submodule "sysbox-mgr"]
 	path = sysbox-mgr
-	url = ../sysbox-mgr.git
+	url = https://github.com/nestybox/sysbox-mgr
 [submodule "sysbox-libs"]
 	path = sysbox-libs
-	url = ../sysbox-libs.git
+	url = https://github.com/nestybox/sysbox-libs
 [submodule "sysbox-pkgr"]
 	path = sysbox-pkgr
-	url = ../sysbox-pkgr.git
+	url = https://github.com/nestybox/sysbox-pkgr
 [submodule "sysbox-dockerfiles"]
 	path = sysbox-dockerfiles
-	url = ../dockerfiles.git
+	url = https://github.com/nestybox/sysbox-dockerfiles
