@@ -44,7 +44,7 @@ LXCFS 的实现目标是长期维护一套接近内核 procfs/sysfs 格式的容
 | /proc/diskstats | 在 proc_fuse.c 的 proc_diskstats_read() 中读取 blkio/io cgroup 统计，并映射为 diskstats 字段；失败时可能回退宿主 /proc/diskstats。 | 当前优先读取 cgroup v2 io.stat；cgroup v1 下读取 blkio.throttle/io_*、blkio.io_* 并生成主要 diskstats 字段；无可靠 cgroup 数据时输出空内容。 | 已对齐 LXCFS 的 v1/v2 cgroup 优先读取方向，但不回退宿主完整 diskstats，避免暴露宿主磁盘设备和 I/O 细节。 |
 | /proc/meminfo | 在 proc_fuse.c 的 proc_meminfo_read() 中基于 memory cgroup、memory.stat、swap、zswap 生成大量字段。 | 当前基于 memory.max/current 或 v1 limit/usage 生成核心字段；同时读取 cgroup v2/v1 memory.stat 映射 active/inactive、cache、slab、dirty、writeback、anon、mapped、shmem、hugepage 等字段。 | 已比早期实现更接近 LXCFS，但 zswap、部分 THP/内核字段仍受 cgroup v2 可用字段限制，无法完整复刻 LXCFS 所有计算。 |
 | /proc/stat | 在 proc_fuse.c 的 proc_stat_read() 和 proc_cpuview.c 的 cpuview_proc_stat() 中处理。它会读取 cpuacct/cpuset，维护历史增量，生成更真实的 per-cpu 统计。 | 当前基于容器 uptime、可见 CPU 数、cgroup CPU usage 生成 cpu/cpuN 行，保留非 CPU 行并把 btime 改成容器创建时间。 | LXCFS 的 CPU 统计需要历史缓存和更复杂的 cpuacct usage_all 逻辑。Sysbox 当前选择生成自洽视图，保证 /proc/uptime、/proc/stat、top 之间不冲突，但精度不等同 LXCFS。 |
-| /proc/swaps | 在 proc_fuse.c 的 proc_swaps_read() 中结合 swap 配置、memory+swap limit、swappiness 输出虚拟 swap 行。 | 当前输出 header；如果能从 cgroup 读到明确 swap limit，则输出一条 virtual swap。 | Sysbox 还没有完整接管 swapon/swapoff，也没有 LXCFS 那套 swap 配置开关与 swappiness 处理，因此只做可确定场景。 |
+| /proc/swaps | 在 proc_fuse.c 的 proc_swaps_read() 中结合 swap 配置、memory+swap limit、swappiness 输出虚拟 swap 行，并按宿主 SwapTotal 封顶。 | 当前输出 header；如果能从 cgroup 读到明确 swap limit/current，则输出一条 virtual swap。cgroup v2 支持 memory.swap.max/current；cgroup v1 支持 memory.memsw.*，并按宿主 SwapTotal 封顶、swappiness=0 时只显示已用量。 | 已对齐 LXCFS 的主要输出语义。差异是 Sysbox 没有 LXCFS 的全局 LXCFS_SWAP_ON 配置开关，也不接管 swapon/swapoff；无可靠 cgroup swap 数据时继续只输出 header。 |
 | /proc/uptime | 在 proc_fuse.c 的 proc_uptime_read() 中使用 get_reaper_age() 作为 uptime，用 get_reaper_busy() 推算 idle。 | 当前使用容器创建时间计算 uptime，结合可见 CPU 数与 cgroup CPU usage 计算 idle，并对 offset 分块读取做 snapshot。 | LXCFS 以 reaper/PID1 年龄为核心。Sysbox 还配合 sysbox-runc time namespace offset 修正 /proc/[pid]/stat starttime，整体以容器创建时间为时间基准。 |
 | /proc/slabinfo | 在 proc_fuse.c 的 proc_slabinfo_read() 中优先读取 cgroup memory.kmem.slabinfo，失败时可能回退宿主 slabinfo。 | 当前 cgroup v1 memory.kmem.slabinfo 可用时读取；否则输出静态 header。 | cgroup v2 通常没有等价 slabinfo 文件。Sysbox 不回退宿主完整 slabinfo，避免暴露宿主内核 slab 细节。 |
 | /proc/pressure/io | 在 proc_fuse.c 的 proc_pressure_read() 中读取 cgroup pressure 文件，并支持 pressure write/poll 相关逻辑。 | 当前读取 cgroup v2 io.pressure；失败时回退 /proc/pressure/io；补齐了换行和 snapshot 读取。 | Sysbox 目前只实现 read 视图，没有实现 LXCFS 的 PSI trigger write/poll 行为。 |
@@ -71,6 +71,7 @@ Sysbox 当前更倾向隐藏宿主细节：
 - /proc/diskstats 无可靠 cgroup 数据时输出空内容。
 - /proc/slabinfo 无 cgroup slabinfo 时只输出 header。
 - /proc/loadavg 不回退宿主 loadavg。
+- /proc/swaps 无可靠 cgroup swap limit/current 时只输出 header。
 
 这样牺牲了信息完整度，但降低了宿主资源信息泄露风险。
 
@@ -123,6 +124,7 @@ LXCFS 更接近 cpuset 的真实 CPU ID。Sysbox 当前更偏“容器内连续 
 - /proc/loadavg 已实现后台采样和 EWMA 移动平均，但采样节点管理方式与 LXCFS 不同。
 - /proc/stat 没有 LXCFS 的 per-cpu 历史增量精度。
 - /proc/diskstats 已支持 cgroup v2 io.stat 与 cgroup v1 blkio 主要字段，但仍不回退宿主完整文件。
+- /proc/swaps 已支持 cgroup swap limit/current、宿主 SwapTotal 封顶和 v1 swappiness=0 处理，但没有 LXCFS_SWAP_ON 开关和 swapon/swapoff 虚拟化。
 - /proc/slabinfo 在 cgroup v2 下仍是保守 header。
 - pressure write/poll 未实现。
 - CPU present/online 使用连续容器 CPU 编号，而不是保留宿主 cpuset CPU ID。
