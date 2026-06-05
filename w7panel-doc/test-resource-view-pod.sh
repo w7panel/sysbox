@@ -87,6 +87,13 @@ bad() {
 	fail=1
 }
 
+check_eq() {
+	name="$1"
+	got="$2"
+	want="$3"
+	[ "$got" = "$want" ] && ok "$name" || bad "$name" "$got != $want"
+}
+
 check_readable() {
 	p="$1"
 	[ -r "$p" ] && ok "$p readable" || bad "$p readable" "not readable"
@@ -164,6 +171,48 @@ top -b -n1 >/tmp/top.out 2>/tmp/top.err && ok "top parses proc files" || bad "to
 grep -q 'load average:' /tmp/top.out && ok "top loadavg line" || bad "top loadavg line" "missing"
 free -m >/tmp/free.out 2>/tmp/free.err && ok "free parses meminfo" || bad "free parses meminfo" "$(cat /tmp/free.err)"
 awk '/^Mem:/ && $2 == 512 {found=1} END{exit found?0:1}' /tmp/free.out && ok "free sees 512Mi limit" || bad "free sees 512Mi limit" "$(sed -n '1,3p' /tmp/free.out)"
+
+set -- $(free -b | awk 'NR==2 {print $2, $3, $4, $5, $6, $7}')
+free_mem_total="$1"
+free_mem_used="$2"
+free_mem_free="$3"
+free_mem_shared="$4"
+free_mem_buff_cache="$5"
+free_mem_available="$6"
+set -- $(free -b | awk 'NR==3 {print $2, $3, $4}')
+free_swap_total="$1"
+free_swap_used="$2"
+free_swap_free="$3"
+
+mem_total_kb="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
+mem_free_kb="$(awk '/^MemFree:/ {print $2}' /proc/meminfo)"
+mem_available_kb="$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)"
+buffers_kb="$(awk '/^Buffers:/ {print $2}' /proc/meminfo)"
+cached_kb="$(awk '/^Cached:/ {print $2}' /proc/meminfo)"
+sreclaimable_kb="$(awk '/^SReclaimable:/ {print $2}' /proc/meminfo)"
+shmem_kb="$(awk '/^Shmem:/ {print $2}' /proc/meminfo)"
+swap_total_kb="$(awk '/^SwapTotal:/ {print $2}' /proc/meminfo)"
+swap_free_kb="$(awk '/^SwapFree:/ {print $2}' /proc/meminfo)"
+
+expected_mem_total=$((mem_total_kb * 1024))
+expected_mem_free=$((mem_free_kb * 1024))
+expected_mem_shared=$((shmem_kb * 1024))
+expected_mem_buff_cache=$(((buffers_kb + cached_kb + sreclaimable_kb) * 1024))
+expected_mem_used=$((expected_mem_total - expected_mem_free - expected_mem_buff_cache))
+expected_mem_available=$((mem_available_kb * 1024))
+expected_swap_total=$((swap_total_kb * 1024))
+expected_swap_free=$((swap_free_kb * 1024))
+expected_swap_used=$((expected_swap_total - expected_swap_free))
+
+check_eq "free mem total" "$free_mem_total" "$expected_mem_total"
+check_eq "free mem used" "$free_mem_used" "$expected_mem_used"
+check_eq "free mem free" "$free_mem_free" "$expected_mem_free"
+check_eq "free mem shared" "$free_mem_shared" "$expected_mem_shared"
+check_eq "free mem buff/cache" "$free_mem_buff_cache" "$expected_mem_buff_cache"
+check_eq "free mem available" "$free_mem_available" "$expected_mem_available"
+check_eq "free swap total" "$free_swap_total" "$expected_swap_total"
+check_eq "free swap used" "$free_swap_used" "$expected_swap_used"
+check_eq "free swap free" "$free_swap_free" "$expected_swap_free"
 
 for key in MemTotal MemFree MemAvailable Cached Active Inactive 'Active(anon)' 'Inactive(anon)' 'Active(file)' 'Inactive(file)' AnonPages Slab KernelStack PageTables SwapTotal SwapFree; do
 	grep -q "^$key:" /proc/meminfo && ok "meminfo $key" || bad "meminfo $key" "missing"
