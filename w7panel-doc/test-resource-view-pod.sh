@@ -169,6 +169,21 @@ grep -Eq '^[0-9]+\.[0-9]{2} [0-9]+\.[0-9]{2} [0-9]+\.[0-9]{2} [0-9]+/[0-9]+ [0-9
 
 top -b -n1 >/tmp/top.out 2>/tmp/top.err && ok "top parses proc files" || bad "top parses proc files" "$(cat /tmp/top.err)"
 grep -q 'load average:' /tmp/top.out && ok "top loadavg line" || bad "top loadavg line" "missing"
+top_load="$(awk -F'load average: ' 'NR == 1 && NF > 1 {gsub(/,/, "", $2); print $2}' /tmp/top.out)"
+proc_load="$(awk '{print $1, $2, $3}' /proc/loadavg)"
+awk -v top="$top_load" -v proc="$proc_load" 'BEGIN {
+	split(top, t, " ")
+	split(proc, p, " ")
+	for (i = 1; i <= 3; i++) {
+		d = t[i] - p[i]
+		if (d < 0) {
+			d = -d
+		}
+		if (d > 0.05) {
+			exit 1
+		}
+	}
+}' && ok "top loadavg matches proc loadavg" || bad "top loadavg matches proc loadavg" "$top_load != $proc_load"
 free -m >/tmp/free.out 2>/tmp/free.err && ok "free parses meminfo" || bad "free parses meminfo" "$(cat /tmp/free.err)"
 awk '/^Mem:/ && $2 == 512 {found=1} END{exit found?0:1}' /tmp/free.out && ok "free sees 512Mi limit" || bad "free sees 512Mi limit" "$(sed -n '1,3p' /tmp/free.out)"
 
