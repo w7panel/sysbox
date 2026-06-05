@@ -80,6 +80,75 @@ verify_memory() {
         warn "    (cgroup v2 不可读)"
 }
 
+# ─── 验证 swap 视图隔离 ────────────────────────────────────────────
+verify_swap() {
+    info "===== swap 视图隔离验证 ====="
+
+    echo ""
+    info "1. 容器内 /proc/swaps:"
+    ${KUBECTL} exec ${POD_NAME} -- cat /proc/swaps
+
+    echo ""
+    info "2. 容器内 /proc/meminfo swap 字段:"
+    ${KUBECTL} exec ${POD_NAME} -- awk '/^SwapTotal:|^SwapFree:/ {print}' /proc/meminfo
+
+    echo ""
+    info "3. cgroup swap 限制:"
+    swap_max="$(${KUBECTL} exec ${POD_NAME} -- sh -c '
+if [ -r /sys/fs/cgroup/memory.swap.max ]; then
+    cg_path="$(awk -F: '"'"'$1 == "0" {print $3}'"'"' /proc/self/cgroup)"
+    cg_path="${cg_path#/}"
+    while :; do
+        swap_max_file="/sys/fs/cgroup/${cg_path:+$cg_path/}memory.swap.max"
+        if [ -r "$swap_max_file" ]; then
+            value="$(cat "$swap_max_file")"
+            if [ -n "$value" ] && [ "$value" != "max" ]; then
+                echo "$value"
+                exit 0
+            fi
+        fi
+        [ -z "$cg_path" ] && break
+        case "$cg_path" in
+            */*) cg_path="${cg_path%/*}" ;;
+            *) cg_path="" ;;
+        esac
+    done
+    echo max
+elif [ -r /sys/fs/cgroup/memory/memory.memsw.limit_in_bytes ]; then
+    cat /sys/fs/cgroup/memory/memory.memsw.limit_in_bytes
+fi
+' | tr -d '\r')"
+    swap_current="$(${KUBECTL} exec ${POD_NAME} -- sh -c 'cat /sys/fs/cgroup/memory.swap.current 2>/dev/null || true' | tr -d '\r')"
+    echo "    memory.swap.max=${swap_max:-<missing>}"
+    echo "    memory.swap.current=${swap_current:-<missing>}"
+
+    swap_rows="$(${KUBECTL} exec ${POD_NAME} -- awk 'NR > 1 {n++} END {print n + 0}' /proc/swaps | tr -d '\r')"
+    swap_total_kb="$(${KUBECTL} exec ${POD_NAME} -- awk '/^SwapTotal:/ {print $2}' /proc/meminfo | tr -d '\r')"
+    if [[ "${swap_max}" =~ ^[0-9]+$ ]] && [[ "${swap_max}" -ge 4611686018427387903 ]]; then
+        swap_max=0
+    fi
+
+    case "${swap_max}" in
+        ""|"max"|"0")
+            if [[ "${swap_rows}" == "0" && "${swap_total_kb}" == "0" ]]; then
+                info "   swap 默认隐藏正确: /proc/swaps 只有 header，SwapTotal=0 ✅"
+            else
+                error "   swap 视图异常: memory.swap.max=${swap_max:-<missing>}, rows=${swap_rows}, SwapTotal=${swap_total_kb}KB"
+                return 1
+            fi
+            ;;
+        *)
+            expected_kb=$((swap_max / 1024))
+            if [[ "${swap_rows}" -ge "1" && "${swap_total_kb}" == "${expected_kb}" ]]; then
+                info "   swap 限制显示正确: ${swap_total_kb}KB ✅"
+            else
+                error "   swap 限制显示异常: expected=${expected_kb}KB, rows=${swap_rows}, SwapTotal=${swap_total_kb}KB"
+                return 1
+            fi
+            ;;
+    esac
+}
+
 # ─── 验证 systemd 容器 ──────────────────────────────────────────────
 verify_systemd() {
     info "===== systemd 容器验证 ====="
@@ -136,12 +205,14 @@ main() {
             ;;
         --verify|-v)
             verify_memory
+            verify_swap
             verify_systemd
             ;;
         *)
             clean_pod 2>/dev/null || true
             create_pod
             verify_memory
+            verify_swap
             verify_systemd
             info ""
             info "全部测试完成 🎉"

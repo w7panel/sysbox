@@ -226,6 +226,76 @@ mem_avail="$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)"
 
 head -1 /proc/swaps | grep -Eq '^Filename[[:space:]]+Type[[:space:]]+Size[[:space:]]+Used[[:space:]]+Priority$' && ok "swaps header" || bad "swaps header" "$(head -1 /proc/swaps)"
 awk 'NR>1 {if (NF < 5) bad=1} END{exit bad?1:0}' /proc/swaps && ok "swaps rows format" || bad "swaps rows format" "invalid row"
+swap_rows="$(awk 'NR > 1 {n++} END {print n + 0}' /proc/swaps)"
+swap_row_total_kb="$(awk 'NR == 2 {print $3 + 0}' /proc/swaps)"
+swap_row_used_kb="$(awk 'NR == 2 {print $4 + 0}' /proc/swaps)"
+swap_max=""
+swap_current=""
+swap_source="missing"
+if [ -r /sys/fs/cgroup/memory.swap.max ]; then
+	swap_source="cgroup-v2"
+	cg_path="$(awk -F: '$1 == "0" {print $3}' /proc/self/cgroup)"
+	cg_path="${cg_path#/}"
+	while :; do
+		swap_max_file="/sys/fs/cgroup/${cg_path:+$cg_path/}memory.swap.max"
+		if [ -r "$swap_max_file" ]; then
+			value="$(cat "$swap_max_file")"
+			if [ -n "$value" ] && [ "$value" != "max" ]; then
+				swap_max="$value"
+				break
+			fi
+		fi
+		[ -z "$cg_path" ] && break
+		case "$cg_path" in
+			*/*) cg_path="${cg_path%/*}" ;;
+			*) cg_path="" ;;
+		esac
+	done
+	if [ -z "$swap_max" ]; then
+		swap_max="max"
+	fi
+	swap_current="$(cat /sys/fs/cgroup/memory.swap.current 2>/dev/null || echo 0)"
+elif [ -r /sys/fs/cgroup/memory/memory.memsw.limit_in_bytes ] && [ -r /sys/fs/cgroup/memory/memory.limit_in_bytes ]; then
+	swap_source="cgroup-v1"
+	mem_limit_bytes="$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)"
+	memsw_limit_bytes="$(cat /sys/fs/cgroup/memory/memory.memsw.limit_in_bytes)"
+	mem_usage_bytes="$(cat /sys/fs/cgroup/memory/memory.usage_in_bytes 2>/dev/null || echo 0)"
+	memsw_usage_bytes="$(cat /sys/fs/cgroup/memory/memory.memsw.usage_in_bytes 2>/dev/null || echo 0)"
+	if [ "$memsw_limit_bytes" -ge 4611686018427387903 ] 2>/dev/null; then
+		swap_max=0
+		swap_current=0
+	elif [ "$memsw_limit_bytes" -gt "$mem_limit_bytes" ] 2>/dev/null; then
+		swap_max="$memsw_limit_bytes"
+		if [ "$memsw_usage_bytes" -gt "$mem_usage_bytes" ] 2>/dev/null; then
+			swap_current=$((memsw_usage_bytes - mem_usage_bytes))
+		else
+			swap_current=0
+		fi
+	else
+		swap_max=0
+		swap_current=0
+	fi
+fi
+printf 'VALUE swap_source=%s swap_max=%s swap_current=%s swap_rows=%s swap_total_kb=%s swap_free_kb=%s\n' "$swap_source" "${swap_max:-<missing>}" "${swap_current:-<missing>}" "$swap_rows" "$swap_total_kb" "$swap_free_kb"
+case "$swap_max" in
+	""|"max"|"0")
+		[ "$swap_rows" -eq 0 ] && ok "swaps hides unlimited/default rows" || bad "swaps hides unlimited/default rows" "rows=$swap_rows"
+		[ "$swap_total_kb" -eq 0 ] && ok "meminfo hides unlimited/default swap total" || bad "meminfo hides unlimited/default swap total" "SwapTotal=$swap_total_kb"
+		[ "$swap_free_kb" -eq 0 ] && ok "meminfo hides unlimited/default swap free" || bad "meminfo hides unlimited/default swap free" "SwapFree=$swap_free_kb"
+		;;
+	*)
+		expected_swap_kb=$((swap_max / 1024))
+		expected_swap_used_kb=$((swap_current / 1024))
+		if [ "$expected_swap_used_kb" -gt "$expected_swap_kb" ]; then
+			expected_swap_used_kb="$expected_swap_kb"
+		fi
+		[ "$swap_rows" -ge 1 ] && ok "swaps shows explicit cgroup swap row" || bad "swaps shows explicit cgroup swap row" "rows=$swap_rows"
+		check_eq "swaps row total matches cgroup" "$swap_row_total_kb" "$expected_swap_kb"
+		check_eq "swaps row used matches cgroup" "$swap_row_used_kb" "$expected_swap_used_kb"
+		check_eq "meminfo swap total matches cgroup" "$swap_total_kb" "$expected_swap_kb"
+		check_eq "meminfo swap free matches cgroup" "$swap_free_kb" "$((expected_swap_kb - expected_swap_used_kb))"
+		;;
+esac
 
 disk_content="$(cat /proc/diskstats)"
 if [ -z "$disk_content" ]; then
