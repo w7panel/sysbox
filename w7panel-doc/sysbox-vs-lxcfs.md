@@ -51,7 +51,7 @@ LXCFS 的实现目标是长期维护一套接近内核 procfs/sysfs 格式的容
 | /proc/pressure/cpu | 同 /proc/pressure/io，读取 cpu.pressure，并支持 write/poll。 | 当前读取 cgroup v2 cpu.pressure；失败时回退 /proc/pressure/cpu。 | 差异同上：只实现读取，没有实现 PSI 事件触发器写入和 poll。 |
 | /proc/pressure/memory | 同 /proc/pressure/io，读取 memory.pressure，并支持 write/poll。 | 当前读取 cgroup v2 memory.pressure；失败时回退 /proc/pressure/memory。 | 差异同上：只实现读取，没有实现 PSI 事件触发器写入和 poll。 |
 | /sys/devices/system/cpu/online | 在 sysfs_fuse.c 的 sys_devices_system_cpu_online_read() 中基于 cpuset 与 CPU quota 输出可见 CPU。 | 当前通过 effectiveCPUCount() 输出连续 CPU 范围 0..N-1。 | LXCFS 更贴近 cpuset 实际 CPU ID。Sysbox 输出连续范围，和 /proc/cpuinfo、/proc/stat 的连续 CPU 编号保持一致，避免用户态工具看到非连续 CPU 时产生额外问题。 |
-| /proc/loadavg | 在 proc_loadavg.c 的 proc_loadavg_read() 中使用 loadavg 后台结构与 cgroup hash 维护负载移动平均。 | 当前 handler 输出格式正确的保守 loadavg：前三列为 0.00；running/total/last pid 优先按访问进程 PID namespace 统计，失败时再用容器 root /proc、进程树或 cgroup 估算。 | 已尽量对齐 LXCFS 的容器进程视图，但没有实现后台采样 daemon，因此不能提供真实 1/5/15 分钟移动平均。 |
+| /proc/loadavg | 在 proc_loadavg.c 的 proc_loadavg_read() 中使用 loadavg 后台结构与 cgroup hash 维护负载移动平均。 | 当前已实现 lazy-start 后台采样器：第一次读取时按访问进程 PID namespace/cgroup 注册 load node，后台每 5 秒刷新 running/total/last pid，并按 LXCFS 固定点 EWMA 算法生成 1/5/15 分钟 loadavg。 | 已对齐 LXCFS 的核心采样模型和计算公式。差异是 Sysbox 以 Go 全局 sampler 管理节点，没有复刻 LXCFS 的 pthread hash bucket 锁结构；节点回收使用 lastSeen TTL。 |
 | /sys/devices/system/cpu/present | LXCFS 新 sysfs 逻辑可把 /sys/devices/system/cpu 下普通文件作为 SUBFILE 透传；online 有专门虚拟化。 | 当前新增 handler，输出与 online 一致的连续 CPU 范围 0..N-1。 | LXCFS 对 present 主要是 sysfs 子文件路径支持，不一定专门虚拟化为容器 CPU present。Sysbox 选择让 present 与 online/cpuinfo/stat 一致，避免容器看到宿主全部 CPU。 |
 
 ## 当前没有完全对齐 LXCFS 的主要原因
@@ -86,18 +86,15 @@ LXCFS 历史上对 cgroup v1 的 blkio、cpuacct、memory.kmem.slabinfo 等文�
 
 因此 Sysbox 只能生成近似且自洽的资源视图，而不是完整复刻 LXCFS。
 
-### 4. /proc/loadavg 需要后台采样
+### 4. /proc/loadavg 后台采样差异
 
-LXCFS 的 /proc/loadavg 不是简单读一个 cgroup 文件，而是维护 cgroup 级 loadavg 节点和历史移动平均。
+LXCFS 的 /proc/loadavg 不是简单读一个 cgroup 文件，而是维护 cgroup 级 loadavg 节点和历史移动平均。当前 Sysbox-FS 已实现后台采样器，采样周期和固定点 EWMA 公式与 LXCFS 对齐。
 
-Sysbox 当前没有 loadavg daemon。如果要完全对齐，需要新增：
+仍未完全逐行复刻 LXCFS 的地方：
 
-- per-container/cgroup loadavg 状态表。
-- 周期性采样任务。
-- 容器销毁时的状态清理。
-- 并发与生命周期管理。
-
-这已经超出“补齐 proc 文件视图”的小范围改动。
+- LXCFS 使用 pthread + hash bucket 多级锁；Sysbox 使用 Go goroutine + mutex。
+- LXCFS 以 cgroup 目录递归深度扫描 cgroup.procs；Sysbox 优先按访问进程 PID namespace 扫描宿主 /proc，失败时再用容器 root /proc、进程树或 cgroup 估算。
+- LXCFS 在 cgroup 消失时删除 node；Sysbox 使用 lastSeen TTL 回收长时间不再读取的 node。
 
 ### 5. CPU ID 语义取舍
 
@@ -123,7 +120,7 @@ LXCFS 更接近 cpuset 的真实 CPU ID。Sysbox 当前更偏“容器内连续 
 
 当前仍未完全等同 LXCFS 的部分：
 
-- /proc/loadavg 没有真实 cgroup 移动平均，但 running/total/last pid 已优先从容器 /proc 估算。
+- /proc/loadavg 已实现后台采样和 EWMA 移动平均，但采样节点管理方式与 LXCFS 不同。
 - /proc/stat 没有 LXCFS 的 per-cpu 历史增量精度。
 - /proc/diskstats 已支持 cgroup v2 io.stat 与 cgroup v1 blkio 主要字段，但仍不回退宿主完整文件。
 - /proc/slabinfo 在 cgroup v2 下仍是保守 header。
@@ -134,8 +131,7 @@ LXCFS 更接近 cpuset 的真实 CPU ID。Sysbox 当前更偏“容器内连续 
 
 建议按优先级推进：
 
-1. 为 /proc/loadavg 增加 per-container 后台采样与状态缓存。
-2. 为 /proc/stat 增加 per-container CPU 历史增量，减少每次读取时的估算。
-3. 继续扩展 /proc/diskstats 中 discard、queue time 等字段在不同内核/cgroup 文件上的兼容映射。
-4. 评估是否需要 pressure write/poll；如果业务不依赖 PSI trigger，可继续只读。
-5. 决定 CPU ID 策略：继续使用连续 CPU 编号，或改为保留 cpuset 原始 CPU ID。这个选择会同时影响 cpuinfo、stat、online、present。
+1. 为 /proc/stat 增加 per-container CPU 历史增量，减少每次读取时的估算。
+2. 继续扩展 /proc/diskstats 中 discard、queue time 等字段在不同内核/cgroup 文件上的兼容映射。
+3. 评估是否需要 pressure write/poll；如果业务不依赖 PSI trigger，可继续只读。
+4. 决定 CPU ID 策略：继续使用连续 CPU 编号，或改为保留 cpuset 原始 CPU ID。这个选择会同时影响 cpuinfo、stat、online、present。
