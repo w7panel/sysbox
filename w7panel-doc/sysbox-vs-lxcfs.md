@@ -41,8 +41,8 @@ LXCFS 的实现目标是长期维护一套接近内核 procfs/sysfs 格式的容
 | 路径 | LXCFS 实现 | 当前 Sysbox-FS 实现 | 未完全对齐原因 |
 |---|---|---|---|
 | /proc/cpuinfo | 在 src/proc_cpuview.c 的 proc_cpuinfo_read() 中处理。结合 cpuset、cpu quota、架构/personality 过滤真实 CPU block，并重新编号。 | 在 procResources.go 的 readCPUInfo() 中读取宿主 /proc/cpuinfo，然后按 effectiveCPUCount() 截取前 N 个 CPU block 并重写 processor 编号。 | LXCFS 会按具体 cpuset CPU ID 过滤，例如 2,4,6；Sysbox 当前输出连续 0..N-1。这样能保证工具看到连续 CPU 视图，但没有完整保留 cpuset 物理 CPU 映射和架构特殊格式。 |
-| /proc/diskstats | 在 proc_fuse.c 的 proc_diskstats_read() 中读取 blkio/io cgroup 统计，并映射为 diskstats 字段；失败时可能回退宿主 /proc/diskstats。 | 当前优先读取 cgroup v2 io.stat 并生成主要 diskstats 字段；无 io.stat 时输出空内容。 | LXCFS 对 v1 blkio 和更多字段映射更完整。Sysbox 不回退宿主完整 diskstats，是为了避免暴露宿主磁盘设备和 I/O 细节。 |
-| /proc/meminfo | 在 proc_fuse.c 的 proc_meminfo_read() 中基于 memory cgroup、memory.stat、swap、zswap 生成大量字段。 | 当前基于 memory.max/current 或 v1 limit/usage 生成核心字段，并用宿主 meminfo 字段做上限裁剪。 | LXCFS 的 memory.stat 字段映射更完整。Sysbox 当前实现偏保守，优先让 free/top 可用并反映 memory limit，没有完整复刻所有内核字段计算。 |
+| /proc/diskstats | 在 proc_fuse.c 的 proc_diskstats_read() 中读取 blkio/io cgroup 统计，并映射为 diskstats 字段；失败时可能回退宿主 /proc/diskstats。 | 当前优先读取 cgroup v2 io.stat；cgroup v1 下读取 blkio.throttle/io_*、blkio.io_* 并生成主要 diskstats 字段；无可靠 cgroup 数据时输出空内容。 | 已对齐 LXCFS 的 v1/v2 cgroup 优先读取方向，但不回退宿主完整 diskstats，避免暴露宿主磁盘设备和 I/O 细节。 |
+| /proc/meminfo | 在 proc_fuse.c 的 proc_meminfo_read() 中基于 memory cgroup、memory.stat、swap、zswap 生成大量字段。 | 当前基于 memory.max/current 或 v1 limit/usage 生成核心字段；同时读取 cgroup v2/v1 memory.stat 映射 active/inactive、cache、slab、dirty、writeback、anon、mapped、shmem、hugepage 等字段。 | 已比早期实现更接近 LXCFS，但 zswap、部分 THP/内核字段仍受 cgroup v2 可用字段限制，无法完整复刻 LXCFS 所有计算。 |
 | /proc/stat | 在 proc_fuse.c 的 proc_stat_read() 和 proc_cpuview.c 的 cpuview_proc_stat() 中处理。它会读取 cpuacct/cpuset，维护历史增量，生成更真实的 per-cpu 统计。 | 当前基于容器 uptime、可见 CPU 数、cgroup CPU usage 生成 cpu/cpuN 行，保留非 CPU 行并把 btime 改成容器创建时间。 | LXCFS 的 CPU 统计需要历史缓存和更复杂的 cpuacct usage_all 逻辑。Sysbox 当前选择生成自洽视图，保证 /proc/uptime、/proc/stat、top 之间不冲突，但精度不等同 LXCFS。 |
 | /proc/swaps | 在 proc_fuse.c 的 proc_swaps_read() 中结合 swap 配置、memory+swap limit、swappiness 输出虚拟 swap 行。 | 当前输出 header；如果能从 cgroup 读到明确 swap limit，则输出一条 virtual swap。 | Sysbox 还没有完整接管 swapon/swapoff，也没有 LXCFS 那套 swap 配置开关与 swappiness 处理，因此只做可确定场景。 |
 | /proc/uptime | 在 proc_fuse.c 的 proc_uptime_read() 中使用 get_reaper_age() 作为 uptime，用 get_reaper_busy() 推算 idle。 | 当前使用容器创建时间计算 uptime，结合可见 CPU 数与 cgroup CPU usage 计算 idle，并对 offset 分块读取做 snapshot。 | LXCFS 以 reaper/PID1 年龄为核心。Sysbox 还配合 sysbox-runc time namespace offset 修正 /proc/[pid]/stat starttime，整体以容器创建时间为时间基准。 |
@@ -51,7 +51,7 @@ LXCFS 的实现目标是长期维护一套接近内核 procfs/sysfs 格式的容
 | /proc/pressure/cpu | 同 /proc/pressure/io，读取 cpu.pressure，并支持 write/poll。 | 当前读取 cgroup v2 cpu.pressure；失败时回退 /proc/pressure/cpu。 | 差异同上：只实现读取，没有实现 PSI 事件触发器写入和 poll。 |
 | /proc/pressure/memory | 同 /proc/pressure/io，读取 memory.pressure，并支持 write/poll。 | 当前读取 cgroup v2 memory.pressure；失败时回退 /proc/pressure/memory。 | 差异同上：只实现读取，没有实现 PSI 事件触发器写入和 poll。 |
 | /sys/devices/system/cpu/online | 在 sysfs_fuse.c 的 sys_devices_system_cpu_online_read() 中基于 cpuset 与 CPU quota 输出可见 CPU。 | 当前通过 effectiveCPUCount() 输出连续 CPU 范围 0..N-1。 | LXCFS 更贴近 cpuset 实际 CPU ID。Sysbox 输出连续范围，和 /proc/cpuinfo、/proc/stat 的连续 CPU 编号保持一致，避免用户态工具看到非连续 CPU 时产生额外问题。 |
-| /proc/loadavg | 在 proc_loadavg.c 的 proc_loadavg_read() 中使用 loadavg 后台结构与 cgroup hash 维护负载移动平均。 | 当前新增 handler，输出格式正确的保守 loadavg：前三列为 0.00，running/total 与 last pid 使用安全估算。 | LXCFS 的 loadavg 需要后台采样 daemon 和 cgroup 级历史状态。Sysbox 当前没有这套运行时架构，先保证 uptime/top 等工具可解析且不暴露宿主 loadavg。 |
+| /proc/loadavg | 在 proc_loadavg.c 的 proc_loadavg_read() 中使用 loadavg 后台结构与 cgroup hash 维护负载移动平均。 | 当前 handler 输出格式正确的保守 loadavg：前三列为 0.00；running/total/last pid 优先按访问进程 PID namespace 统计，失败时再用容器 root /proc、进程树或 cgroup 估算。 | 已尽量对齐 LXCFS 的容器进程视图，但没有实现后台采样 daemon，因此不能提供真实 1/5/15 分钟移动平均。 |
 | /sys/devices/system/cpu/present | LXCFS 新 sysfs 逻辑可把 /sys/devices/system/cpu 下普通文件作为 SUBFILE 透传；online 有专门虚拟化。 | 当前新增 handler，输出与 online 一致的连续 CPU 范围 0..N-1。 | LXCFS 对 present 主要是 sysfs 子文件路径支持，不一定专门虚拟化为容器 CPU present。Sysbox 选择让 present 与 online/cpuinfo/stat 一致，避免容器看到宿主全部 CPU。 |
 
 ## 当前没有完全对齐 LXCFS 的主要原因
@@ -123,9 +123,9 @@ LXCFS 更接近 cpuset 的真实 CPU ID。Sysbox 当前更偏“容器内连续 
 
 当前仍未完全等同 LXCFS 的部分：
 
-- /proc/loadavg 没有真实 cgroup 移动平均。
+- /proc/loadavg 没有真实 cgroup 移动平均，但 running/total/last pid 已优先从容器 /proc 估算。
 - /proc/stat 没有 LXCFS 的 per-cpu 历史增量精度。
-- /proc/diskstats 只从 cgroup v2 io.stat 转换主要字段。
+- /proc/diskstats 已支持 cgroup v2 io.stat 与 cgroup v1 blkio 主要字段，但仍不回退宿主完整文件。
 - /proc/slabinfo 在 cgroup v2 下仍是保守 header。
 - pressure write/poll 未实现。
 - CPU present/online 使用连续容器 CPU 编号，而不是保留宿主 cpuset CPU ID。
@@ -136,6 +136,6 @@ LXCFS 更接近 cpuset 的真实 CPU ID。Sysbox 当前更偏“容器内连续 
 
 1. 为 /proc/loadavg 增加 per-container 后台采样与状态缓存。
 2. 为 /proc/stat 增加 per-container CPU 历史增量，减少每次读取时的估算。
-3. 扩展 /proc/diskstats 对 cgroup v1 blkio 与 cgroup v2 io.stat 的字段映射。
+3. 继续扩展 /proc/diskstats 中 discard、queue time 等字段在不同内核/cgroup 文件上的兼容映射。
 4. 评估是否需要 pressure write/poll；如果业务不依赖 PSI trigger，可继续只读。
 5. 决定 CPU ID 策略：继续使用连续 CPU 编号，或改为保留 cpuset 原始 CPU ID。这个选择会同时影响 cpuinfo、stat、online、present。
