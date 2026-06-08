@@ -15,7 +15,8 @@
 	url = https://github.com/nestybox/sysbox-libs
 [submodule "sysbox-pkgr"]
 	path = sysbox-pkgr
-	url = https://github.com/nestybox/sysbox-pkgr
+	url = https://github.com/w7panel/sysbox-pkgr
+	branch = w7panel
 [submodule "sysbox-dockerfiles"]
 	path = sysbox-dockerfiles
 	url = https://github.com/nestybox/dockerfiles
