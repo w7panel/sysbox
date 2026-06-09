@@ -184,6 +184,7 @@ verify_proc_sys() {
 
     # CPU 统计
     check_exact  "stat 可读"           "/proc/stat"
+    verify_cpu_topology
 
     verify_swap
     verify_swapon
@@ -191,13 +192,15 @@ verify_proc_sys() {
     # 运行时间
     check_exact  "uptime 可读"         "/proc/uptime"
 
-    # Slab 信息（虚拟化为空表头）
+    # Slab 信息
     check        "slabinfo 显示版本"   "/proc/slabinfo"        "slabinfo - version"
+    verify_slabinfo
 
     # PSI — pressure stall indicators
     check        "pressure/io 可读"    "/proc/pressure/io"     "some avg10="
     check        "pressure/cpu 可读"   "/proc/pressure/cpu"    "some avg10="
     check        "pressure/memory 可读" "/proc/pressure/memory" "some avg10="
+    verify_pressure
 
     # CPU 拓扑
     check_exact  "cpu/online 可读"     "/sys/devices/system/cpu/online"
@@ -209,6 +212,190 @@ verify_proc_sys() {
     echo ""
     info "结果: ${PASS} 通过, ${FAIL} 失败"
     if [ "$FAIL" -gt 0 ]; then return 1; fi
+}
+
+# ─── 验证 CPU 拓扑视图一致性 ────────────────────────────────────────
+verify_cpu_topology() {
+    echo ""
+    info "========== CPU 拓扑一致性验证 =========="
+
+    local out
+    out="$(${KUBECTL} exec ${POD_NAME} -- sh -c '
+fail=0
+
+bad() {
+    echo "FAIL $1: $2"
+    fail=1
+}
+
+ok() {
+    echo "PASS $1"
+}
+
+count_range() {
+    awk -v range="$1" "
+    BEGIN {
+        n = split(range, parts, \",\")
+        total = 0
+        for (i = 1; i <= n; i++) {
+            gsub(/^[[:space:]]+|[[:space:]]+$/, \"\", parts[i])
+            if (parts[i] == \"\") continue
+            if (parts[i] ~ /^[0-9]+-[0-9]+$/) {
+                split(parts[i], b, \"-\")
+                if (b[2] >= b[1]) total += b[2] - b[1] + 1
+            } else if (parts[i] ~ /^[0-9]+$/) {
+                total++
+            }
+        }
+        print total
+    }"
+}
+
+online="$(tr -d "[:space:]" < /sys/devices/system/cpu/online 2>/dev/null)"
+present="$(tr -d "[:space:]" < /sys/devices/system/cpu/present 2>/dev/null)"
+cpuinfo_count="$(grep -c "^processor[[:space:]]*:" /proc/cpuinfo 2>/dev/null || echo 0)"
+stat_count="$(grep -Ec "^cpu[0-9]+[[:space:]]" /proc/stat 2>/dev/null || echo 0)"
+online_count="$(count_range "$online")"
+present_count="$(count_range "$present")"
+
+echo "VALUE cpu_online=${online:-<empty>} cpu_present=${present:-<empty>} cpuinfo_count=${cpuinfo_count} stat_count=${stat_count}"
+
+[ "$online_count" -gt 0 ] || bad "cpu online range non-empty" "$online"
+[ "$present_count" -gt 0 ] || bad "cpu present range non-empty" "$present"
+[ "$cpuinfo_count" -eq "$online_count" ] || bad "cpuinfo count matches online" "$cpuinfo_count != $online_count"
+[ "$stat_count" -eq "$online_count" ] || bad "proc stat cpu lines match online" "$stat_count != $online_count"
+[ "$present_count" -ge "$online_count" ] || bad "present covers online" "$present_count < $online_count"
+
+[ "$fail" -eq 0 ] && ok "cpu topology views are consistent"
+exit "$fail"
+' 2>/dev/null | tr -d '\r')"
+
+    echo "$out"
+    if echo "$out" | grep -q '^FAIL '; then
+        FAIL=$((FAIL+1))
+    else
+        PASS=$((PASS+1))
+    fi
+}
+
+# ─── 验证 slabinfo 视图来源 ─────────────────────────────────────────
+verify_slabinfo() {
+    echo ""
+    info "========== slabinfo 视图验证 =========="
+
+    local out
+    out="$(${KUBECTL} exec ${POD_NAME} -- sh -c '
+fail=0
+
+bad() {
+    echo "FAIL $1: $2"
+    fail=1
+}
+
+ok() {
+    echo "PASS $1"
+}
+
+slab_header="$(head -1 /proc/slabinfo 2>/dev/null)"
+slab_rows="$(awk "NR > 2 {n++} END {print n + 0}" /proc/slabinfo 2>/dev/null)"
+source="host-fallback"
+
+if [ -r /sys/fs/cgroup/memory/memory.kmem.slabinfo ]; then
+    source="cgroup-v1"
+    cg_header="$(head -1 /sys/fs/cgroup/memory/memory.kmem.slabinfo 2>/dev/null)"
+    [ "$slab_header" = "$cg_header" ] || bad "slabinfo cgroup header matches" "$slab_header != $cg_header"
+elif [ "$slab_rows" -eq 0 ]; then
+    bad "slabinfo fallback has rows" "rows=$slab_rows"
+fi
+
+echo "VALUE slabinfo_source=${source} slab_rows=${slab_rows}"
+echo "$slab_header" | grep -q "^slabinfo - version:" || bad "slabinfo version header" "$slab_header"
+
+[ "$fail" -eq 0 ] && ok "slabinfo source is valid"
+exit "$fail"
+' 2>/dev/null | tr -d '\r')"
+
+    echo "$out"
+    if echo "$out" | grep -q '^FAIL '; then
+        FAIL=$((FAIL+1))
+    else
+        PASS=$((PASS+1))
+    fi
+}
+
+# ─── 验证 PSI pressure 视图来源 ──────────────────────────────────────
+verify_pressure() {
+    echo ""
+    info "========== PSI pressure 视图验证 =========="
+
+    local out
+    out="$(${KUBECTL} exec ${POD_NAME} -- sh -c '
+fail=0
+
+bad() {
+    echo "FAIL $1: $2"
+    fail=1
+}
+
+ok() {
+    echo "PASS $1"
+}
+
+avg_fields() {
+    grep "^$1 " "$2" | tr " " "\n" | grep -E "^avg(10|60|300)=" | tr "\n" " "
+}
+
+check_pressure() {
+    name="$1"
+    cgroup_file="$2"
+    proc_file="/proc/pressure/$name"
+
+    [ -s "$proc_file" ] || { bad "pressure/$name readable" "empty"; return; }
+    grep -q "^some avg10=" "$proc_file" || bad "pressure/$name has some line" "$(head -1 "$proc_file")"
+
+    if [ -r "/sys/fs/cgroup/$cgroup_file" ]; then
+        source="cgroup-v2"
+        cg_file="/sys/fs/cgroup/$cgroup_file"
+    elif [ -r "/sys/fs/cgroup/$name/$cgroup_file" ]; then
+        source="cgroup-v1"
+        cg_file="/sys/fs/cgroup/$name/$cgroup_file"
+    elif [ "$name" = "io" ] && [ -r "/sys/fs/cgroup/blkio/$cgroup_file" ]; then
+        source="cgroup-v1"
+        cg_file="/sys/fs/cgroup/blkio/$cgroup_file"
+    else
+        source="host-fallback"
+        cg_file=""
+    fi
+
+    if [ -n "$cg_file" ]; then
+        proc_some="$(avg_fields some "$proc_file")"
+        cg_some="$(avg_fields some "$cg_file")"
+        [ "$proc_some" = "$cg_some" ] || bad "pressure/$name some avg matches cgroup" "$proc_some != $cg_some"
+
+        if grep -q "^full " "$proc_file" && grep -q "^full " "$cg_file"; then
+            proc_full="$(avg_fields full "$proc_file")"
+            cg_full="$(avg_fields full "$cg_file")"
+            [ "$proc_full" = "$cg_full" ] || bad "pressure/$name full avg matches cgroup" "$proc_full != $cg_full"
+        fi
+    fi
+
+    echo "VALUE pressure_${name}_source=${source}"
+}
+
+check_pressure io io.pressure
+check_pressure cpu cpu.pressure
+check_pressure memory memory.pressure
+
+[ "$fail" -eq 0 ] && ok "pressure views are valid"
+exit "$fail"
+' 2>/dev/null | tr -d '\r')"
+
+    echo "$out"
+    if echo "$out" | grep -q '^FAIL '; then
+        FAIL=$((FAIL+1))
+    else
+        PASS=$((PASS+1))
+    fi
 }
 
 # ─── 验证 swap 视图隔离 ────────────────────────────────────────────
