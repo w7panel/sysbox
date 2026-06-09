@@ -1,6 +1,6 @@
 # Sysbox + K3s Swap 配置指南
 
-如何在 K3s 中启用 swap 支持，并在 sysbox-runc 系统容器内验证 swap 视图。
+如何在 K3s 中启用 swap 支持，并在 sysbox-runc 系统容器内验证 swap 视图。本文同时记录 `w7panel` 分支中 `/proc/swaps`、`/proc/meminfo` 的回归测试方法。
 
 ---
 
@@ -140,7 +140,47 @@ k3s kubectl exec test-swap -- sh -c 'cat /sys/fs/cgroup/memory.swap.max 2>/dev/n
 
 ---
 
-## 第五步：运行完整测试
+## 第五步：运行 swap 专项测试
+
+使用 `w7panel-doc/swaps.sh`：
+
+```bash
+# 开启 K3s swap 支持并重启 k3s
+bash w7panel-doc/swaps.sh --enable-k3s
+
+# 创建 / 重建测试 pod
+bash w7panel-doc/swaps.sh --create
+
+# 验证 K3s 配置、pod cgroup swap、/proc/swaps、/proc/meminfo
+bash w7panel-doc/swaps.sh --verify
+
+# 一次性执行：开启 K3s swap → 重建 pod → 验证
+bash w7panel-doc/swaps.sh --all
+
+# 宿主临时 swapon 测试；会创建临时 64MiB swapfile，测试后自动 swapoff 并删除
+bash w7panel-doc/swaps.sh --host-swapon-test
+```
+
+成功时，pod 内应看到一条虚拟 swap：
+
+```text
+/proc/swaps:
+Filename                                Type            Size    Used    Priority
+none                                    virtual         135108  0       0
+
+/proc/meminfo:
+SwapTotal:         135108 kB
+SwapFree:          135108 kB
+
+free -m:
+Swap:              131        0       131
+```
+
+`135108 kB` 来自 cgroup v2 `memory.swap.max=138350592`，即 `138350592 / 1024`。
+
+---
+
+## 第六步：运行完整资源视图测试
 
 使用 `test-pod.sh` 脚本（位于 `w7panel-doc/test-pod.sh`）：
 
@@ -178,9 +218,10 @@ func swapInfoV2(cg cgroupView, hostSwapTotalKB uint64) (swapInfo, bool) {
 | `536870912` (512Mi) | 显示一行 swap 条目 | `524288 kB` | swap 已配置并生效 |
 
 **关键点：**
-- sysbox-fs 本身已经支持 swap 虚拟化，**不需要修改代码**
-- 要使 swap 在容器内可见，需要 kubelet/containerd 把 swap limit **写入容器 cgroup**
-- 如果 cgroup 有 swap max 但 sysbox-fs 仍显示 0，说明 swap limit 来自父级 cgroup（继承），sysbox 默认隐藏
+- 要使 swap 在容器内可见，需要 kubelet/containerd 把 swap limit 写入容器 cgroup。
+- K8s + Sysbox pod 会注册 infra/pause 容器和业务容器；同 netns 容器会共享 sysbox-fs state。
+- 资源视图必须优先使用 FUSE 请求进程的 cgroup，而不是共享 state 的第一个容器 init pid。否则会读到 pause 容器的 `memory.swap.max=max`，导致业务容器内 `/proc/swaps` 被错误隐藏。
+- `w7panel` 分支已将 `cgroupForReq()` 改成优先使用 `req.Pid`，读不到时才回退到 `Container.InitPid()`。
 
 ---
 
@@ -188,14 +229,26 @@ func swapInfoV2(cg cgroupView, hostSwapTotalKB uint64) (swapInfo, bool) {
 
 ### cgroup 有 swap.max 但容器内 SwapTotal=0
 
-可能是 swap limit 在父级 cgroup 而非容器级别：
+先确认业务容器 cgroup 是否真的有数值型 `memory.swap.max`：
 
 ```bash
-# 检查容器 cgroup 的 swap.max
-find /sys/fs/cgroup -name "memory.swap.max" -exec sh -c 'echo "$1: $(cat "$1")"' _ {} \; 2>/dev/null
+# 容器内
+cat /sys/fs/cgroup/memory.swap.max
+cat /sys/fs/cgroup/memory.swap.current
 
 # 检查 kubelet 配置是否生效
 cat /var/lib/rancher/k3s/agent/etc/kubelet.conf.d/*.conf | grep -A2 swap
+```
+
+如果容器内 `memory.swap.max` 是数值，但 `/proc/swaps` 仍只有 header，检查 sysbox-fs 是否包含 `cgroupForReq()` 的请求进程 cgroup 修复，并重建安装 `/usr/bin/sysbox-fs` 后重建 pod。
+
+K8s pod 中可用下面的方法比较 pause 容器和业务容器 cgroup：
+
+```bash
+journalctl -u sysbox-fs --no-pager | grep 'Container registration completed' | tail
+cat /proc/<pause-init-pid>/cgroup
+cat /proc/<app-init-pid>/cgroup
+cat /sys/fs/cgroup/<app-cgroup-without-init.scope>/memory.swap.max
 ```
 
 ### `--memory-swap-behavior` flag 错误

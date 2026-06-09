@@ -187,6 +187,7 @@ verify_proc_sys() {
     check_exact  "stat 可读"           "/proc/stat"
 
     verify_swap
+    verify_swapon
 
     # 运行时间
     check_exact  "uptime 可读"         "/proc/uptime"
@@ -326,6 +327,121 @@ exit "$fail"
     if echo "$out" | grep -q '^FAIL '; then
         FAIL=$((FAIL+1))
     else
+        PASS=$((PASS+1))
+    fi
+}
+
+# ─── 验证 pod 内 swapon 行为 ───────────────────────────────────────
+verify_swapon() {
+    echo ""
+    info "========== pod 内 swapon 验证 =========="
+
+    local host_before host_after out
+    host_before="$(cat /proc/swaps 2>/dev/null | tr -d '\r')"
+
+    out="$(${KUBECTL} exec ${POD_NAME} -- sh -c '
+set -u
+
+fail=0
+swapfile="/tmp/sysbox-swapon-test.swap"
+
+bad() {
+    echo "FAIL $1: $2"
+    fail=1
+}
+
+ok() {
+    echo "PASS $1"
+}
+
+cleanup() {
+    swapoff "$swapfile" >/dev/null 2>&1 || true
+    rm -f "$swapfile" \
+        /tmp/sysbox-swapon-test.mkswap.out \
+        /tmp/sysbox-swapon-test.mkswap.err \
+        /tmp/sysbox-swapon-test.swapon.out \
+        /tmp/sysbox-swapon-test.swapon.err \
+        /tmp/sysbox-swapon-test.swapoff.out \
+        /tmp/sysbox-swapon-test.swapoff.err
+}
+
+cleanup
+
+echo "--- before /proc/swaps ---"
+cat /proc/swaps
+before_rows="$(awk "NR > 1 {n++} END {print n + 0}" /proc/swaps)"
+before_swap_total="$(awk "/^SwapTotal:/ {print \$2}" /proc/meminfo)"
+before_swap_free="$(awk "/^SwapFree:/ {print \$2}" /proc/meminfo)"
+
+if command -v fallocate >/dev/null 2>&1; then
+    fallocate -l 16M "$swapfile" || bad "create swapfile" "fallocate failed"
+else
+    dd if=/dev/zero of="$swapfile" bs=1M count=16 >/dev/null 2>&1 || bad "create swapfile" "dd failed"
+fi
+
+chmod 600 "$swapfile" 2>/dev/null || bad "chmod swapfile" "chmod failed"
+mkswap "$swapfile" >/tmp/sysbox-swapon-test.mkswap.out 2>/tmp/sysbox-swapon-test.mkswap.err
+mkswap_rc=$?
+[ "$mkswap_rc" -eq 0 ] && ok "mkswap swapfile" || bad "mkswap swapfile" "$(cat /tmp/sysbox-swapon-test.mkswap.err)"
+
+swapon "$swapfile" >/tmp/sysbox-swapon-test.swapon.out 2>/tmp/sysbox-swapon-test.swapon.err
+swapon_rc=$?
+swapon_err="$(cat /tmp/sysbox-swapon-test.swapon.err)"
+echo "VALUE swapon_rc=${swapon_rc} swapon_err=${swapon_err}"
+
+case "$swapon_rc:$swapon_err" in
+    0:*)
+        ok "swapon accepted by syscall virtualization"
+        ;;
+    *"Operation not permitted"*|*"Not superuser"*)
+        ok "swapon denied safely"
+        ;;
+    *)
+        bad "swapon result" "rc=${swapon_rc} err=${swapon_err}"
+        ;;
+esac
+
+echo "--- after /proc/swaps ---"
+cat /proc/swaps
+after_rows="$(awk "NR > 1 {n++} END {print n + 0}" /proc/swaps)"
+after_swap_total="$(awk "/^SwapTotal:/ {print \$2}" /proc/meminfo)"
+after_swap_free="$(awk "/^SwapFree:/ {print \$2}" /proc/meminfo)"
+
+[ "$after_rows" -eq "$before_rows" ] || bad "swapon does not add proc swaps row" "rows ${before_rows} -> ${after_rows}"
+[ "$after_swap_total" = "$before_swap_total" ] || bad "swapon does not change SwapTotal" "${before_swap_total} -> ${after_swap_total}"
+[ "$after_swap_free" = "$before_swap_free" ] || bad "swapon does not change SwapFree" "${before_swap_free} -> ${after_swap_free}"
+
+swapoff "$swapfile" >/tmp/sysbox-swapon-test.swapoff.out 2>/tmp/sysbox-swapon-test.swapoff.err
+swapoff_rc=$?
+swapoff_err="$(cat /tmp/sysbox-swapon-test.swapoff.err)"
+echo "VALUE swapoff_rc=${swapoff_rc} swapoff_err=${swapoff_err}"
+
+case "$swapoff_rc:$swapoff_err" in
+    0:*)
+        ok "swapoff accepted by syscall virtualization"
+        ;;
+    *"Operation not permitted"*|*"Not superuser"*|*"Invalid argument"*)
+        ok "swapoff denied or no-op safely"
+        ;;
+    *)
+        bad "swapoff result" "rc=${swapoff_rc} err=${swapoff_err}"
+        ;;
+esac
+
+cleanup
+exit "$fail"
+' 2>/dev/null | tr -d '\r')"
+
+    host_after="$(cat /proc/swaps 2>/dev/null | tr -d '\r')"
+
+    echo "$out"
+    if echo "$out" | grep -q '^FAIL '; then
+        FAIL=$((FAIL+1))
+    elif [ "$host_before" != "$host_after" ]; then
+        echo "FAIL host /proc/swaps changed after pod swapon"
+        FAIL=$((FAIL+1))
+    else
+        echo "PASS host /proc/swaps unchanged after pod swapon"
         PASS=$((PASS+1))
     fi
 }
