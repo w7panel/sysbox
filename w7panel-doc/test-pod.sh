@@ -176,9 +176,8 @@ verify_proc_sys() {
     check        "cpuinfo 显示处理器"  "/proc/cpuinfo"          "processor"
     check_exact  "cpuinfo 内容非空"    "/proc/cpuinfo"
 
-    # 磁盘（sysbox-fs 虚拟化为空，无内容也视为正常）
-    echo "  ✅ diskstats 可读 (/proc/diskstats) — 空内容（系统容器预期行为）"
-    PASS=$((PASS+1))
+    # 磁盘
+    check_exact  "diskstats 可读"      "/proc/diskstats"
 
     # 内存（需显示 512Mi 限制）
     check        "meminfo MemTotal=524288 kB"  "/proc/meminfo"  "MemTotal:.*524288"
