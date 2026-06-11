@@ -206,8 +206,7 @@ verify_proc_sys() {
     check_exact  "cpu/online 可读"     "/sys/devices/system/cpu/online"
     check_exact  "cpu/present 可读"    "/sys/devices/system/cpu/present"
 
-    # 平均负载
-    check_exact  "loadavg 可读"        "/proc/loadavg"
+    verify_loadavg
 
     echo ""
     info "结果: ${PASS} 通过, ${FAIL} 失败"
@@ -387,6 +386,73 @@ check_pressure cpu cpu.pressure
 check_pressure memory memory.pressure
 
 [ "$fail" -eq 0 ] && ok "pressure views are valid"
+exit "$fail"
+' 2>/dev/null | tr -d '\r')"
+
+    echo "$out"
+    if echo "$out" | grep -q '^FAIL '; then
+        FAIL=$((FAIL+1))
+    else
+        PASS=$((PASS+1))
+    fi
+}
+
+# ─── 验证 loadavg 视图会反映容器内负载 ──────────────────────────────
+verify_loadavg() {
+    echo ""
+    info "========== loadavg 视图验证 =========="
+
+    local out
+    out="$(${KUBECTL} exec ${POD_NAME} -- sh -c '
+fail=0
+
+bad() {
+    echo "FAIL $1: $2"
+    fail=1
+}
+
+ok() {
+    echo "PASS $1"
+}
+
+cleanup() {
+    if [ -n "${pids:-}" ]; then
+        kill $pids >/dev/null 2>&1 || true
+        wait $pids >/dev/null 2>&1 || true
+    fi
+}
+trap cleanup EXIT
+
+before="$(cat /proc/loadavg 2>/dev/null)"
+[ -n "$before" ] || bad "loadavg readable" "empty"
+echo "VALUE loadavg_before=${before}"
+
+workers="$(( $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2) * 2 ))"
+[ "$workers" -lt 4 ] && workers=4
+[ "$workers" -gt 16 ] && workers=16
+
+pids=""
+i=0
+while [ "$i" -lt "$workers" ]; do
+    sh -c "while :; do :; done" &
+    pids="$pids $!"
+    i=$((i + 1))
+done
+
+max=0
+i=0
+while [ "$i" -lt 8 ]; do
+    current="$(cat /proc/loadavg 2>/dev/null)"
+    centi="$(printf "%s\n" "$current" | awk "{ split(\$1, p, \".\"); print (p[1] * 100) + p[2] }")"
+    echo "VALUE loadavg_sample_${i}=${current}"
+    [ "$centi" -gt "$max" ] && max="$centi"
+    [ "$max" -gt 0 ] && break
+    sleep 1
+    i=$((i + 1))
+done
+
+[ "$max" -gt 0 ] || bad "loadavg reflects runnable tasks" "max load1 stayed 0.00"
+[ "$fail" -eq 0 ] && ok "loadavg reflects container load"
 exit "$fail"
 ' 2>/dev/null | tr -d '\r')"
 
