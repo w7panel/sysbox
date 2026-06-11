@@ -1,0 +1,36 @@
+namespaceOverride: ""
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  name: ""
+
+rbac:
+  clusterRoleName: ""
+  clusterRoleBindingName: ""
+
+runtimeClass:
+  name: sysbox-runc
+  handler: sysbox-runc
+
+installLabel:
+  key: sysbox-install
+  value: "yes"
+
+runtimeLabel:
+  key: sysbox-runtime
+  value: running
+
+daemonSet:
+  name: ""
+  image:
+    repository: registry.nestybox.com/nestybox/sysbox-deploy-k8s
+    pullPolicy: Always
+    tag: ""
+  podLabels: {}
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations:
+    - operator: Exists
+      effect: NoSchedule

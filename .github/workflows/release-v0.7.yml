@@ -1,20 +1,9 @@
-name: Build Sysbox Release
+name: Release v0.7
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Sysbox version without leading v"
-        required: false
-        default: "0.7.0-1"
-      push_image:
-        description: "Push deploy image to CNB registry"
-        type: boolean
-        required: false
-        default: false
   push:
     tags:
-      - "v*"
+      - "v0.7*"
 
 defaults:
   run:
@@ -22,15 +11,24 @@ defaults:
 
 permissions:
   contents: write
+  packages: write
 
 env:
-  IMAGE_REPO: docker.cnb.cool/i0358/docker-images-chrom/sysbox-deploy-k3s
-  UBUNTU_MIRROR: http://mirrors.aliyun.com/ubuntu
-  DOCKER_APT_MIRROR: https://mirrors.aliyun.com/docker-ce/linux/ubuntu
-  GOPROXY: https://goproxy.cn,direct
+  SYS_ARCH: amd64
+  IMAGE_REPO: ghcr.io/${{ github.repository_owner }}/sysbox-deploy-k3s
+  PUSH_IMAGE: "true"
+  VERIFY_IMAGE: "true"
+  PACKAGE_CHART: "true"
+  K3S_BASE_IMAGE: ghcr.io/nestybox/centos7/systemd
+  UBUNTU_MIRROR: http://archive.ubuntu.com/ubuntu
+  DOCKER_APT_MIRROR: https://download.docker.com/linux/ubuntu
+  GOPROXY: https://proxy.golang.org,direct
+  GITHUB_TOKEN: ${{ github.token }}
+  GITHUB_REPOSITORY: ${{ github.repository }}
+  TARGET_COMMITISH: ${{ github.sha }}
 
 jobs:
-  build-release:
+  release:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout source
@@ -39,105 +37,33 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Resolve version
-        id: version
+      - name: Resolve release tag
         run: |
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            version="${GITHUB_REF_NAME#v}"
-          else
-            version="${{ inputs.version }}"
-          fi
+          version="${GITHUB_REF_NAME#v}"
           full_version="$(echo "${version}" | sed '/-[0-9]/!s/.*/&-0/')"
-          echo "version=${version}" >> "${GITHUB_OUTPUT}"
-          echo "full_version=${full_version}" >> "${GITHUB_OUTPUT}"
-          echo "image=${IMAGE_REPO}:v${full_version}" >> "${GITHUB_OUTPUT}"
 
-      - name: Prepare local sysbox-pkgr source link
-        run: |
-          mkdir -p sysbox-pkgr/sources
-          ln -sfn ../.. sysbox-pkgr/sources/sysbox
-          printf '%s\n' "${{ steps.version.outputs.version }}" > VERSION
+          echo "SYSBOX_VERSION=${version}" >> "${GITHUB_ENV}"
+          echo "RELEASE_TAG=${GITHUB_REF_NAME}" >> "${GITHUB_ENV}"
+          echo "IMAGE_TAG=${GITHUB_REF_NAME}" >> "${GITHUB_ENV}"
+          echo "CHART_VERSION=${full_version}" >> "${GITHUB_ENV}"
 
-      - name: Build generic deb
-        run: |
-          make -C sysbox-pkgr/deb clean generic EDITION=ce \
-            UBUNTU_MIRROR="${UBUNTU_MIRROR}" \
-            DOCKER_APT_MIRROR="${DOCKER_APT_MIRROR}" \
-            GOPROXY="${GOPROXY}"
-
-      - name: Collect deb artifacts
-        id: deb
-        run: |
-          mkdir -p dist
-          deb="$(find sysbox-pkgr/deb/build -type f -name 'sysbox-ce_*.deb' | sort | tail -1)"
-          test -n "${deb}"
-          cp "${deb}" dist/
-          cp sysbox-pkgr/deb/build/amd64/ubuntu-jammy/sysbox-ce_* dist/ 2>/dev/null || true
-          echo "deb=dist/$(basename "${deb}")" >> "${GITHUB_OUTPUT}"
-          sha256sum dist/* > dist/SHA256SUMS
-
-      - name: Extract Sysbox binaries for K3s image
-        run: |
-          tmpdir="$(mktemp -d)"
-          dpkg -x "${{ steps.deb.outputs.deb }}" "${tmpdir}"
-          mkdir -p sysbox-pkgr/k8s/bin/sysbox-ce/generic
-          install -m 0755 \
-            "${tmpdir}/usr/bin/sysbox-runc" \
-            "${tmpdir}/usr/bin/sysbox-fs" \
-            "${tmpdir}/usr/bin/sysbox-mgr" \
-            sysbox-pkgr/k8s/bin/sysbox-ce/generic/
-          rm -rf "${tmpdir}"
-          sysbox-pkgr/k8s/bin/sysbox-ce/generic/sysbox-runc --version
-          sysbox-pkgr/k8s/bin/sysbox-ce/generic/sysbox-fs --version
-          sysbox-pkgr/k8s/bin/sysbox-ce/generic/sysbox-mgr --version
-
-      - name: Build K3s deploy image
-        run: |
-          docker build \
-            -t "${{ steps.version.outputs.image }}" \
-            --build-arg sys_arch=amd64 \
-            --build-arg sysbox_version="v${{ steps.version.outputs.full_version }}" \
-            -f sysbox-pkgr/k8s/Dockerfile.sysbox-k3s \
-            sysbox-pkgr/k8s
-
-      - name: Verify K3s deploy image
-        run: |
-          docker run --rm "${{ steps.version.outputs.image }}" kubectl version --client=true
-          docker run --rm "${{ steps.version.outputs.image }}" crictl --version
-          docker run --rm "${{ steps.version.outputs.image }}" /opt/sysbox/bin/generic/sysbox-runc --version
-
-      - name: Login to CNB registry
-        if: ${{ github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.push_image) }}
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          registry: docker.cnb.cool
-          username: ${{ secrets.CNB_USERNAME }}
-          password: ${{ secrets.CNB_PASSWORD }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
 
-      - name: Push K3s deploy image
-        if: ${{ github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.push_image) }}
-        run: |
-          docker push "${{ steps.version.outputs.image }}"
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
 
-      - name: Write image metadata
-        run: |
-          {
-            echo "version=v${{ steps.version.outputs.full_version }}"
-            echo "image=${{ steps.version.outputs.image }}"
-            docker image inspect "${{ steps.version.outputs.image }}" --format 'image_id={{.Id}}'
-            docker image inspect "${{ steps.version.outputs.image }}" --format 'repo_digests={{json .RepoDigests}}'
-          } > dist/image-metadata.txt
-          sha256sum dist/image-metadata.txt >> dist/SHA256SUMS
+      - name: Build and publish release
+        run: ./w7panel-doc/release.sh
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sysbox-v${{ steps.version.outputs.full_version }}-release-files
-          path: dist/
-
-      - name: Create GitHub release
-        if: ${{ github.ref_type == 'tag' }}
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          generate_release_notes: true
+          name: sysbox-${{ github.ref_name }}-release-files
+          path: |
+            dist/
+            !dist/sysbox-ce_*.linux.tar.gz

@@ -1,0 +1,7 @@
+Sysbox installer manifests have been installed.
+
+Check installer pods:
+  kubectl get pods -n kube-system -l sysbox-install=yes
+
+Check RuntimeClass:
+  kubectl get runtimeclass sysbox-runc
