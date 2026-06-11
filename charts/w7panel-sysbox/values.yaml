@@ -25,7 +25,7 @@ runtimeLabel:
 daemonSet:
   name: ""
   image:
-    repository: registry.nestybox.com/nestybox/sysbox-deploy-k8s
+    repository: ghcr.io/w7panel/sysbox-deploy-k3s
     pullPolicy: Always
     tag: ""
   podLabels: {}
