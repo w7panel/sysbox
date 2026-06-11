@@ -121,6 +121,54 @@ kubectl exec sysbox-release-test -- sh -lc 'mount | grep -E "sysboxfs|proc|cgrou
 
 ## GitHub Release
 
+本地完整 release 脚本：
+
+```bash
+./w7panel-doc/release.sh
+```
+
+默认行为：
+
+1. 使用当前源码构建 generic deb。
+2. 从 deb 解出 `sysbox-runc`、`sysbox-fs`、`sysbox-mgr`。
+3. 构建并验证 K3s deploy 镜像。
+4. 写入 `dist/` 产物和 `SHA256SUMS`。
+5. 如果设置了 `GITHUB_TOKEN`，自动创建或复用 GitHub Release，并上传 `dist/` 内文件。
+
+常用变量：
+
+```bash
+SYSBOX_VERSION=0.7.0-1
+SYS_ARCH=amd64
+IMAGE_REPO=docker.cnb.cool/i0358/docker-images-chrom/sysbox-deploy-k3s
+PUSH_IMAGE=true
+CNB_USERNAME=...
+CNB_PASSWORD=...
+GITHUB_TOKEN=...
+GITHUB_REPOSITORY=w7panel/sysbox
+./w7panel-doc/release.sh
+```
+
+可选变量：
+
+```bash
+RELEASE_TAG=v0.7.0-1
+RELEASE_NAME="Sysbox v0.7.0-1"
+RELEASE_BODY="Sysbox v0.7.0-1 release artifacts."
+SAVE_IMAGE_TAR=true
+VERIFY_IMAGE=false
+DIST_DIR=/tmp/sysbox-release
+USE_BUILDX=false
+```
+
+`SYS_ARCH` 默认根据当前机器自动识别，支持 `amd64` 和 `arm64`。建议在对应架构的机器上原生构建；如果要在 amd64 机器上构建 arm64 release，需要先配置 Docker buildx/qemu，并显式设置 `ALLOW_CROSS_ARCH=true`。跨架构时脚本会自动用 `docker buildx build --platform linux/${SYS_ARCH} --load` 构建 deploy image。
+
+```bash
+SYS_ARCH=arm64
+ALLOW_CROSS_ARCH=true
+./w7panel-doc/release.sh
+```
+
 顶层 `sysbox/.github/workflows/release-v0.7.yml` 支持：
 
 - tag `v*` 自动触发。
