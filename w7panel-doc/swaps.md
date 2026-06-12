@@ -102,6 +102,51 @@ Kubelet `memorySwap.swapBehavior: LimitedSwap` 下，Pod 是否能得到 swap �
 
 因此测试 swap 时必须显式写低于 limit 的 request，例如下面的 `requests.memory: 256Mi`、`limits.memory: 512Mi`。
 
+### Pod 具体能分配多少 swap
+
+Kubelet 负责给 Pod cgroup 写入真正的 swap 限制，sysbox-fs 只负责把这个限制展示到容器内的 `/proc/swaps` 和 `/proc/meminfo`。
+
+在 `memorySwap.swapBehavior: LimitedSwap` 下，cgroup v2 的 swap 限制写入 `memory.swap.max`。它表示 **只允许使用的 swap 字节数**，不包含 memory limit。计算可以按下面理解：
+
+```text
+pod_swap_bytes = node_swap_bytes * pod_memory_limit_bytes / node_allocatable_memory_bytes
+```
+
+其中：
+
+- `node_swap_bytes`：节点宿主机总 swap，来自宿主 `/proc/meminfo` 的 `SwapTotal`。
+- `pod_memory_limit_bytes`：Pod 内该容器的 `resources.limits.memory`。
+- `node_allocatable_memory_bytes`：节点可分配内存，来自 `kubectl get node -o json` 的 `.status.allocatable.memory`。
+- Guaranteed Pod 通常不会分配 swap，结果是 `memory.swap.max=0`。
+
+当前 `server1` 示例：
+
+```text
+node allocatable memory = 65822980 Ki
+node swap total         = 4194300 Ki
+pod memory limit        = 1 Gi
+
+pod_swap_bytes = 4194300 Ki * 1 Gi / 65822980 Ki
+               ~= 66813952 bytes
+               ~= 65248 KiB
+```
+
+因此容器内看到：
+
+```text
+/sys/fs/cgroup/memory.swap.max = 66813952
+/proc/meminfo SwapTotal        = 65248 kB
+/proc/swaps Size               = 65248
+```
+
+sysbox-fs 的展示规则：
+
+- cgroup v2：读取 `memory.swap.max`，如果是数值且大于 0，则 `SwapTotal = memory.swap.max / 1024`。
+- `SwapFree = (memory.swap.max - memory.swap.current) / 1024`。
+- `/proc/swaps` 生成一行虚拟设备 `none virtual <SwapTotal> <Used> 0`。
+- 如果 `memory.swap.max` 不存在、为 `max`、为 `0`，或被宿主 swap 总量截断为 0，则 `/proc/swaps` 只显示表头，`SwapTotal` 为 0。
+- 如果计算出的 swap 大于宿主 `SwapTotal`，sysbox-fs 会按宿主 `SwapTotal` 截断展示。
+
 ```yaml
 # test-swap-pod.yaml
 apiVersion: v1
