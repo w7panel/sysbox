@@ -51,7 +51,7 @@ LXCFS 的实现目标是长期维护一套接近内核 procfs/sysfs 格式的容
 | /proc/pressure/cpu | 同 /proc/pressure/io，读取 cpu.pressure，并支持 PSI trigger write/poll。 | 当前读取容器根 cgroup 的 cgroup v2 cpu.pressure；失败时回退 /proc/pressure/cpu。 | 差异同上：只实现读取，没有实现 PSI 事件触发器写入和 poll。 |
 | /proc/pressure/memory | 同 /proc/pressure/io，读取 memory.pressure，并支持 PSI trigger write/poll。 | 当前读取容器根 cgroup 的 cgroup v2 memory.pressure；失败时回退 /proc/pressure/memory。 | 差异同上：只实现读取，没有实现 PSI 事件触发器写入和 poll。 |
 | /sys/devices/system/cpu/online | 在 sysfs_fuse.c 的 sys_devices_system_cpu_online_read() 中基于 cpuset 与 CPU quota 输出可见 CPU。 | 当前通过 effectiveCPUCount() 输出连续 CPU 范围 0..N-1。 | LXCFS 更贴近 cpuset 实际 CPU ID。Sysbox 输出连续范围，和 /proc/cpuinfo、/proc/stat 的连续 CPU 编号保持一致，避免用户态工具看到非连续 CPU 时产生额外问题。 |
-| /proc/loadavg | 在 proc_loadavg.c 的 proc_loadavg_read() 中使用 loadavg 后台结构与 cgroup hash 维护负载移动平均。 | 当前已实现 lazy-start 后台采样器：第一次读取时按访问进程 PID namespace/cgroup 注册 load node，后台每 5 秒刷新 running/total/last pid，并按 LXCFS 固定点 EWMA 算法生成 1/5/15 分钟 loadavg。 | 已对齐 LXCFS 的核心采样模型和计算公式。差异是 Sysbox 以 Go 全局 sampler 管理节点，没有复刻 LXCFS 的 pthread hash bucket 锁结构；节点回收使用 lastSeen TTL。 |
+| /proc/loadavg | 在 proc_loadavg.c 的 proc_loadavg_read() 中使用 loadavg 后台结构与 cgroup hash 维护负载移动平均。首次读取创建 load node，后续由 5 秒刷新线程更新。 | 当前已实现 lazy-start 后台采样器：第一次读取时按访问进程 PID namespace 反查 namespace PID 1 作为采样 PID，注册 load node 但不立即刷新；后台每 5 秒刷新 running/total/last pid，并按 LXCFS 固定点 EWMA 算法生成 1/5/15 分钟 loadavg。 | 已对齐 LXCFS 的核心采样模型、初始 0/1 行为和计算公式。差异是 Sysbox 以 Go 全局 sampler 管理节点，没有复刻 LXCFS 的 pthread hash bucket 锁结构；节点回收使用 lastSeen TTL。 |
 | /sys/devices/system/cpu/present | LXCFS 新 sysfs 逻辑可把 /sys/devices/system/cpu 下普通文件作为 SUBFILE 透传；online 有专门虚拟化。 | 当前新增 handler，输出与 online 一致的连续 CPU 范围 0..N-1。 | LXCFS 对 present 主要是 sysfs 子文件路径支持，不一定专门虚拟化为容器 CPU present。Sysbox 选择让 present 与 online/cpuinfo/stat 一致，避免容器看到宿主全部 CPU。 |
 
 ## 逐项差异说明
@@ -221,16 +221,18 @@ LXCFS 的实现目标是长期维护一套接近内核 procfs/sysfs 格式的容
 
 - LXCFS 使用后台 loadavg 结构、cgroup hash 和固定点 EWMA 维护 1/5/15 分钟负载。
 - Sysbox-FS 已实现 lazy-start 后台 sampler，采样周期和固定点 EWMA 公式与 LXCFS 对齐。
+- Sysbox-FS 首次读取只创建节点并返回初始值，和 LXCFS 一样等待后台 5 秒采样刷新，避免 `top` 在空闲容器里长期看到宿主 load。
+- Sysbox-FS 优先从访问 `/proc/loadavg` 的进程 PID namespace 反查 namespace PID 1 作为采样对象；这避免 Kubernetes/CRI 场景中误用 sandbox/pause 容器 init pid，导致业务容器一直显示 `0/1 1`。
 - Sysbox-FS 的节点管理使用 Go goroutine + mutex，节点回收靠 lastSeen TTL；LXCFS 使用 pthread、hash bucket 锁和 cgroup 消失删除。
 
 影响：
 
 - loadavg 的前三列和 LXCFS 计算方向基本一致，top/uptime 可正常使用。
-- running/total/last pid 的采样来源和节点生命周期与 LXCFS 不完全一致，边界场景可能有差异。
+- running/total/last pid 的节点生命周期与 LXCFS 不完全一致，边界场景可能有差异；采样来源已尽量和 LXCFS 一样绑定到读取进程所在容器/PID namespace。
 
 不能完全对齐 LXCFS 的原因：
 
-- Sysbox-FS 的进程发现优先使用访问进程 PID namespace/cgroup，再 fallback 到容器 root /proc、进程树或 cgroup；LXCFS 的扫描路径和数据结构不同。
+- Sysbox-FS 的进程发现优先使用访问进程 PID namespace/cgroup，再 fallback 到容器 root /proc 或 cgroup；LXCFS 的扫描路径和数据结构不同。
 - 复刻 LXCFS 的 hash bucket、多级锁和节点删除模型不符合当前 Go handler 结构。
 - 当前 sampler 已满足主要工具解析和移动平均语义，继续逐行复刻会增加复杂度但收益有限。
 
@@ -295,7 +297,7 @@ LXCFS 的 /proc/loadavg 不是简单读一个 cgroup 文件，而是维护 cgrou
 仍未完全逐行复刻 LXCFS 的地方：
 
 - LXCFS 使用 pthread + hash bucket 多级锁；Sysbox 使用 Go goroutine + mutex。
-- LXCFS 以 cgroup 目录递归深度扫描 cgroup.procs；Sysbox 优先按访问进程 PID namespace 扫描宿主 /proc，失败时再用容器 root /proc、进程树或 cgroup 估算。
+- LXCFS 以 cgroup 目录递归深度扫描 cgroup.procs；Sysbox 优先按访问进程 PID namespace 扫描宿主 /proc，失败时再用容器 root /proc 或 cgroup 估算。
 - LXCFS 在 cgroup 消失时删除 node；Sysbox 使用 lastSeen TTL 回收长时间不再读取的 node。
 
 ### 5. CPU ID 语义取舍

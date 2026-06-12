@@ -415,6 +415,50 @@ ok() {
     echo "PASS $1"
 }
 
+check_idle_top() {
+    idle_ok=0
+    idle_seen=0
+    i=0
+    while [ "$i" -lt 3 ]; do
+        load="$(cat /proc/loadavg 2>/dev/null)"
+        parsed="$(printf "%s\n" "$load" | awk "{ split(\$4, tasks, \"/\"); printf \"%s %s %s %s %s %s\", \$1, \$2, \$3, tasks[1], tasks[2], \$5 }")"
+        set -- $parsed
+        load1="$1"; load5="$2"; load15="$3"; running="$4"; total="$5"; lastpid="$6"
+
+        top_header="$(top -b -n1 | head -5 | tr -d "\r")"
+        top_load="$(printf "%s\n" "$top_header" | awk -F"load average: " "/load average:/ {print \$2; exit}" | tr -d " ")"
+        proc_load="$(printf "%s,%s,%s" "$load1" "$load5" "$load15")"
+
+        echo "VALUE idle_loadavg_sample_${i}=${load}"
+        echo "VALUE idle_top_load_sample_${i}=${top_load:-<missing>}"
+
+        task_count=0
+        for task_dir in /proc/[0-9]*/task/[0-9]*; do
+            [ -e "$task_dir" ] || continue
+            task_count=$((task_count + 1))
+        done
+        max_total=$((task_count + 64))
+        echo "VALUE idle_task_count_sample_${i}=${task_count}"
+
+        [ -n "$top_load" ] || bad "idle top loadavg line" "$top_header"
+        [ "$top_load" = "$proc_load" ] || bad "idle top loadavg matches proc" "$top_load != $proc_load"
+        [ "${total:-0}" -gt 0 ] 2>/dev/null || bad "idle loadavg total task count" "$load"
+        [ "${total:-0}" -le "$max_total" ] 2>/dev/null || bad "idle loadavg total not host-wide" "loadavg_total=$total task_count=$task_count"
+        [ "${lastpid:-0}" -gt 0 ] 2>/dev/null || bad "idle loadavg last pid" "$load"
+        [ "${running:-0}" -ge 0 ] 2>/dev/null || bad "idle loadavg running task count" "$load"
+
+        if [ "$fail" -eq 0 ]; then
+            idle_ok=1
+        fi
+        idle_seen=$((idle_seen + 1))
+        sleep 3
+        i=$((i + 1))
+    done
+
+    [ "$idle_seen" -gt 0 ] || bad "idle top sampled" "no samples"
+    [ "$idle_ok" -eq 1 ] && ok "idle top loadavg remains valid without extra workers"
+}
+
 cleanup() {
     if [ -n "${pids:-}" ]; then
         kill $pids >/dev/null 2>&1 || true
@@ -426,6 +470,8 @@ trap cleanup EXIT
 before="$(cat /proc/loadavg 2>/dev/null)"
 [ -n "$before" ] || bad "loadavg readable" "empty"
 echo "VALUE loadavg_before=${before}"
+
+check_idle_top
 
 workers="$(( $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2) * 2 ))"
 [ "$workers" -lt 4 ] && workers=4
