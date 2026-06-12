@@ -94,6 +94,14 @@ k3s kubectl get nodes
 
 ### 创建带 swap 限制的 Pod
 
+Kubelet `memorySwap.swapBehavior: LimitedSwap` 下，Pod 是否能得到 swap 取决于 memory request / limit：
+
+- `requests.memory < limits.memory`：Pod 是 Burstable，kubelet 会按差值/节点策略给 cgroup 写入数值型 `memory.swap.max`，容器内 `free` 才能看到 swap。
+- `requests.memory == limits.memory`：Pod 是 Guaranteed，kubelet 会写 `memory.swap.max=0`，容器内 `free` 显示 `Swap: 0`。
+- 只写 `limits.memory`、不写 `requests.memory` 时，Kubernetes 通常会默认 request 等于 limit，因此也会成为 Guaranteed，swap 仍是 0。
+
+因此测试 swap 时必须显式写低于 limit 的 request，例如下面的 `requests.memory: 256Mi`、`limits.memory: 512Mi`。
+
 ```yaml
 # test-swap-pod.yaml
 apiVersion: v1
@@ -178,6 +186,44 @@ Swap:              131        0       131
 
 `135108 kB` 来自 cgroup v2 `memory.swap.max=138350592`，即 `138350592 / 1024`。
 
+如果把同一个 Pod 改成只写 limit：
+
+```yaml
+resources:
+  limits:
+    memory: 2Gi
+```
+
+或显式写成 request 等于 limit：
+
+```yaml
+resources:
+  requests:
+    memory: 2Gi
+  limits:
+    memory: 2Gi
+```
+
+则容器会是 Guaranteed QoS，通常会看到：
+
+```text
+cat /sys/fs/cgroup/memory.swap.max
+0
+
+free -h:
+Swap: 0B 0B 0B
+```
+
+这是 kubelet 的 swap 分配结果，不是 sysbox-fs 显示错误。要让这类业务 Pod 显示 swap，需要改成 Burstable，例如：
+
+```yaml
+resources:
+  requests:
+    memory: 1Gi
+  limits:
+    memory: 2Gi
+```
+
 ---
 
 ## 第六步：运行完整资源视图测试
@@ -226,6 +272,41 @@ func swapInfoV2(cg cgroupView, hostSwapTotalKB uint64) (swapInfo, bool) {
 ---
 
 ## 故障排查
+
+### free 显示 Swap: 0
+
+先看容器 cgroup：
+
+```bash
+cat /sys/fs/cgroup/memory.max
+cat /sys/fs/cgroup/memory.swap.max
+cat /sys/fs/cgroup/memory.swap.current
+```
+
+如果 `memory.swap.max=0`，说明 kubelet 没有给该 Pod 分配 swap，sysbox-fs 会正确显示：
+
+```text
+/proc/swaps 只有表头
+SwapTotal: 0 kB
+free: Swap 0
+```
+
+常见原因是 Pod 是 Guaranteed QoS：
+
+- 只写了 `resources.limits.memory`，没有写 `resources.requests.memory`。
+- 或者 `requests.memory` 和 `limits.memory` 相等。
+
+修复方式是让 request 小于 limit，并重建 Pod：
+
+```yaml
+resources:
+  requests:
+    memory: 1Gi
+  limits:
+    memory: 2Gi
+```
+
+重建后确认 `memory.swap.max` 是数值型且大于 0，再看 `free -h`。
 
 ### cgroup 有 swap.max 但容器内 SwapTotal=0
 
