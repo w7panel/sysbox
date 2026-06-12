@@ -23,6 +23,132 @@ LXCFS 的 `/proc/loadavg` 不是直接读取宿主 `/proc/loadavg`，也不是�
 - 有 runnable worker 后，下一轮 5 秒采样应看到容器内负载上升。
 - `/proc/loadavg` 第 4 列 `running/total` 和第 5 列 last pid 应来自容器视图，而不是宿主全局视图。
 
+## LXCFS 如何开启 loadavg 虚拟化
+
+LXCFS 的 `/proc/loadavg` 虚拟化不是所有安装方式都会默认启用。源码里 `load_use` 默认是 `false`，只有启动参数带 `-l` 或 `--enable-loadavg` 时才会启动 loadavg daemon。
+
+如果没有开启，LXCFS 会直接回退读取宿主 `/proc/loadavg`。典型现象是：
+
+```text
+宿主 /proc/loadavg:
+2.24 2.35 2.35 ...
+
+/var/lib/lxcfs/proc/loadavg:
+2.24 2.35 2.35 ...
+
+容器 /proc/loadavg:
+2.26 2.37 2.36 ... total 接近宿主任务数
+```
+
+这种情况下，即使容器内实际只有几个 task，`top` 也会显示宿主负载，看起来像“LXCFS 有值、Sysbox 没值”。这不是 LXCFS 的容器 loadavg 虚拟化结果，而是 LXCFS fallback 到宿主 `/proc/loadavg`。
+
+### 使用脚本开启
+
+仓库提供了脚本：
+
+```sh
+./w7panel-doc/lxcfs-virtual.sh on
+```
+
+脚本会写入 systemd override：
+
+```ini
+[Service]
+ExecStart=
+ExecStart=/usr/bin/lxcfs -l /var/lib/lxcfs
+```
+
+然后执行：
+
+```sh
+systemctl daemon-reload
+systemctl restart lxcfs
+```
+
+关闭虚拟化：
+
+```sh
+./w7panel-doc/lxcfs-virtual.sh off
+```
+
+只检查当前状态：
+
+```sh
+./w7panel-doc/lxcfs-virtual.sh status
+```
+
+### 手动开启
+
+也可以手动创建：
+
+```sh
+mkdir -p /etc/systemd/system/lxcfs.service.d
+cat >/etc/systemd/system/lxcfs.service.d/override.conf <<'EOF'
+[Service]
+ExecStart=
+ExecStart=/usr/bin/lxcfs -l /var/lib/lxcfs
+EOF
+
+systemctl daemon-reload
+systemctl restart lxcfs
+```
+
+确认服务命令包含 `-l`：
+
+```sh
+systemctl status lxcfs --no-pager
+systemctl cat lxcfs
+```
+
+期望看到：
+
+```text
+/usr/bin/lxcfs -l /var/lib/lxcfs
+```
+
+再确认 LXCFS 自身不再等同宿主 loadavg：
+
+```sh
+cat /proc/loadavg
+cat /var/lib/lxcfs/proc/loadavg
+```
+
+开启后，`/var/lib/lxcfs/proc/loadavg` 应该显示 LXCFS 虚拟视图，例如：
+
+```text
+0.00 0.00 0.00 0/1 <pid>
+```
+
+而不是和宿主 `/proc/loadavg` 完全一致。
+
+### 重启已有 Pod
+
+重启 LXCFS 服务会影响已经 bind mount 了 `/var/lib/lxcfs/proc/*` 的容器。旧 Pod 可能出现：
+
+```text
+Transport endpoint is not connected
+```
+
+因此启用或重启 LXCFS 后，需要重建接入 LXCFS 的 Pod。对 Deployment 可以执行：
+
+```sh
+kubectl rollout restart deploy/<name> -n <namespace>
+```
+
+重建后在容器里确认：
+
+```sh
+grep ' /proc/loadavg ' /proc/self/mountinfo
+cat /proc/loadavg
+top -b -n1 | head -5
+```
+
+期望 `/proc/loadavg` 挂载来源是 `fuse.lxcfs`：
+
+```text
+/proc/loadavg /proc/loadavg ... - fuse.lxcfs lxcfs ...
+```
+
 ## Sysbox 之前没有完全对齐的原因
 
 Sysbox-FS 原先的实现是请求式 handler，更偏向每次 read 时即时生成视图。这个模型和 LXCFS 的后台 loadavg 节点模型不同。
