@@ -62,30 +62,30 @@ jobs:
 
       - name: Push zpk
         env:
-          ZPK_DOCKER_USERNAME: ${{ secrets.ZPK_DOCKER_USERNAME }}
-          ZPK_DOCKER_PASSWORD: ${{ secrets.ZPK_DOCKER_PASSWORD }}
-          ZPK_HOST: ${{ vars.ZPK_HOST }}
-          ZPK_ARTIFACT: ${{ vars.ZPK_ARTIFACT }}
+          ZPK_IDC_DOCKER_USERNAME: ${{ secrets.ZPK_IDC_DOCKER_USERNAME }}
+          ZPK_IDC_DOCKER_PASSWORD: ${{ secrets.ZPK_IDC_DOCKER_PASSWORD }}
+          ZPK_IDC_HOST: ${{ vars.ZPK_IDC_HOST }}
+          ZPK_IDC_ARTIFACT: ${{ vars.ZPK_IDC_ARTIFACT }}
         run: |
           sudo curl -L --fail -o /usr/local/bin/zpk https://github.com/w7panel/w7panel-zpk/releases/download/latest/zpk_linux_amd64
           sudo chmod +x /usr/local/bin/zpk
 
           set -euo pipefail
 
-          if [ -z "${ZPK_DOCKER_USERNAME:-}" ]; then
-            echo "ZPK_DOCKER_USERNAME secret is required"
+          if [ -z "${ZPK_IDC_DOCKER_USERNAME:-}" ]; then
+            echo "ZPK_IDC_DOCKER_USERNAME secret is required"
             exit 1
           fi
-          if [ -z "${ZPK_DOCKER_PASSWORD:-}" ]; then
-            echo "ZPK_DOCKER_PASSWORD secret is required"
+          if [ -z "${ZPK_IDC_DOCKER_PASSWORD:-}" ]; then
+            echo "ZPK_IDC_DOCKER_PASSWORD secret is required"
             exit 1
           fi
-          if [ -z "${ZPK_HOST:-}" ]; then
-            echo "ZPK_HOST variable is required"
+          if [ -z "${ZPK_IDC_HOST:-}" ]; then
+            echo "ZPK_IDC_HOST variable is required"
             exit 1
           fi
-          if [ -z "${ZPK_ARTIFACT:-}" ]; then
-            echo "ZPK_ARTIFACT variable is required"
+          if [ -z "${ZPK_IDC_ARTIFACT:-}" ]; then
+            echo "ZPK_IDC_ARTIFACT variable is required"
             exit 1
           fi
 
@@ -101,8 +101,8 @@ jobs:
           fi
           HELM_PACKAGE="${helm_packages[0]}"
 
-          zpk login --username="${ZPK_DOCKER_USERNAME}" --password="${ZPK_DOCKER_PASSWORD}" --host="${ZPK_HOST}"
-          zpk use "${ZPK_ARTIFACT}"
+          zpk login --username="${ZPK_IDC_DOCKER_USERNAME}" --password="${ZPK_IDC_DOCKER_PASSWORD}" --host="${ZPK_IDC_HOST}"
+          zpk use "${ZPK_IDC_ARTIFACT}"
           zpk attach add --path="${HELM_PACKAGE}" --type=helm
           zpk push
 
