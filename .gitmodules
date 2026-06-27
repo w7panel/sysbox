@@ -9,7 +9,7 @@
 	url = https://github.com/nestybox/sysbox-ipc
 [submodule "sysbox-mgr"]
 	path = sysbox-mgr
-	url = https://github.com/nestybox/sysbox-mgr
+	url = https://github.com/w7panel/sysbox-mgr
 [submodule "sysbox-libs"]
 	path = sysbox-libs
 	url = https://github.com/nestybox/sysbox-libs
