@@ -480,7 +480,7 @@ openat                   6,100           ~9,500       +56%
 3. `readOnlyResource` / `procUptime` snapshot map 过期清理。**已实现机会式清理并通过 `go test ./handler/implementations -run 'Test(ReadOnlyResourceSnapshot|ProcUptimeSnapshot|ProcUptimeNonZeroOffset)' -race -shuffle=on -count=1`、`go test ./handler/implementations -race -count=1`、`go test ./... -count=1` 和 `make` 验证。**
 4. openat2 正常成功路径 Info 日志降 Debug。**已实现（`sysbox-fs/seccomp/openat2.go` 三个 success-path `Infof` → `Debugf`），`go build ./...` 通过。**
 5. process attribute `(pid,starttime)` 短缓存。**已实现为懒加载属性快照缓存：`ProcessCreate()` 仍保持轻量，仅在 `init()` 读取属性时按 `(pid, starttime)` 复用 uid/gid/groups/root/cwd 快照，避免共享可变 process/capability 对象；`go test -race -shuffle=on -count=1 ./...` 全量通过，并已完成测试集群新建 sysbox pod 验收。**
-6. seccomp goroutine 与 pidTracker 重构。
+6. seccomp goroutine 与 pidTracker 重构。**已实现最小安全版本：新增全局 seccomp notification in-flight limiter（128），调度前限制并发、复用现有 pidTracker 保持同 pid 串行；新增 limiter 并发/释放/同 pid 串行/不同 pid 并发测试和 pidTracker cleanup 测试，`go test -race -shuffle=on -count=1 ./...`、`go build ./...`、`git diff --check` 通过。**
 7. loadavg sampler 缓存 pid namespace、增加采样预算。
 8. sysbox-mgr rsync/chown 加指标和并发限制。
 
