@@ -478,8 +478,8 @@ openat                   6,100           ~9,500       +56%
 1. xattr allowlist 判断前置，避免读取无效 value。**已实现并通过 `go test ./seccomp` 验证。**
 2. passthrough cache miss 锁外执行 nsenter，并加 singleflight。**已实现并通过本地测试与测试集群新建 sysbox pod 验收。**
 3. `readOnlyResource` / `procUptime` snapshot map 过期清理。**已实现机会式清理并通过 `go test ./handler/implementations -run 'Test(ReadOnlyResourceSnapshot|ProcUptimeSnapshot|ProcUptimeNonZeroOffset)' -race -shuffle=on -count=1`、`go test ./handler/implementations -race -count=1`、`go test ./... -count=1` 和 `make` 验证。**
-4. openat2 正常成功路径 Info 日志降 Debug。
-5. process attribute `(pid,starttime)` 短缓存。
+4. openat2 正常成功路径 Info 日志降 Debug。**已实现（`sysbox-fs/seccomp/openat2.go` 三个 success-path `Infof` → `Debugf`），`go build ./...` 通过。**
+5. process attribute `(pid,starttime)` 短缓存。**已实现为懒加载属性快照缓存：`ProcessCreate()` 仍保持轻量，仅在 `init()` 读取属性时按 `(pid, starttime)` 复用 uid/gid/groups/root/cwd 快照，避免共享可变 process/capability 对象；`go test -race -shuffle=on -count=1 ./...` 全量通过，并已完成测试集群新建 sysbox pod 验收。**
 6. seccomp goroutine 与 pidTracker 重构。
 7. loadavg sampler 缓存 pid namespace、增加采样预算。
 8. sysbox-mgr rsync/chown 加指标和并发限制。
