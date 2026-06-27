@@ -7,6 +7,10 @@
 - 优先遵循项目已有风格和约定，避免无关重构。
 - 开发方案必须面向根因彻底解决问题，不做临时绕过、兼容旧缺陷的过渡方案或只缓解表象的补丁；如发现当前方案只能临时缓解，应停止实施并重新分析根因。
 
+## Git 操作
+
+- 本环境的全局 Git 配置文件位于 `/home/.gitconfig`；遇到 push/auth/remote rewrite 等 Git 配置问题时，先检查该文件，不要假设使用默认 `$HOME/.gitconfig`。
+
 ## 测试集群访问与验收
 
 - 测试集群 kubeconfig 位于 `.omo/run-continuation/sysbox-cluster-kubeconfig.yaml`，所有集群命令显式添加 `--kubeconfig /home/wwwroot/sysbox/.omo/run-continuation/sysbox-cluster-kubeconfig.yaml`，不要依赖默认 kubeconfig。
