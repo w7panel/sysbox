@@ -5,6 +5,9 @@ build
 # Ignore virtual-studio-code metadata
 .vscode
 
+# Ignore OhMyOpenCode workspace state
+.omo/
+
 # Ignore paths holding build artifacts and related files.
 image/deb/debbuild/
 image/deb/sources/
