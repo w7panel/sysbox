@@ -481,7 +481,7 @@ openat                   6,100           ~9,500       +56%
 4. openat2 正常成功路径 Info 日志降 Debug。**已实现（`sysbox-fs/seccomp/openat2.go` 三个 success-path `Infof` → `Debugf`），`go build ./...` 通过。**
 5. process attribute `(pid,starttime)` 短缓存。**已实现为懒加载属性快照缓存：`ProcessCreate()` 仍保持轻量，仅在 `init()` 读取属性时按 `(pid, starttime)` 复用 uid/gid/groups/root/cwd 快照，避免共享可变 process/capability 对象；`go test -race -shuffle=on -count=1 ./...` 全量通过，并已完成测试集群新建 sysbox pod 验收。**
 6. seccomp goroutine 与 pidTracker 重构。**已实现最小安全版本：新增全局 seccomp notification in-flight limiter（128），调度前限制并发、复用现有 pidTracker 保持同 pid 串行；新增 limiter 并发/释放/同 pid 串行/不同 pid 并发测试和 pidTracker cleanup 测试，`go test -race -shuffle=on -count=1 ./...`、`go build ./...`、`git diff --check` 通过。**
-7. loadavg sampler 缓存 pid namespace、增加采样预算。
-8. sysbox-mgr rsync/chown 加指标和并发限制。
+7. loadavg sampler 缓存 pid namespace、增加采样预算。**已实现：先将 oversized `procResources.go` 中的 loadavg 逻辑拆分为 `procLoadavg*.go` 职责文件，再为 pid namespace init-pid 查找增加缓存与 4096 项扫描预算；新增缓存命中避免扫描、预算传递测试，`go test -race -shuffle=on -count=1 ./...`、`go build ./...`、`git diff --check` 通过。**
+8. sysbox-mgr rsync/chown 加指标和并发限制。**已实现代码侧生命周期 IO gate：新增 `lifecycleIO` limiter 统一限制 rsync 与 recursive chown 并发（默认 2），记录 started/succeeded/failed、duration、last target/error、max observed queue；`volMgr` rsync 逻辑从 oversized `volMgr.go` 拆到 `rsync.go`，rootfs/mount recursive chown 调用点走同一 limiter；`go test ./lifecycleIO`、`go test ./volMgr -run '^$'`、`go test ./... -run '^$'`、`go build ./...`、`git diff --check` 通过。完整 `go test ./volMgr` 当前环境因缺少 `rsync` 二进制失败，需在安装 rsync 的验收环境重跑。**
 
 其中 1-4 风险低、改动小、收益较明确；5-7 需要更完整的 profiling 和回归测试；8 属于容器生命周期优化，需要单独压测大目录和高 churn 场景。
