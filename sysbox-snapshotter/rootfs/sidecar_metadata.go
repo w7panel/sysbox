@@ -7,25 +7,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/nestybox/sysbox-snapshotter/rootfscontract"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 )
 
-const RootfsRwLayerSpecEnv = "ROOTFS_RW_LAYER_SPEC"
-
 type SidecarMetadataResolver struct {
 	store SidecarSpecStore
-}
-
-type sidecarIntent struct {
-	Version int                  `json:"version"`
-	Entries []sidecarIntentEntry `json:"entries"`
-}
-
-type sidecarIntentEntry struct {
-	ContainerName string `json:"containerName"`
-	VolumeName    string `json:"volumeName"`
-	Path          string `json:"path"`
-	PVCClaimName  string `json:"pvcClaimName"`
 }
 
 func NewSidecarMetadataResolver(store SidecarSpecStore) *SidecarMetadataResolver {
@@ -76,22 +63,22 @@ func rootfsIntentEnv(spec *runtimespec.Spec) (string, bool) {
 	if spec == nil || spec.Process == nil {
 		return "", false
 	}
-	prefix := RootfsRwLayerSpecEnv + "="
+	prefix := rootfscontract.SpecEnv + "="
 	for _, env := range spec.Process.Env {
-		if strings.HasPrefix(env, prefix) {
-			return strings.TrimPrefix(env, prefix), true
+		if value, ok := strings.CutPrefix(env, prefix); ok {
+			return value, true
 		}
 	}
 	return "", false
 }
 
-func parseSidecarIntent(raw string) (sidecarIntent, error) {
-	var intent sidecarIntent
+func parseSidecarIntent(raw string) (rootfscontract.Intent, error) {
+	var intent rootfscontract.Intent
 	if err := json.Unmarshal([]byte(raw), &intent); err != nil {
-		return sidecarIntent{}, fmt.Errorf("decode sidecar rootfs rw-layer intent: %w", err)
+		return rootfscontract.Intent{}, fmt.Errorf("decode sidecar rootfs rw-layer intent: %w", err)
 	}
 	if intent.Version != 1 {
-		return sidecarIntent{}, fmt.Errorf("unsupported sidecar rootfs rw-layer intent version %d", intent.Version)
+		return rootfscontract.Intent{}, fmt.Errorf("unsupported sidecar rootfs rw-layer intent version %d", intent.Version)
 	}
 	return intent, nil
 }

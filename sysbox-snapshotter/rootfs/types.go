@@ -30,7 +30,6 @@ type RootfsRwLayerSpec struct {
 	VolumeName   string
 	Path         string
 	PVCClaimName string
-	PVCMountPath string
 	ImageChainID string
 	UIDMappings  []IDMapping
 	GIDMappings  []IDMapping
