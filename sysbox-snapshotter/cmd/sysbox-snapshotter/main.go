@@ -8,11 +8,11 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"regexp"
+	"path/filepath"
 	"slices"
-	"strings"
 	"syscall"
 
+	"github.com/nestybox/sysbox-libs/containerdUtils"
 	"github.com/nestybox/sysbox-snapshotter/daemon"
 	"github.com/nestybox/sysbox-snapshotter/rootfs"
 	overlay "github.com/nestybox/sysbox-snapshotter/snapshotter"
@@ -28,28 +28,28 @@ var (
 )
 
 const (
-	defaultSysboxSnapshotterRoot = "/var/lib/rancher/k3s/agent/containerd/io.containerd.snapshotter.v1.sysbox"
-	defaultContainerdConfig      = "/var/lib/rancher/k3s/agent/etc/containerd/config.toml"
-	defaultContainerdSocket      = "/run/k3s/containerd/containerd.sock"
-	defaultKubeletPodsPath       = "/var/lib/kubelet/pods"
-	proxyPluginID                = "sysbox"
+	sysboxSnapshotterStateDir = "io.containerd.snapshotter.v1.sysbox"
+	proxyPluginID             = "sysbox"
 )
 
 var ErrIDMappedMountsUnsupported = errors.New("idmapped overlay mounts are not supported")
 
 type snapshotterConfig struct {
 	Capabilities           []string
-	KubeletPodsPath        string
 	ContainerdSocket       string
 	SupportsIDMappedMounts func() (bool, error)
 }
 
 type snapshotterFlags struct {
-	Address          string
-	Root             string
-	ContainerdConfig string
-	KubeletPodsPath  string
-	ShowVersion      bool
+	Address     string
+	Root        string
+	ShowVersion bool
+}
+
+type runtimeResolvers struct {
+	Capabilities func(string) ([]string, error)
+	DataRoot     func() (string, error)
+	GRPCAddress  func() (string, error)
 }
 
 func main() {
@@ -60,7 +60,11 @@ func main() {
 }
 
 func run() error {
-	flags, err := parseSnapshotterFlags(os.Args[1:])
+	flags, config, err := loadRuntimeConfig(os.Args[1:], runtimeResolvers{
+		Capabilities: containerdUtils.GetProxyPluginCapabilities,
+		DataRoot:     containerdUtils.GetDataRoot,
+		GRPCAddress:  containerdUtils.GetGRPCAddress,
+	})
 	if err != nil {
 		return err
 	}
@@ -70,17 +74,8 @@ func run() error {
 		return nil
 	}
 
-	capabilities, err := readProxyCapabilities(flags.ContainerdConfig, proxyPluginID)
-	if err != nil {
-		return err
-	}
-
-	opts, err := buildSnapshotterOptions(snapshotterConfig{
-		Capabilities:           capabilities,
-		KubeletPodsPath:        flags.KubeletPodsPath,
-		ContainerdSocket:       defaultContainerdSocket,
-		SupportsIDMappedMounts: overlayutils.SupportsIDMappedMounts,
-	})
+	config.SupportsIDMappedMounts = overlayutils.SupportsIDMappedMounts
+	opts, err := buildSnapshotterOptions(config)
 	if err != nil {
 		return err
 	}
@@ -97,28 +92,46 @@ func run() error {
 	return daemon.NewServer(daemon.Config{Address: flags.Address, Snapshotter: wrapped}).Serve(ctx)
 }
 
-func parseSnapshotterFlags(args []string) (snapshotterFlags, error) {
+func parseSnapshotterFlagsWithDataRoot(args []string, dataRootResolver func() (string, error)) (snapshotterFlags, error) {
+	dataRoot, err := dataRootResolver()
+	if err != nil {
+		return snapshotterFlags{}, fmt.Errorf("read containerd data root: %w", err)
+	}
 	flags := snapshotterFlags{}
 	flagSet := flag.NewFlagSet("sysbox-snapshotter", flag.ContinueOnError)
 	flagSet.StringVar(&flags.Address, "address", "/run/sysbox-snapshotter.sock", "unix socket address for containerd proxy plugin")
-	flagSet.StringVar(&flags.Root, "root", defaultSysboxSnapshotterRoot, "sysbox snapshotter root directory")
-	flagSet.StringVar(&flags.ContainerdConfig, "containerd-config", defaultContainerdConfig, "containerd config path used to read sysbox proxy capabilities")
-	flagSet.StringVar(&flags.KubeletPodsPath, "kubelet-pods-path", defaultKubeletPodsPath, "kubelet pods directory used to resolve PVC mount paths")
+	flagSet.StringVar(&flags.Root, "root", filepath.Join(dataRoot, sysboxSnapshotterStateDir), "sysbox snapshotter root directory")
 	flagSet.BoolVar(&flags.ShowVersion, "version", false, "print version and exit")
 	return flags, flagSet.Parse(args)
+}
+
+func loadRuntimeConfig(args []string, resolvers runtimeResolvers) (snapshotterFlags, snapshotterConfig, error) {
+	flags, err := parseSnapshotterFlagsWithDataRoot(args, resolvers.DataRoot)
+	if err != nil {
+		return snapshotterFlags{}, snapshotterConfig{}, err
+	}
+	capabilities, err := resolvers.Capabilities(proxyPluginID)
+	if err != nil {
+		return snapshotterFlags{}, snapshotterConfig{}, fmt.Errorf("read containerd proxy plugin capabilities: %w", err)
+	}
+	grpcAddress, err := resolvers.GRPCAddress()
+	if err != nil {
+		return snapshotterFlags{}, snapshotterConfig{}, fmt.Errorf("read containerd grpc address: %w", err)
+	}
+	return flags, snapshotterConfig{
+		Capabilities:     capabilities,
+		ContainerdSocket: grpcAddress,
+	}, nil
 }
 
 func buildSnapshotterOptions(config snapshotterConfig) ([]overlay.Opt, error) {
 	opts := []overlay.Opt{overlay.AsynchronousRemove}
 	sidecarStore := rootfs.NewContainerdSidecarSpecStore(config.ContainerdSocket)
 	opts = append(opts, overlay.WithRootfsHooks(overlay.RootfsHooks{
-		IdentityResolver: rootfs.NewContainerdIdentityResolver(),
+		IdentityResolver: rootfs.NewContainerdIdentityResolver(config.ContainerdSocket),
 		MetadataResolver: rootfs.NewSidecarMetadataResolver(sidecarStore),
-		PVCResolver: rootfs.NewComposedPVCMountPathResolver(
-			rootfs.NewPVCMountPathResolver(sidecarStore),
-			rootfs.NewKubeletPVCMountPathResolver(config.KubeletPodsPath),
-		),
-		Preparer: rootfs.NewLocalPreparer(),
+		PVCResolver:      rootfs.NewPVCMountPathResolver(sidecarStore),
+		Preparer:         rootfs.NewLocalPreparer(),
 	}))
 	if hasCapability(config.Capabilities, "remap-ids") {
 		supported, err := config.SupportsIDMappedMounts()
@@ -131,46 +144,6 @@ func buildSnapshotterOptions(config snapshotterConfig) ([]overlay.Opt, error) {
 		return append(opts, overlay.WithRemapIDs), nil
 	}
 	return opts, nil
-}
-
-func readProxyCapabilities(configPath string, pluginID string) ([]string, error) {
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, fmt.Errorf("read containerd config: %w", err)
-	}
-	section := sectionBody(string(data), fmt.Sprintf("[proxy_plugins.%s]", pluginID))
-	if section == "" {
-		section = sectionBody(string(data), fmt.Sprintf("[proxy_plugins.%q]", pluginID))
-	}
-	return parseCapabilities(section), nil
-}
-
-func parseCapabilities(section string) []string {
-	match := regexp.MustCompile(`(?m)^\s*capabilities\s*=\s*\[(.*)\]\s*$`).FindStringSubmatch(section)
-	if len(match) != 2 {
-		return nil
-	}
-	items := strings.Split(match[1], ",")
-	capabilities := make([]string, 0, len(items))
-	for _, item := range items {
-		capability := strings.Trim(strings.TrimSpace(item), `"`)
-		if capability != "" {
-			capabilities = append(capabilities, capability)
-		}
-	}
-	return capabilities
-}
-
-func sectionBody(config string, header string) string {
-	_, rest, found := strings.Cut(config, header)
-	if !found {
-		return ""
-	}
-	body, _, found := strings.Cut(rest, "\n[")
-	if !found {
-		return rest
-	}
-	return body
 }
 
 func hasCapability(capabilities []string, capability string) bool {

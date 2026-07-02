@@ -7,13 +7,17 @@ require (
 	github.com/containerd/containerd/v2 v2.2.0
 	github.com/containerd/continuity v0.4.5
 	github.com/containerd/log v0.1.0
-	github.com/containerd/platforms v1.0.0-rc.2
-	github.com/containerd/plugin v1.0.0
 	github.com/moby/sys/userns v0.1.0
 	github.com/opencontainers/runtime-spec v1.2.1
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/sys v0.37.0
 	google.golang.org/grpc v1.76.0
+)
+
+require (
+	github.com/BurntSushi/toml v1.4.0 // indirect
+	github.com/containerd/platforms v1.0.0-rc.2 // indirect
+	github.com/containerd/plugin v1.0.0 // indirect
 )
 
 require (
@@ -40,12 +44,14 @@ require (
 	github.com/moby/sys/sequential v0.6.0 // indirect
 	github.com/moby/sys/signal v0.7.1 // indirect
 	github.com/moby/sys/user v0.4.0 // indirect
+	github.com/nestybox/sysbox-libs/containerdUtils v0.0.0
+	github.com/nestybox/sysbox-snapshotter/rootfscontract v0.0.0
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/opencontainers/selinux v1.12.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/sirupsen/logrus v1.9.3 // indirect
+	github.com/sirupsen/logrus v1.9.3
 	go.etcd.io/bbolt v1.4.3 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
@@ -60,3 +66,7 @@ require (
 	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/nestybox/sysbox-libs/containerdUtils => ../sysbox-libs/containerdUtils
+
+replace github.com/nestybox/sysbox-snapshotter/rootfscontract => ./rootfscontract
