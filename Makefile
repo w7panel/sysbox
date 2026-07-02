@@ -7,6 +7,8 @@
 	sysbox-runc sysbox-runc-static sysbox-runc-debug \
 	sysbox-fs sysbox-fs-static sysbox-fs-debug \
 	sysbox-mgr sysbox-mgr-static sysbox-mgr-debug \
+	sysbox-snapshotter \
+	sysbox-admission \
 	sysbox-ipc \
 	install uninstall \
 	test \
@@ -14,7 +16,7 @@
 	test-runc test-fs test-mgr test-sysbox-libs \
 	test-shell test-shell-debug test-shell-systemd test-shell-systemd-debug test-shell-installer test-shell-installer-debug \
 	test-img test-img-systemd test-cleanup \
-	test-sysbox-local test-sysbox-local-installer test-sysbox-local-ci test-fs-local test-mgr-local test-sysbox-libs-local \
+	test-sysbox-local test-sysbox-local-installer test-sysbox-local-ci test-fs-local test-mgr-local test-sysbox-libs-local test-snapshotter-local test-admission-local \
 	lint lint-local lint-sysbox-local lint-tests-local shfmt \
 	sysbox-runc-recvtty \
 	listRuncPkgs listFsPkgs listMgrPkgs listSysboxLibsPkgs \
@@ -70,6 +72,8 @@ SYSFS_DIR       := sysbox-fs
 SYSMGR_DIR      := sysbox-mgr
 SYSIPC_DIR      := sysbox-ipc
 SYSLIBS_DIR     := sysbox-libs
+SYSSNAPSHOTTER_DIR := sysbox-snapshotter
+SYSADMISSION_DIR := sysbox-admission
 
 PROJECT := /root/nestybox/sysbox
 
@@ -253,6 +257,12 @@ sysbox-mgr-static: sysbox-ipc
 	@cd $(SYSMGR_DIR) && make sysbox-mgr-static
 	@cd $(SYSMGR_DIR) && chown -R $(HOST_UID):$(HOST_GID) build
 
+sysbox-snapshotter:
+	@cd $(SYSSNAPSHOTTER_DIR) && make sysbox-snapshotter
+
+sysbox-admission:
+	@cd $(SYSADMISSION_DIR) && make sysbox-admission
+
 sysbox-ipc:
 	@cd $(SYSIPC_DIR) && make sysbox-ipc
 	@cd $(SYSIPC_DIR) && chown -R $(HOST_UID):$(HOST_GID) *
@@ -398,6 +408,12 @@ test-sysbox-libs: test-prereq sysbox
 	$(DOCKER_RUN) /bin/bash -c "export PHY_EGRESS_IFACE_MTU=$(EGRESS_IFACE_MTU) && \
 		testContainerInit && \
 		make --no-print-directory test-sysbox-libs-local"
+
+test-snapshotter-local:
+	cd $(SYSSNAPSHOTTER_DIR) && GOPROXY=$${GOPROXY:-https://goproxy.cn,direct} go test -buildvcs=false -timeout 3m -v ./...
+
+test-admission-local:
+	cd $(SYSADMISSION_DIR) && GOPROXY=$${GOPROXY:-https://goproxy.cn,direct} go test -buildvcs=false -timeout 3m -v ./...
 
 test-shell: ## Get a shell in the test container (useful for debug)
 test-shell: test-prereq test-img
@@ -580,6 +596,8 @@ gomod-tidy:
 	@cd $(SYSRUNC_DIR) && make gomod-tidy
 	@cd $(SYSMGR_DIR) && make gomod-tidy
 	@cd $(SYSFS_DIR) && make gomod-tidy
+	@cd $(SYSSNAPSHOTTER_DIR) && GOPROXY=$${GOPROXY:-https://goproxy.cn,direct} make gomod-tidy
+	@cd $(SYSADMISSION_DIR) && GOPROXY=$${GOPROXY:-https://goproxy.cn,direct} make gomod-tidy
 
 clean: ## Eliminate sysbox binaries
 clean:
@@ -587,6 +605,8 @@ clean:
 	cd $(SYSFS_DIR) && make clean TARGET_ARCH=$(TARGET_ARCH)
 	cd $(SYSMGR_DIR) && make clean TARGET_ARCH=$(TARGET_ARCH)
 	cd $(SYSIPC_DIR) && make clean TARGET_ARCH=$(TARGET_ARCH)
+	cd $(SYSSNAPSHOTTER_DIR) && make clean TARGET_ARCH=$(TARGET_ARCH)
+	cd $(SYSADMISSION_DIR) && make clean TARGET_ARCH=$(TARGET_ARCH)
 	rm -rf ./build/$(TARGET_ARCH)
 
 
@@ -596,6 +616,8 @@ distclean:
 	cd $(SYSFS_DIR) && make distclean
 	cd $(SYSMGR_DIR) && make distclean
 	cd $(SYSIPC_DIR) && make distclean
+	cd $(SYSSNAPSHOTTER_DIR) && make distclean
+	cd $(SYSADMISSION_DIR) && make distclean
 	rm -rf ./build
 
 # memoize all packages once
