@@ -10,16 +10,16 @@ import (
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 )
 
-const containerdSocket = "/run/k3s/containerd/containerd.sock"
+type ContainerdIdentityResolver struct {
+	socketPath string
+}
 
-type ContainerdIdentityResolver struct{}
-
-func NewContainerdIdentityResolver() *ContainerdIdentityResolver {
-	return &ContainerdIdentityResolver{}
+func NewContainerdIdentityResolver(socketPath string) *ContainerdIdentityResolver {
+	return &ContainerdIdentityResolver{socketPath: socketPath}
 }
 
 func (r *ContainerdIdentityResolver) ResolveIdentity(ctx context.Context, snapshotKey string) (RootfsRwLayerRequest, error) {
-	client, err := containerdclient.New(containerdSocket)
+	client, err := containerdclient.New(r.socketPath)
 	if err != nil {
 		return RootfsRwLayerRequest{}, fmt.Errorf("connect containerd for identity lookup: %w", err)
 	}
