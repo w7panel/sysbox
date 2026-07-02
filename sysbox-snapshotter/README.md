@@ -2,10 +2,10 @@
 
 `sysbox-snapshotter` is a containerd proxy snapshotter that maintains its own snapshot metadata under a containerd-compatible root directory and focuses on rewriting only the writable `upperdir` and `workdir` for containers that opt into Sysbox rootfs rw-layer persistence.
 
-The snapshotter root should follow the native containerd plugin layout convention:
+The snapshotter root follows the native containerd plugin layout convention under the configured containerd data root:
 
 ```text
-/var/lib/rancher/k3s/agent/containerd/io.containerd.snapshotter.v1.sysbox
+<containerd-root>/io.containerd.snapshotter.v1.sysbox
 ```
 
 The current stable code path keeps the PVC-backed `upperdir/workdir` implementation and removes the previous experimental lower-source borrowing path. Lower alignment to overlay-native semantics remains an implementation task inside the sysbox snapshotter itself rather than by borrowing another snapshotter's runtime lower directories.
@@ -14,9 +14,10 @@ The current stable code path keeps the PVC-backed `upperdir/workdir` implementat
 
 ```bash
 sysbox-snapshotter \
-  --address /run/sysbox-snapshotter.sock \
-  --root /var/lib/rancher/k3s/agent/containerd/io.containerd.snapshotter.v1.sysbox
+  --address /run/sysbox-snapshotter.sock
 ```
+
+`sysbox-snapshotter` derives the default snapshotter root and containerd socket from the active containerd config. Use `--root` only to override the derived snapshotter root.
 
 Containerd proxy plugin config:
 
@@ -74,7 +75,7 @@ The current bridge stores rootfs rw-layer intent on the injected sidecar contain
 
 At runtime, `sysbox-snapshotter` uses containerd labels to find the current Pod's sidecar OCI spec. It reads `ROOTFS_RW_LAYER_SPEC` for container intent and reads the sidecar OCI mounts to resolve `volumeName` to the exact node-side PVC source path.
 
-`path` must be relative and must not contain `..`. The snapshotter never infers a host path from `volumeName` alone; it must match the corresponding sidecar mount at `/var/lib/sysbox/rootfs-rw-volume/<volumeName>`. If the sidecar spec is malformed or the requested mount is missing, startup fails closed. Kubelet PVC directory scanning remains only as a fallback when sidecar spec data is unavailable.
+`path` must be relative and must not contain `..`. The snapshotter never infers a host path from `volumeName` alone; it must match the corresponding sidecar mount at `/var/lib/sysbox/rootfs-rw-volume/<volumeName>`. If the sidecar spec is unavailable, malformed, or missing the requested mount, startup fails closed for that rootfs rw-layer request.
 
 `LocalPreparer` remains local to `sysbox-snapshotter`; this near-term bridge does not move rootfs preparation into sysbox-admission, a database, or a containerd fork.
 
