@@ -12,7 +12,8 @@
 	url = https://github.com/w7panel/sysbox-mgr
 [submodule "sysbox-libs"]
 	path = sysbox-libs
-	url = https://github.com/nestybox/sysbox-libs
+	url = https://github.com/w7panel/sysbox-libs
+	branch = w7panel
 [submodule "sysbox-pkgr"]
 	path = sysbox-pkgr
 	url = https://github.com/w7panel/sysbox-pkgr
