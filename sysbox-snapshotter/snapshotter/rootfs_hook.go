@@ -39,7 +39,7 @@ func applyRootfsHook(ctx context.Context, hooks RootfsHooks, snapshotKey string,
 	if err != nil {
 		return nil, err
 	}
-	pvcMountPath := spec.PVCMountPath
+	pvcMountPath := ""
 	if hooks.PVCResolver != nil {
 		resolved, resolveErr := hooks.PVCResolver.ResolvePVCMountPath(ctx, request, spec)
 		if resolveErr != nil {

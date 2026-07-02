@@ -238,7 +238,8 @@ func TestApplyRootfsHook_returns_error_when_prepare_fails(t *testing.T) {
 	// Given
 	hooks := RootfsHooks{
 		IdentityResolver: fakeIdentityResolver{request: rootfs.RootfsRwLayerRequest{SnapshotKey: "snapshot-key"}},
-		MetadataResolver: fakeMetadataResolver{spec: rootfs.RootfsRwLayerSpec{PVCMountPath: "/pvc"}},
+		MetadataResolver: fakeMetadataResolver{spec: rootfs.RootfsRwLayerSpec{VolumeName: "rootfs"}},
+		PVCResolver:      fakePVCResolver{mountPath: "/pvc"},
 		Preparer:         &fakeRootfsPreparer{err: errRootfsHookTest},
 	}
 

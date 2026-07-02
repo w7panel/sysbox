@@ -10,13 +10,14 @@ import (
 
 	"github.com/containerd/containerd/v2/core/mount"
 	"github.com/nestybox/sysbox-snapshotter/rootfs"
+	"github.com/nestybox/sysbox-snapshotter/rootfscontract"
+	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/stretchr/testify/require"
 )
 
-func TestApplyRootfsHook_rewritesOverlayMounts_fromSidecarIntentAndKubeletPVCRoot(t *testing.T) {
+func TestApplyRootfsHook_rewritesOverlayMounts_fromSidecarIntentAndPVCRoot(t *testing.T) {
 	// Given
-	kubeletPodsRoot := t.TempDir()
-	pvcRoot := filepath.Join(kubeletPodsRoot, "pod-uid-123", "volumes", "kubernetes.io~local-volume", "pv-rootfs")
+	pvcRoot := filepath.Join(t.TempDir(), "pv-rootfs")
 	require.NoError(t, os.MkdirAll(pvcRoot, 0o755))
 	require.NoDirExists(t, filepath.Join(pvcRoot, "containers/main"))
 
@@ -40,7 +41,7 @@ func TestApplyRootfsHook_rewritesOverlayMounts_fromSidecarIntentAndKubeletPVCRoo
 			Path:         "containers/main",
 			PVCClaimName: "rootfs-pvc",
 		}},
-		PVCResolver: rootfs.NewKubeletPVCMountPathResolver(kubeletPodsRoot),
+		PVCResolver: rootfs.NewPVCMountPathResolver(fakeSidecarSpecStore{source: pvcRoot}),
 		Preparer:    rootfs.NewLocalPreparer(),
 	}
 
@@ -59,4 +60,15 @@ func TestApplyRootfsHook_rewritesOverlayMounts_fromSidecarIntentAndKubeletPVCRoo
 	require.DirExists(t, wantUpper)
 	require.DirExists(t, wantWork)
 	require.FileExists(t, filepath.Join(pvcRoot, "containers/main", "meta.json"))
+}
+
+type fakeSidecarSpecStore struct {
+	source string
+}
+
+func (s fakeSidecarSpecStore) LoadSidecarSpec(context.Context, rootfs.RootfsRwLayerRequest) (*runtimespec.Spec, error) {
+	return &runtimespec.Spec{Mounts: []runtimespec.Mount{{
+		Source:      s.source,
+		Destination: filepath.Join(rootfscontract.SidecarMountPath, "rootfs"),
+	}}}, nil
 }
