@@ -7,10 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/nestybox/sysbox-snapshotter/rootfscontract"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 )
-
-const SidecarMountPath = "/var/lib/sysbox/rootfs-rw-volume"
 
 var (
 	ErrSidecarSpecUnavailable = errors.New("sysbox sidecar oci spec unavailable")
@@ -35,9 +34,6 @@ func (r *PVCMountPathResolverFromSidecar) ResolvePVCMountPath(
 	request RootfsRwLayerRequest,
 	spec RootfsRwLayerSpec,
 ) (string, error) {
-	if spec.PVCMountPath != "" {
-		return spec.PVCMountPath, nil
-	}
 	if spec.VolumeName == "" {
 		return "", fmt.Errorf("volume name is required to resolve sidecar pvc mount path: %w", ErrSidecarSpecMalformed)
 	}
@@ -48,7 +44,7 @@ func (r *PVCMountPathResolverFromSidecar) ResolvePVCMountPath(
 	if sidecarSpec == nil {
 		return "", ErrSidecarSpecUnavailable
 	}
-	target := filepath.ToSlash(filepath.Join(SidecarMountPath, spec.VolumeName))
+	target := filepath.ToSlash(filepath.Join(rootfscontract.SidecarMountPath, spec.VolumeName))
 	for _, mount := range sidecarSpec.Mounts {
 		if cleanOCIDestination(mount.Destination) != target {
 			continue
@@ -63,28 +59,4 @@ func (r *PVCMountPathResolverFromSidecar) ResolvePVCMountPath(
 
 func cleanOCIDestination(destination string) string {
 	return filepath.ToSlash(filepath.Clean(strings.TrimSpace(destination)))
-}
-
-type ComposedPVCMountPathResolver struct {
-	primary  PVCMountPathResolver
-	fallback PVCMountPathResolver
-}
-
-func NewComposedPVCMountPathResolver(primary PVCMountPathResolver, fallback PVCMountPathResolver) *ComposedPVCMountPathResolver {
-	return &ComposedPVCMountPathResolver{primary: primary, fallback: fallback}
-}
-
-func (r *ComposedPVCMountPathResolver) ResolvePVCMountPath(
-	ctx context.Context,
-	request RootfsRwLayerRequest,
-	spec RootfsRwLayerSpec,
-) (string, error) {
-	path, err := r.primary.ResolvePVCMountPath(ctx, request, spec)
-	if err == nil {
-		return path, nil
-	}
-	if errors.Is(err, ErrSidecarSpecUnavailable) {
-		return r.fallback.ResolvePVCMountPath(ctx, request, spec)
-	}
-	return "", err
 }

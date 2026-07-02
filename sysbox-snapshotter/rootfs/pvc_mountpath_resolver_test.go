@@ -2,7 +2,6 @@ package rootfs_test
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/nestybox/sysbox-snapshotter/rootfs"
@@ -70,64 +69,6 @@ func TestPVCMountPathResolver_returnsMountMissing_whenRequestedVolumeIsAbsent(t 
 	require.ErrorIs(t, err, rootfs.ErrPVCMountNotFound)
 }
 
-func TestComposedPVCMountPathResolver_usesPrimaryResolver_whenSidecarDataIsAvailable(t *testing.T) {
-	// Given
-	resolver := rootfs.NewComposedPVCMountPathResolver(
-		fakePVCResolver{path: "/from-sidecar"},
-		fakePVCResolver{path: "/from-kubelet"},
-	)
-
-	// When
-	resolved, err := resolver.ResolvePVCMountPath(context.Background(), rootfs.RootfsRwLayerRequest{}, rootfs.RootfsRwLayerSpec{})
-
-	// Then
-	require.NoError(t, err)
-	require.Equal(t, "/from-sidecar", resolved)
-}
-
-func TestComposedPVCMountPathResolver_fallsBackToKubeletOnlyWhenSidecarDataIsUnavailable(t *testing.T) {
-	// Given
-	resolver := rootfs.NewComposedPVCMountPathResolver(
-		fakePVCResolver{err: rootfs.ErrSidecarSpecUnavailable},
-		fakePVCResolver{path: "/from-kubelet"},
-	)
-
-	// When
-	resolved, err := resolver.ResolvePVCMountPath(context.Background(), rootfs.RootfsRwLayerRequest{}, rootfs.RootfsRwLayerSpec{})
-
-	// Then
-	require.NoError(t, err)
-	require.Equal(t, "/from-kubelet", resolved)
-}
-
-func TestComposedPVCMountPathResolver_doesNotFallback_whenSidecarDataIsMalformed(t *testing.T) {
-	// Given
-	resolver := rootfs.NewComposedPVCMountPathResolver(
-		fakePVCResolver{err: rootfs.ErrSidecarSpecMalformed},
-		fakePVCResolver{path: "/from-kubelet"},
-	)
-
-	// When
-	_, err := resolver.ResolvePVCMountPath(context.Background(), rootfs.RootfsRwLayerRequest{}, rootfs.RootfsRwLayerSpec{})
-
-	// Then
-	require.ErrorIs(t, err, rootfs.ErrSidecarSpecMalformed)
-}
-
-func TestComposedPVCMountPathResolver_doesNotFallback_whenSidecarMountIsMissing(t *testing.T) {
-	// Given
-	resolver := rootfs.NewComposedPVCMountPathResolver(
-		fakePVCResolver{err: rootfs.ErrPVCMountNotFound},
-		fakePVCResolver{path: "/from-kubelet"},
-	)
-
-	// When
-	_, err := resolver.ResolvePVCMountPath(context.Background(), rootfs.RootfsRwLayerRequest{}, rootfs.RootfsRwLayerSpec{})
-
-	// Then
-	require.ErrorIs(t, err, rootfs.ErrPVCMountNotFound)
-}
-
 type fakeSidecarSpecStore struct {
 	spec *runtimespec.Spec
 	err  error
@@ -138,19 +79,4 @@ func (f fakeSidecarSpecStore) LoadSidecarSpec(_ context.Context, _ rootfs.Rootfs
 		return nil, f.err
 	}
 	return f.spec, nil
-}
-
-type fakePVCResolver struct {
-	path string
-	err  error
-}
-
-func (f fakePVCResolver) ResolvePVCMountPath(_ context.Context, _ rootfs.RootfsRwLayerRequest, _ rootfs.RootfsRwLayerSpec) (string, error) {
-	if f.err != nil {
-		return "", f.err
-	}
-	if f.path == "" {
-		return "", errors.New("fake pvc resolver path missing")
-	}
-	return f.path, nil
 }
