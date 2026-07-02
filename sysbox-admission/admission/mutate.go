@@ -13,9 +13,6 @@ import (
 
 const (
 	AnnotationRootfsRwLayer = "sysbox/rootfs-rw-layer"
-	SidecarMountPath        = "/var/lib/sysbox/rootfs-rw-volume"
-	RootfsPVCSidecarName    = "sysbox-rootfs"
-	RootfsRwLayerSpecEnv    = "ROOTFS_RW_LAYER_SPEC"
 )
 
 type Config struct {
@@ -24,18 +21,6 @@ type Config struct {
 
 type Mutator struct {
 	sandboxImage string
-}
-
-type SidecarIntent struct {
-	Version int                  `json:"version"`
-	Entries []SidecarIntentEntry `json:"entries"`
-}
-
-type SidecarIntentEntry struct {
-	ContainerName string `json:"containerName"`
-	VolumeName    string `json:"volumeName"`
-	Path          string `json:"path"`
-	PVCClaimName  string `json:"pvcClaimName"`
 }
 
 type RootfsRwLayerEntry struct {
