@@ -111,24 +111,22 @@ func TestApplyRootfsHook_returns_original_mounts_when_metadata_is_not_configured
 	}
 }
 
-func TestApplyRootfsHook_returns_original_mounts_when_sidecar_spec_is_unavailable(t *testing.T) {
+func TestApplyRootfsHook_returns_error_when_configured_pvc_mount_becomes_unavailable(t *testing.T) {
 	// Given
 	mounts := []mount.Mount{{Type: "overlay", Source: "overlay", Options: []string{"upperdir=/old", "workdir=/old-work"}}}
 	hooks := RootfsHooks{
 		IdentityResolver: fakeIdentityResolver{request: rootfs.RootfsRwLayerRequest{SnapshotKey: "snapshot-key", ContainerName: "main"}},
-		MetadataResolver: fakeMetadataResolver{err: rootfs.ErrSidecarSpecUnavailable},
+		MetadataResolver: fakeMetadataResolver{spec: rootfs.RootfsRwLayerSpec{VolumeName: "rootfs", Path: "containers/main"}},
+		PVCResolver:      fakePVCResolver{err: rootfs.ErrSidecarSpecUnavailable},
 		Preparer:         &fakeRootfsPreparer{},
 	}
 
 	// When
-	got, err := applyRootfsHook(context.Background(), hooks, "snapshot-key", nil, mounts)
+	_, err := applyRootfsHook(context.Background(), hooks, "snapshot-key", nil, mounts)
 
 	// Then
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-	if !reflect.DeepEqual(got, mounts) {
-		t.Fatalf("expected original mounts %#v, got %#v", mounts, got)
+	if !errors.Is(err, rootfs.ErrSidecarSpecUnavailable) {
+		t.Fatalf("expected sidecar spec unavailable error, got %v", err)
 	}
 }
 

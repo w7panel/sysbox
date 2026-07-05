@@ -33,7 +33,7 @@ func applyRootfsHook(ctx context.Context, hooks RootfsHooks, snapshotKey string,
 	}
 	request = withSnapshotMappings(request, snapshotLabels)
 	spec, err := hooks.MetadataResolver.ResolveRootfsRwLayer(ctx, request)
-	if errors.Is(err, rootfs.ErrRootfsRwLayerNotConfigured) || errors.Is(err, rootfs.ErrSidecarSpecUnavailable) {
+	if errors.Is(err, rootfs.ErrRootfsRwLayerNotConfigured) {
 		return mounts, nil
 	}
 	if err != nil {
