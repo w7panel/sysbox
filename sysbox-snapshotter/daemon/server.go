@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
+	"github.com/containerd/containerd/v2/contrib/snapshotservice"
 	"github.com/containerd/containerd/v2/core/snapshots"
-	"github.com/nestybox/sysbox-snapshotter/plugin"
 	"google.golang.org/grpc"
 )
 
@@ -47,7 +47,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	defer listener.Close()
 
 	grpcServer := grpc.NewServer()
-	snapshotsapi.RegisterSnapshotsServer(grpcServer, plugin.NewSnapshotService(s.config.Snapshotter))
+	snapshotsapi.RegisterSnapshotsServer(grpcServer, snapshotservice.FromSnapshotter(s.config.Snapshotter))
 	go func() {
 		<-ctx.Done()
 		grpcServer.GracefulStop()
