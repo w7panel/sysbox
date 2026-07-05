@@ -2,8 +2,11 @@ package rootfs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
+
+var ErrRootfsRwLayerNotConfigured = errors.New("rootfs rw-layer not configured")
 
 type RootfsRwLayerRequest struct {
 	SnapshotKey   string
@@ -20,8 +23,16 @@ type IdentityResolver interface {
 	ResolveIdentity(ctx context.Context, snapshotKey string) (RootfsRwLayerRequest, error)
 }
 
+type MetadataResolver interface {
+	ResolveRootfsRwLayer(ctx context.Context, request RootfsRwLayerRequest) (RootfsRwLayerSpec, error)
+}
+
 type PVCMountPathResolver interface {
 	ResolvePVCMountPath(ctx context.Context, request RootfsRwLayerRequest, spec RootfsRwLayerSpec) (string, error)
+}
+
+type RootfsPreparer interface {
+	PrepareRootfsRwLayer(ctx context.Context, request PrepareRootfsRequest) (PreparedRootfs, error)
 }
 
 type RootfsRwLayerSpec struct {
