@@ -45,7 +45,6 @@ require (
 	github.com/moby/sys/signal v0.7.1 // indirect
 	github.com/moby/sys/user v0.4.0 // indirect
 	github.com/nestybox/sysbox-libs/containerdUtils v0.0.0
-	github.com/nestybox/sysbox-snapshotter/rootfscontract v0.0.0
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/opencontainers/selinux v1.12.0 // indirect
@@ -68,5 +67,3 @@ require (
 )
 
 replace github.com/nestybox/sysbox-libs/containerdUtils => ../sysbox-libs/containerdUtils
-
-replace github.com/nestybox/sysbox-snapshotter/rootfscontract => ./rootfscontract

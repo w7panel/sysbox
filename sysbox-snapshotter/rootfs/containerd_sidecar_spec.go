@@ -6,7 +6,6 @@ import (
 
 	containerdclient "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
-	"github.com/nestybox/sysbox-snapshotter/rootfscontract"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 )
 
@@ -39,7 +38,7 @@ func (s *ContainerdSidecarSpecStore) LoadSidecarSpec(ctx context.Context, reques
 		}
 		if labels["io.kubernetes.pod.namespace"] != request.Namespace ||
 			labels["io.kubernetes.pod.name"] != request.PodName ||
-			labels["io.kubernetes.container.name"] != rootfscontract.SidecarContainerName {
+			labels["io.kubernetes.container.name"] != SidecarContainerName {
 			continue
 		}
 		spec, err := container.Spec(ctx)

@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/nestybox/sysbox-snapshotter/rootfscontract"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 )
 
@@ -44,7 +43,7 @@ func (r *PVCMountPathResolverFromSidecar) ResolvePVCMountPath(
 	if sidecarSpec == nil {
 		return "", ErrSidecarSpecUnavailable
 	}
-	target := filepath.ToSlash(filepath.Join(rootfscontract.SidecarMountPath, spec.VolumeName))
+	target := filepath.ToSlash(filepath.Join(SidecarMountPath, spec.VolumeName))
 	for _, mount := range sidecarSpec.Mounts {
 		if cleanOCIDestination(mount.Destination) != target {
 			continue

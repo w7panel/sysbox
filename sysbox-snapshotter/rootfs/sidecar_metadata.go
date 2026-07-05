@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/nestybox/sysbox-snapshotter/rootfscontract"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 )
 
@@ -63,7 +62,7 @@ func rootfsIntentEnv(spec *runtimespec.Spec) (string, bool) {
 	if spec == nil || spec.Process == nil {
 		return "", false
 	}
-	prefix := rootfscontract.SpecEnv + "="
+	prefix := SpecEnv + "="
 	for _, env := range spec.Process.Env {
 		if value, ok := strings.CutPrefix(env, prefix); ok {
 			return value, true
@@ -72,13 +71,13 @@ func rootfsIntentEnv(spec *runtimespec.Spec) (string, bool) {
 	return "", false
 }
 
-func parseSidecarIntent(raw string) (rootfscontract.Intent, error) {
-	var intent rootfscontract.Intent
+func parseSidecarIntent(raw string) (Intent, error) {
+	var intent Intent
 	if err := json.Unmarshal([]byte(raw), &intent); err != nil {
-		return rootfscontract.Intent{}, fmt.Errorf("decode sidecar rootfs rw-layer intent: %w", err)
+		return Intent{}, fmt.Errorf("decode sidecar rootfs rw-layer intent: %w", err)
 	}
 	if intent.Version != 1 {
-		return rootfscontract.Intent{}, fmt.Errorf("unsupported sidecar rootfs rw-layer intent version %d", intent.Version)
+		return Intent{}, fmt.Errorf("unsupported sidecar rootfs rw-layer intent version %d", intent.Version)
 	}
 	return intent, nil
 }

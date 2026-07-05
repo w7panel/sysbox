@@ -1,4 +1,4 @@
-package rootfscontract
+package rootfs
 
 const (
 	// SidecarMountPath is the fixed in-container path where the rootfs sidecar mounts PVC roots.
