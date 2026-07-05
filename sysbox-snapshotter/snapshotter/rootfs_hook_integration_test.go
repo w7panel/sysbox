@@ -12,7 +12,6 @@ import (
 	"github.com/containerd/containerd/v2/core/mount"
 	"github.com/containerd/containerd/v2/core/snapshots"
 	"github.com/nestybox/sysbox-snapshotter/rootfs"
-	"github.com/nestybox/sysbox-snapshotter/rootfscontract"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/stretchr/testify/require"
 )
@@ -302,6 +301,6 @@ type fakeSidecarSpecStore struct {
 func (s fakeSidecarSpecStore) LoadSidecarSpec(context.Context, rootfs.RootfsRwLayerRequest) (*runtimespec.Spec, error) {
 	return &runtimespec.Spec{Mounts: []runtimespec.Mount{{
 		Source:      s.source,
-		Destination: filepath.Join(rootfscontract.SidecarMountPath, "rootfs"),
+		Destination: filepath.Join(rootfs.SidecarMountPath, "rootfs"),
 	}}}, nil
 }
