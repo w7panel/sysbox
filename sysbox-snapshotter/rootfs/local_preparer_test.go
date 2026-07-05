@@ -193,6 +193,25 @@ func TestLocalPreparer_rejectsLayerPathTraversal(t *testing.T) {
 	require.ErrorIs(t, err, rootfs.ErrUnsafeLayerPath)
 }
 
+func TestLocalPreparer_rejectsSymlinkLayerPath(t *testing.T) {
+	volumeRoot := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(volumeRoot, "containers"), 0o755))
+	require.NoError(t, os.Symlink(t.TempDir(), filepath.Join(volumeRoot, "containers/app")))
+	preparer := rootfs.NewLocalPreparer()
+
+	_, err := preparer.PrepareRootfsRwLayer(context.Background(), rootfs.PrepareRootfsRequest{
+		SnapshotKey:   "snapshot-key",
+		PodUID:        "pod-123",
+		ContainerName: "app",
+		VolumeName:    "rootfs",
+		Path:          "containers/app",
+		PVCClaimName:  "rootfs-rw-pvc",
+		PVCMountPath:  volumeRoot,
+	})
+
+	require.ErrorIs(t, err, rootfs.ErrUnsafeLayerPath)
+}
+
 type layerMetaFixture struct {
 	Version      int                `json:"version"`
 	State        string             `json:"state"`
