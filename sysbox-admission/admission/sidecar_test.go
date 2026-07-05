@@ -8,7 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/nestybox/sysbox-admission/admission"
-	"github.com/nestybox/sysbox-snapshotter/rootfscontract"
+	"github.com/nestybox/sysbox-snapshotter/rootfs"
 	"github.com/stretchr/testify/require"
 )
 
@@ -19,7 +19,7 @@ func TestMutator_replacesExistingSidecarWithCanonicalContainer_whenPodSidecarWas
 	pod.Spec.Containers = []corev1.Container{
 		{Name: "c1"},
 		{
-			Name:    rootfscontract.SidecarContainerName,
+			Name:    rootfs.SidecarContainerName,
 			Image:   "attacker.example/old:latest",
 			Command: []string{"sh", "-c", "exfiltrate"},
 			Env: []corev1.EnvVar{{
@@ -28,7 +28,7 @@ func TestMutator_replacesExistingSidecarWithCanonicalContainer_whenPodSidecarWas
 			}},
 			VolumeMounts: []corev1.VolumeMount{
 				{Name: "host", MountPath: "/host"},
-				{Name: "rootfs", MountPath: filepath.Join(rootfscontract.SidecarMountPath, "wrong")},
+				{Name: "rootfs", MountPath: filepath.Join(rootfs.SidecarMountPath, "wrong")},
 			},
 		},
 		{Name: "c2"},
@@ -39,17 +39,17 @@ func TestMutator_replacesExistingSidecarWithCanonicalContainer_whenPodSidecarWas
 
 	// Then
 	require.NoError(t, err)
-	require.Equal(t, rootfscontract.SidecarContainerName, mutated.Spec.Containers[0].Name)
+	require.Equal(t, rootfs.SidecarContainerName, mutated.Spec.Containers[0].Name)
 	require.Equal(t, "c1", mutated.Spec.Containers[1].Name)
 	require.Equal(t, "c2", mutated.Spec.Containers[2].Name)
 	sidecar := mutated.Spec.Containers[0]
 	require.Equal(t, testSandboxImage, sidecar.Image)
 	require.Empty(t, sidecar.Command)
 	require.Len(t, sidecar.Env, 1)
-	require.Equal(t, rootfscontract.SpecEnv, sidecar.Env[0].Name)
+	require.Equal(t, rootfs.SpecEnv, sidecar.Env[0].Name)
 	require.Equal(t, []corev1.VolumeMount{{
 		Name:      "rootfs",
-		MountPath: filepath.Join(rootfscontract.SidecarMountPath, "rootfs"),
+		MountPath: filepath.Join(rootfs.SidecarMountPath, "rootfs"),
 	}}, sidecar.VolumeMounts)
 }
 
@@ -68,7 +68,7 @@ func TestMutator_injectsSidecarBeforeRootfsContainers_whenPodHasRootfsRwLayer(t 
 
 	// Then
 	require.NoError(t, err)
-	require.Equal(t, rootfscontract.SidecarContainerName, mutated.Spec.Containers[0].Name)
+	require.Equal(t, rootfs.SidecarContainerName, mutated.Spec.Containers[0].Name)
 	require.Equal(t, "c1", mutated.Spec.Containers[1].Name)
 	require.Equal(t, "c2", mutated.Spec.Containers[2].Name)
 }
@@ -80,7 +80,7 @@ func TestMutator_replacesExistingSidecarWithCanonicalContainer_whenDeploymentTem
 	deployment.Spec.Template.Spec.Containers = []corev1.Container{
 		{Name: "my-container"},
 		{
-			Name:         rootfscontract.SidecarContainerName,
+			Name:         rootfs.SidecarContainerName,
 			Image:        "old-image",
 			Command:      []string{"old"},
 			Env:          []corev1.EnvVar{{Name: "OLD", Value: "1"}},
@@ -95,14 +95,14 @@ func TestMutator_replacesExistingSidecarWithCanonicalContainer_whenDeploymentTem
 	require.NoError(t, err)
 	sidecar := mutated.Spec.Template.Spec.Containers[0]
 	require.Equal(t, "my-container", mutated.Spec.Template.Spec.Containers[1].Name)
-	require.Equal(t, rootfscontract.SidecarContainerName, sidecar.Name)
+	require.Equal(t, rootfs.SidecarContainerName, sidecar.Name)
 	require.Equal(t, testSandboxImage, sidecar.Image)
 	require.Empty(t, sidecar.Command)
 	require.Len(t, sidecar.Env, 1)
-	require.Equal(t, rootfscontract.SpecEnv, sidecar.Env[0].Name)
+	require.Equal(t, rootfs.SpecEnv, sidecar.Env[0].Name)
 	require.Equal(t, []corev1.VolumeMount{{
 		Name:      "test",
-		MountPath: filepath.Join(rootfscontract.SidecarMountPath, "test"),
+		MountPath: filepath.Join(rootfs.SidecarMountPath, "test"),
 	}}, sidecar.VolumeMounts)
 }
 
@@ -126,8 +126,8 @@ func TestMutator_injectsDistinctSidecarMounts_whenEntriesUseDifferentPVCs(t *tes
 	require.NoError(t, err)
 	sidecar := mutated.Spec.Containers[0]
 	require.Equal(t, []corev1.VolumeMount{
-		{Name: "rootfs-a", MountPath: filepath.Join(rootfscontract.SidecarMountPath, "rootfs-a")},
-		{Name: "rootfs-b", MountPath: filepath.Join(rootfscontract.SidecarMountPath, "rootfs-b")},
+		{Name: "rootfs-a", MountPath: filepath.Join(rootfs.SidecarMountPath, "rootfs-a")},
+		{Name: "rootfs-b", MountPath: filepath.Join(rootfs.SidecarMountPath, "rootfs-b")},
 	}, sidecar.VolumeMounts)
 }
 
@@ -136,10 +136,10 @@ func TestMutator_replacesSidecarMountsWithRequiredMounts_whenSidecarAlreadyExist
 	mutator := newTestMutator()
 	pod := validRootfsPod()
 	pod.Spec.Containers = append(pod.Spec.Containers, corev1.Container{
-		Name: rootfscontract.SidecarContainerName,
+		Name: rootfs.SidecarContainerName,
 		VolumeMounts: []corev1.VolumeMount{{
 			Name:      "rootfs",
-			MountPath: filepath.Join(rootfscontract.SidecarMountPath, "rootfs"),
+			MountPath: filepath.Join(rootfs.SidecarMountPath, "rootfs"),
 		}},
 	})
 	pod.Annotations[admission.AnnotationRootfsRwLayer] = `[
@@ -159,8 +159,8 @@ func TestMutator_replacesSidecarMountsWithRequiredMounts_whenSidecarAlreadyExist
 	require.Len(t, mutated.Spec.Containers, 3)
 	sidecar := mutated.Spec.Containers[0]
 	require.Equal(t, []corev1.VolumeMount{
-		{Name: "rootfs", MountPath: filepath.Join(rootfscontract.SidecarMountPath, "rootfs")},
-		{Name: "cache", MountPath: filepath.Join(rootfscontract.SidecarMountPath, "cache")},
+		{Name: "rootfs", MountPath: filepath.Join(rootfs.SidecarMountPath, "rootfs")},
+		{Name: "cache", MountPath: filepath.Join(rootfs.SidecarMountPath, "cache")},
 	}, sidecar.VolumeMounts)
 }
 
@@ -169,10 +169,10 @@ func TestMutator_replacesConflictingSidecarMountPath_whenSidecarAlreadyExists(t 
 	mutator := newTestMutator()
 	pod := validRootfsPod()
 	pod.Spec.Containers = append(pod.Spec.Containers, corev1.Container{
-		Name: rootfscontract.SidecarContainerName,
+		Name: rootfs.SidecarContainerName,
 		VolumeMounts: []corev1.VolumeMount{{
 			Name:      "other",
-			MountPath: filepath.Join(rootfscontract.SidecarMountPath, "rootfs"),
+			MountPath: filepath.Join(rootfs.SidecarMountPath, "rootfs"),
 		}},
 	})
 
@@ -183,6 +183,6 @@ func TestMutator_replacesConflictingSidecarMountPath_whenSidecarAlreadyExists(t 
 	require.NoError(t, err)
 	require.Equal(t, []corev1.VolumeMount{{
 		Name:      "rootfs",
-		MountPath: filepath.Join(rootfscontract.SidecarMountPath, "rootfs"),
+		MountPath: filepath.Join(rootfs.SidecarMountPath, "rootfs"),
 	}}, mutated.Spec.Containers[0].VolumeMounts)
 }

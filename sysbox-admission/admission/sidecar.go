@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/nestybox/sysbox-snapshotter/rootfscontract"
+	"github.com/nestybox/sysbox-snapshotter/rootfs"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -17,7 +17,7 @@ func ensureSidecar(spec *corev1.PodSpec, entries []RootfsRwLayerEntry, sandboxIm
 	containers := make([]corev1.Container, 0, len(spec.Containers)+1)
 	containers = append(containers, sidecar)
 	for _, container := range spec.Containers {
-		if container.Name != rootfscontract.SidecarContainerName {
+		if container.Name != rootfs.SidecarContainerName {
 			containers = append(containers, container)
 		}
 	}
@@ -31,21 +31,21 @@ func canonicalSidecar(spec *corev1.PodSpec, entries []RootfsRwLayerEntry, sandbo
 		return corev1.Container{}, err
 	}
 	return corev1.Container{
-		Name:         rootfscontract.SidecarContainerName,
+		Name:         rootfs.SidecarContainerName,
 		Image:        sandboxImage,
-		Env:          []corev1.EnvVar{{Name: rootfscontract.SpecEnv, Value: intent}},
+		Env:          []corev1.EnvVar{{Name: rootfs.SpecEnv, Value: intent}},
 		VolumeMounts: requiredSidecarMounts(entries),
 	}, nil
 }
 
 func sidecarIntent(spec *corev1.PodSpec, entries []RootfsRwLayerEntry) (string, error) {
-	intent := rootfscontract.Intent{Version: 1, Entries: make([]rootfscontract.IntentEntry, 0, len(entries))}
+	intent := rootfs.Intent{Version: 1, Entries: make([]rootfs.IntentEntry, 0, len(entries))}
 	for _, entry := range entries {
 		_, claimName, found := findPVCVolume(spec, entry.VolumeName)
 		if !found {
 			return "", fmt.Errorf("volume %s must be a persistentVolumeClaim volume", entry.VolumeName)
 		}
-		intent.Entries = append(intent.Entries, rootfscontract.IntentEntry{
+		intent.Entries = append(intent.Entries, rootfs.IntentEntry{
 			ContainerName: entry.Name,
 			VolumeName:    entry.VolumeName,
 			Path:          entry.Path,
@@ -67,7 +67,7 @@ func requiredSidecarMounts(entries []RootfsRwLayerEntry) []corev1.VolumeMount {
 			continue
 		}
 		seenVolumes[entry.VolumeName] = struct{}{}
-		volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: entry.VolumeName, MountPath: filepath.Join(rootfscontract.SidecarMountPath, entry.VolumeName)})
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: entry.VolumeName, MountPath: filepath.Join(rootfs.SidecarMountPath, entry.VolumeName)})
 	}
 	return volumeMounts
 }

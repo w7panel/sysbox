@@ -11,7 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/nestybox/sysbox-admission/admission"
-	"github.com/nestybox/sysbox-snapshotter/rootfscontract"
+	"github.com/nestybox/sysbox-snapshotter/rootfs"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,15 +26,15 @@ func TestMutator_injectsSidecarIntent_whenAnnotationIsValid(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, mutated.Spec.Containers, 3)
 	sidecar := mutated.Spec.Containers[0]
-	require.Equal(t, rootfscontract.SidecarContainerName, sidecar.Name)
+	require.Equal(t, rootfs.SidecarContainerName, sidecar.Name)
 	require.Equal(t, testSandboxImage, sidecar.Image)
 	require.Empty(t, sidecar.Command)
 	require.Len(t, sidecar.VolumeMounts, 1)
 	require.Equal(t, "rootfs", sidecar.VolumeMounts[0].Name)
-	require.Equal(t, filepath.Join(rootfscontract.SidecarMountPath, "rootfs"), sidecar.VolumeMounts[0].MountPath)
+	require.Equal(t, filepath.Join(rootfs.SidecarMountPath, "rootfs"), sidecar.VolumeMounts[0].MountPath)
 	require.Empty(t, sidecar.VolumeMounts[0].SubPath)
 	require.Len(t, sidecar.Env, 1)
-	require.Equal(t, rootfscontract.SpecEnv, sidecar.Env[0].Name)
+	require.Equal(t, rootfs.SpecEnv, sidecar.Env[0].Name)
 	assertSidecarIntent(t, sidecar.Env[0].Value, []map[string]any{
 		{"containerName": "c1", "volumeName": "rootfs", "path": "containers/c1", "pvcClaimName": "sysbox-rootfs-pvc"},
 		{"containerName": "c2", "volumeName": "rootfs", "path": "containers/c2", "pvcClaimName": "sysbox-rootfs-pvc"},
@@ -57,12 +57,12 @@ func TestMutator_mutatesDeploymentPodTemplate_whenTemplateAnnotationIsValid(t *t
 	require.NoError(t, err)
 	require.Len(t, mutated.Spec.Template.Spec.Containers, 2)
 	sidecar := mutated.Spec.Template.Spec.Containers[0]
-	require.Equal(t, rootfscontract.SidecarContainerName, sidecar.Name)
+	require.Equal(t, rootfs.SidecarContainerName, sidecar.Name)
 	require.Equal(t, testSandboxImage, sidecar.Image)
 	require.Empty(t, sidecar.Command)
 	require.Len(t, sidecar.VolumeMounts, 1)
 	require.Equal(t, "test", sidecar.VolumeMounts[0].Name)
-	require.Equal(t, filepath.Join(rootfscontract.SidecarMountPath, "test"), sidecar.VolumeMounts[0].MountPath)
+	require.Equal(t, filepath.Join(rootfs.SidecarMountPath, "test"), sidecar.VolumeMounts[0].MountPath)
 }
 
 func TestMutator_injectsSidecarIntent_whenPodNameIsEmpty(t *testing.T) {
@@ -77,7 +77,7 @@ func TestMutator_injectsSidecarIntent_whenPodNameIsEmpty(t *testing.T) {
 
 	// Then
 	require.NoError(t, err)
-	require.Equal(t, rootfscontract.SidecarContainerName, mutated.Spec.Containers[0].Name)
+	require.Equal(t, rootfs.SidecarContainerName, mutated.Spec.Containers[0].Name)
 	require.Len(t, mutated.Spec.Containers[0].Env, 1)
 }
 
@@ -95,7 +95,7 @@ func TestMutator_mutatesDeploymentPodTemplate_whenDeploymentAnnotationIsValid(t 
 	require.NoError(t, err)
 	require.Equal(t, deployment.Annotations[admission.AnnotationRootfsRwLayer], mutated.Spec.Template.Annotations[admission.AnnotationRootfsRwLayer])
 	require.Len(t, mutated.Spec.Template.Spec.Containers, 2)
-	require.Equal(t, rootfscontract.SidecarContainerName, mutated.Spec.Template.Spec.Containers[0].Name)
+	require.Equal(t, rootfs.SidecarContainerName, mutated.Spec.Template.Spec.Containers[0].Name)
 }
 
 func TestMutator_leavesDeploymentUnchanged_whenTemplateAnnotationMissing(t *testing.T) {
