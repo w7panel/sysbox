@@ -120,6 +120,210 @@ func testOverlayMounts(t *testing.T, newSnapshotter testsuite.SnapshotterFunc) {
 	}
 }
 
+func TestMountsDoesNotEmitIDMapOptionsWhenRemapIDsDisabled(t *testing.T) {
+	ctx := context.TODO()
+	sn, cleanup, err := newSnapshotterWithOpts()(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := cleanup(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	mounts, err := sn.Prepare(ctx, "active", "", containerd.WithUserNSRemapperLabels(
+		[]specs.LinuxIDMapping{{ContainerID: 0, HostID: 100000, Size: 65536}},
+		[]specs.LinuxIDMapping{{ContainerID: 0, HostID: 100000, Size: 65536}},
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mounts) != 1 {
+		t.Fatalf("should only have 1 mount but received %d", len(mounts))
+	}
+
+	for _, opt := range mounts[0].Options {
+		if opt == "uidmap=0:100000:65536" || opt == "gidmap=0:100000:65536" {
+			t.Fatalf("remap disabled mount must not include idmap option %q", opt)
+		}
+	}
+}
+
+func TestMountsUsesFallbackChownWhenRemapIDsDisabledWithLabels(t *testing.T) {
+	testutil.RequiresRoot(t)
+	ctx := context.TODO()
+	root := t.TempDir()
+	sn, cleanup, err := newSnapshotterWithOpts()(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := cleanup(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	key := "active"
+	mounts, err := sn.Prepare(ctx, key, "", containerd.WithUserNSRemapperLabels(
+		[]specs.LinuxIDMapping{{ContainerID: 0, HostID: 100000, Size: 65536}},
+		[]specs.LinuxIDMapping{{ContainerID: 0, HostID: 100001, Size: 65536}},
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, opt := range mounts[0].Options {
+		if opt == "uidmap=0:100000:65536" || opt == "gidmap=0:100001:65536" {
+			t.Fatalf("remap disabled mount must not include idmap option %q", opt)
+		}
+	}
+
+	owner, ok, err := fallbackChownOwner(remapModeOf(sn), map[string]string{
+		snapshots.LabelSnapshotUIDMapping: "0:100000:65536",
+		snapshots.LabelSnapshotGIDMapping: "0:100001:65536",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("remap disabled labels must select fallback chown ownership")
+	}
+	if owner.uid != 100000 || owner.gid != 100001 {
+		t.Fatalf("fallback chown owner = %d:%d, want 100000:100001", owner.uid, owner.gid)
+	}
+
+	info, err := os.Stat(filepath.Join(getBasePath(ctx, sn, root, key), "fs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		t.Fatal("expected *syscall.Stat_t")
+	}
+	if stat.Uid != 100000 || stat.Gid != 100001 {
+		t.Fatalf("snapshot upper owner = %d:%d, want 100000:100001", stat.Uid, stat.Gid)
+	}
+}
+
+func TestNewSnapshotterUsesExplicitRemapMode(t *testing.T) {
+	ctx := context.TODO()
+
+	disabled, cleanupDisabled, err := newSnapshotterWithOpts()(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := cleanupDisabled(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if remapModeOf(disabled) != remapModeDisabled {
+		t.Fatalf("default remap mode = %v, want %v", remapModeOf(disabled), remapModeDisabled)
+	}
+
+	idmapped, cleanupIDMapped, err := newSnapshotterWithOpts(WithRemapIDs)(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := cleanupIDMapped(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if remapModeOf(idmapped) != remapModeIDMapped {
+		t.Fatalf("WithRemapIDs remap mode = %v, want %v", remapModeOf(idmapped), remapModeIDMapped)
+	}
+}
+
+func TestMountsEmitsIDMapOptionsWhenRemapIDsEnabled(t *testing.T) {
+	ctx := context.TODO()
+	sn, cleanup, err := newSnapshotterWithOpts(WithRemapIDs)(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := cleanup(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	mounts, err := sn.Prepare(ctx, "active", "", containerd.WithUserNSRemapperLabels(
+		[]specs.LinuxIDMapping{{ContainerID: 0, HostID: 100000, Size: 65536}},
+		[]specs.LinuxIDMapping{{ContainerID: 0, HostID: 100000, Size: 65536}},
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mounts) != 1 {
+		t.Fatalf("should only have 1 mount but received %d", len(mounts))
+	}
+
+	foundUIDMap := false
+	foundGIDMap := false
+	for _, opt := range mounts[0].Options {
+		if opt == "uidmap=0:100000:65536" {
+			foundUIDMap = true
+		}
+		if opt == "gidmap=0:100000:65536" {
+			foundGIDMap = true
+		}
+	}
+	if !foundUIDMap {
+		t.Fatal("remap enabled mount must include uidmap=0:100000:65536")
+	}
+	if !foundGIDMap {
+		t.Fatal("remap enabled mount must include gidmap=0:100000:65536")
+	}
+}
+
+func TestMountsRejectsPartialIDMapOptionsWhenRemapIDsEnabled(t *testing.T) {
+	ctx := context.TODO()
+	sn, cleanup, err := newSnapshotterWithOpts(WithRemapIDs)(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := cleanup(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	_, err = sn.Prepare(ctx, "active", "", snapshots.WithLabels(map[string]string{
+		snapshots.LabelSnapshotUIDMapping: "0:100000:65536",
+	}))
+	if err == nil {
+		t.Fatal("snapshots with partial idmap labels must fail")
+	}
+}
+
+func TestMountsRejectsPartialIDMapOptionsWithoutCreatingSnapshot(t *testing.T) {
+	ctx := context.TODO()
+	sn, cleanup, err := newSnapshotterWithOpts(WithRemapIDs)(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := cleanup(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	key := "active"
+	_, err = sn.Prepare(ctx, key, "", snapshots.WithLabels(map[string]string{
+		snapshots.LabelSnapshotUIDMapping: "0:100000:65536",
+	}))
+	if err == nil {
+		t.Fatal("snapshots with partial idmap labels must fail")
+	}
+	if _, err := sn.Stat(ctx, key); err == nil {
+		t.Fatal("failed partial idmap prepare must not leave snapshot metadata")
+	}
+	if _, err := sn.Mounts(ctx, key); err == nil {
+		t.Fatal("failed partial idmap prepare must not leave recoverable mounts")
+	}
+}
+
 func testOverlayCommit(t *testing.T, newSnapshotter testsuite.SnapshotterFunc) {
 	ctx := context.TODO()
 	root := t.TempDir()
@@ -344,7 +548,7 @@ func testOverlayRemappedBind(t *testing.T, newSnapshotter testsuite.SnapshotterF
 			t.Fatal(err)
 		}
 
-		if sn, ok := o.(*snapshotter); !ok || !sn.remapIDs {
+		if remapModeOf(o) != remapModeIDMapped {
 			t.Skip("overlayfs doesn't support idmapped mounts")
 		}
 
@@ -500,7 +704,7 @@ func testOverlayRemappedActive(t *testing.T, newSnapshotter testsuite.Snapshotte
 			t.Fatal(err)
 		}
 
-		if sn, ok := o.(*snapshotter); !ok || !sn.remapIDs {
+		if remapModeOf(o) != remapModeIDMapped {
 			t.Skip("overlayfs doesn't support idmapped mounts")
 		}
 
@@ -556,7 +760,7 @@ func testOverlayRemappedInvalidMapping(t *testing.T, newSnapshotter testsuite.Sn
 		t.Fatal(err)
 	}
 
-	if sn, ok := o.(*snapshotter); !ok || !sn.remapIDs {
+	if remapModeOf(o) != remapModeIDMapped {
 		t.Skip("overlayfs doesn't support idmapped mounts")
 	}
 

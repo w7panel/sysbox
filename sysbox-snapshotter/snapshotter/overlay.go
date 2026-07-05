@@ -32,7 +32,6 @@ import (
 	"github.com/containerd/containerd/v2/plugins/snapshots/overlay/overlayutils"
 	"github.com/containerd/continuity/fs"
 	"github.com/containerd/log"
-	"github.com/nestybox/sysbox-snapshotter/internal/userns"
 )
 
 // SnapshotterConfig is used to configure the overlay snapshotter instance
@@ -40,7 +39,7 @@ type SnapshotterConfig struct {
 	asyncRemove  bool
 	ms           MetaStore
 	mountOptions []string
-	remapIDs     bool
+	remapMode    remapMode
 	rootfsHooks  RootfsHooks
 }
 
@@ -72,13 +71,12 @@ type MetaStore interface {
 }
 
 func WithRemapIDs(config *SnapshotterConfig) error {
-	config.remapIDs = true
+	config.remapMode = remapModeIDMapped
 	return nil
 }
 
 func HasRemapIDs(sn snapshots.Snapshotter) bool {
-	overlaySnapshotter, ok := sn.(*snapshotter)
-	return ok && overlaySnapshotter.remapIDs
+	return remapModeOf(sn) == remapModeIDMapped
 }
 
 type snapshotter struct {
@@ -86,7 +84,7 @@ type snapshotter struct {
 	ms          MetaStore
 	asyncRemove bool
 	options     []string
-	remapIDs    bool
+	remapMode   remapMode
 	rootfsHooks RootfsHooks
 }
 
@@ -142,7 +140,7 @@ func NewSnapshotter(root string, opts ...Opt) (snapshots.Snapshotter, error) {
 		ms:          config.ms,
 		asyncRemove: config.asyncRemove,
 		options:     config.mountOptions,
-		remapIDs:    config.remapIDs,
+		remapMode:   config.remapMode,
 		rootfsHooks: config.rootfsHooks,
 	}, nil
 }
@@ -255,8 +253,15 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) (_ []mount.Mount, 
 		logSnapshotLifecycle(ctx, "mounts_error", logSnapshotError(key, err))
 		return nil, err
 	}
-	mounts := o.mounts(s, info)
+	mounts, err := o.mounts(s, info)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build snapshot mounts: %w", err)
+	}
 	logSnapshotLifecycle(ctx, "mounts_base", logMounts(key, s, info, mounts))
+	if info.Kind != snapshots.KindActive {
+		logSnapshotLifecycle(ctx, "mounts_done", logMountResult(key, mounts, nil))
+		return mounts, nil
+	}
 	rewritten, err := applyRootfsHook(ctx, o.rootfsHooks, key, info.Labels, mounts)
 	logSnapshotLifecycle(ctx, "mounts_done", logMountResult(key, rewritten, err))
 	return rewritten, err
@@ -344,48 +349,6 @@ func (o *snapshotter) Cleanup(ctx context.Context) error {
 	return nil
 }
 
-func (o *snapshotter) cleanupDirectories(ctx context.Context) (_ []string, err error) {
-	var cleanupDirs []string
-	// Get a write transaction to ensure no other write transaction can be entered
-	// while the cleanup is scanning.
-	if err := o.ms.WithTransaction(ctx, true, func(ctx context.Context) error {
-		cleanupDirs, err = o.getCleanupDirectories(ctx)
-		return err
-	}); err != nil {
-		return nil, err
-	}
-	return cleanupDirs, nil
-}
-
-func (o *snapshotter) getCleanupDirectories(ctx context.Context) ([]string, error) {
-	ids, err := storage.IDMap(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	snapshotDir := filepath.Join(o.root, "snapshots")
-	fd, err := os.Open(snapshotDir)
-	if err != nil {
-		return nil, err
-	}
-	defer fd.Close()
-
-	dirs, err := fd.Readdirnames(0)
-	if err != nil {
-		return nil, err
-	}
-
-	cleanup := []string{}
-	for _, d := range dirs {
-		if _, ok := ids[d]; ok {
-			continue
-		}
-		cleanup = append(cleanup, filepath.Join(snapshotDir, d))
-	}
-
-	return cleanup, nil
-}
-
 func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, key, parent string, opts []snapshots.Opt) (_ []mount.Mount, err error) {
 	var (
 		s        storage.Snapshot
@@ -425,36 +388,19 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 		if err != nil {
 			return fmt.Errorf("failed to get snapshot info: %w", err)
 		}
-
-		var (
-			mappedUID, mappedGID     = -1, -1
-			uidmapLabel, gidmapLabel string
-			needsRemap               = false
-		)
-		// NOTE: if idmapped mounts' supported by hosted kernel there may be
-		// no parents at all, so overlayfs will not work and snapshotter
-		// will use bind mount. To be able to create file objects inside the
-		// rootfs -- just chown this only bound directory according to provided
-		// {uid,gid}map. In case of one/multiple parents -- chown upperdir.
-		if v, ok := info.Labels[snapshots.LabelSnapshotUIDMapping]; ok {
-			uidmapLabel = v
-			needsRemap = true
-		}
-		if v, ok := info.Labels[snapshots.LabelSnapshotGIDMapping]; ok {
-			gidmapLabel = v
-			needsRemap = true
+		if _, err := remapOptions(o.remapMode, info.Labels); err != nil {
+			return fmt.Errorf("failed to validate snapshot remap labels: %w", err)
 		}
 
-		if needsRemap {
-			var idMap userns.IDMap
-			if err = idMap.Unmarshal(uidmapLabel, gidmapLabel); err != nil {
-				return fmt.Errorf("failed to unmarshal snapshot ID mapped labels: %w", err)
-			}
-			root, err := idMap.RootPair()
-			if err != nil {
-				return fmt.Errorf("failed to find root pair: %w", err)
-			}
-			mappedUID, mappedGID = int(root.Uid), int(root.Gid)
+		mappedUID, mappedGID := -1, -1
+		if owner, ok, err := fallbackChownOwner(o.remapMode, info.Labels); err != nil {
+			return err
+		} else if ok {
+			mappedUID, mappedGID = owner.uid, owner.gid
+		} else if owner, ok, err := idmappedSnapshotOwner(o.remapMode, info.Labels); err != nil {
+			return err
+		} else if ok {
+			mappedUID, mappedGID = owner.uid, owner.gid
 		}
 
 		if mappedUID == -1 || mappedGID == -1 {
@@ -504,7 +450,21 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 		logSnapshotLifecycle(ctx, "create_error", logCreateSnapshotError(kind, key, parent, err))
 		return nil, err
 	}
-	mounts := o.mounts(s, info)
+	mounts, err := o.mounts(s, info)
+	if err != nil {
+		logSnapshotLifecycle(ctx, "create_error", logCreateSnapshotError(kind, key, parent, err))
+		return nil, fmt.Errorf("failed to build snapshot mounts: %w", err)
+	}
+	if kind == snapshots.KindActive {
+		mounts, err = applyRootfsHook(ctx, o.rootfsHooks, key, info.Labels, mounts)
+		if err != nil {
+			logSnapshotLifecycle(ctx, "create_error", logCreateSnapshotError(kind, key, parent, err))
+			if removeErr := o.Remove(ctx, key); removeErr != nil {
+				return nil, fmt.Errorf("failed to remove snapshot after rootfs hook error: %v: %w", removeErr, err)
+			}
+			return nil, fmt.Errorf("failed to apply rootfs hook: %w", err)
+		}
+	}
 	logSnapshotLifecycle(ctx, "create_done", logCreateSnapshotDone(kind, key, parent, s, info, path, mounts))
 	return mounts, nil
 }
@@ -526,79 +486,6 @@ func (o *snapshotter) prepareDirectory(snapshotDir string, kind snapshots.Kind) 
 	}
 
 	return td, nil
-}
-
-func (o *snapshotter) mounts(s storage.Snapshot, info snapshots.Info) []mount.Mount {
-	var options []string
-
-	if o.remapIDs {
-		if v, ok := info.Labels[snapshots.LabelSnapshotUIDMapping]; ok {
-			options = append(options, fmt.Sprintf("uidmap=%s", v))
-		}
-		if v, ok := info.Labels[snapshots.LabelSnapshotGIDMapping]; ok {
-			options = append(options, fmt.Sprintf("gidmap=%s", v))
-		}
-	}
-
-	if len(s.ParentIDs) == 0 {
-		// if we only have one layer/no parents then just return a bind mount as overlay
-		// will not work
-		roFlag := "rw"
-		if s.Kind == snapshots.KindView {
-			roFlag = "ro"
-		}
-		return []mount.Mount{
-			{
-				Source: o.upperPath(s.ID),
-				Type:   "bind",
-				Options: append(options,
-					roFlag,
-					"rbind",
-				),
-			},
-		}
-	}
-
-	if s.Kind == snapshots.KindActive {
-		options = append(options,
-			fmt.Sprintf("workdir=%s", o.workPath(s.ID)),
-			fmt.Sprintf("upperdir=%s", o.upperPath(s.ID)),
-		)
-	} else if len(s.ParentIDs) == 1 {
-		return []mount.Mount{
-			{
-				Source: o.upperPath(s.ParentIDs[0]),
-				Type:   "bind",
-				Options: append(options,
-					"ro",
-					"rbind",
-				),
-			},
-		}
-	}
-
-	parentPaths := make([]string, len(s.ParentIDs))
-	for i := range s.ParentIDs {
-		parentPaths[i] = o.upperPath(s.ParentIDs[i])
-	}
-	options = append(options, fmt.Sprintf("lowerdir=%s", strings.Join(parentPaths, ":")))
-	options = append(options, o.options...)
-
-	return []mount.Mount{
-		{
-			Type:    "overlay",
-			Source:  "overlay",
-			Options: options,
-		},
-	}
-}
-
-func (o *snapshotter) upperPath(id string) string {
-	return filepath.Join(o.root, "snapshots", id, "fs")
-}
-
-func (o *snapshotter) workPath(id string) string {
-	return filepath.Join(o.root, "snapshots", id, "work")
 }
 
 // Close closes the snapshotter
