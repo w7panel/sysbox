@@ -75,7 +75,7 @@ The current bridge stores rootfs rw-layer intent on the injected sidecar contain
 
 At runtime, `sysbox-snapshotter` uses containerd labels to find the current Pod's sidecar OCI spec. It reads `ROOTFS_RW_LAYER_SPEC` for container intent and reads the sidecar OCI mounts to resolve `volumeName` to the exact node-side PVC source path.
 
-`path` must be relative and must not contain `..`. The snapshotter never infers a host path from `volumeName` alone; it must match the corresponding sidecar mount at `/var/lib/sysbox/rootfs-rw-volume/<volumeName>`. If the sidecar spec is unavailable, malformed, or missing the requested mount, startup fails closed for that rootfs rw-layer request.
+`path` must be relative and must not contain `..`. The snapshotter never infers a host path from `volumeName` alone; it must match the corresponding sidecar mount at `/var/lib/sysbox/rootfs-rw-volume/<volumeName>`. If the sidecar spec is unavailable, the rootfs rw-layer request is treated as not configured and native overlay mounts are returned unchanged. If the sidecar spec is malformed or missing the requested mount, startup fails closed for that rootfs rw-layer request.
 
 `LocalPreparer` remains local to `sysbox-snapshotter`; this near-term bridge does not move rootfs preparation into sysbox-admission, a database, or a containerd fork.
 
