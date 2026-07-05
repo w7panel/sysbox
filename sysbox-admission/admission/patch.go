@@ -2,6 +2,7 @@ package admission
 
 import (
 	"encoding/json"
+	"reflect"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -15,10 +16,10 @@ type jsonPatch struct {
 
 func patchForPod(original *corev1.Pod, mutated *corev1.Pod) ([]byte, error) {
 	patches := []jsonPatch{}
-	if len(mutated.Spec.Containers) != 0 {
+	if !reflect.DeepEqual(original.Spec.Containers, mutated.Spec.Containers) {
 		patches = append(patches, jsonPatch{Op: "replace", Path: "/spec/containers", Value: mutated.Spec.Containers})
 	}
-	if len(mutated.Labels) == 0 {
+	if reflect.DeepEqual(original.Labels, mutated.Labels) {
 		return json.Marshal(patches)
 	}
 	path := "/metadata/labels"
@@ -32,10 +33,10 @@ func patchForPod(original *corev1.Pod, mutated *corev1.Pod) ([]byte, error) {
 
 func patchForDeployment(original *appsv1.Deployment, mutated *appsv1.Deployment) ([]byte, error) {
 	patches := []jsonPatch{}
-	if len(mutated.Spec.Template.Spec.Containers) != 0 {
+	if !reflect.DeepEqual(original.Spec.Template.Spec.Containers, mutated.Spec.Template.Spec.Containers) {
 		patches = append(patches, jsonPatch{Op: "replace", Path: "/spec/template/spec/containers", Value: mutated.Spec.Template.Spec.Containers})
 	}
-	if len(mutated.Spec.Template.Annotations) != 0 {
+	if !reflect.DeepEqual(original.Spec.Template.Annotations, mutated.Spec.Template.Annotations) {
 		path := "/spec/template/metadata/annotations"
 		op := "add"
 		if original.Spec.Template.Annotations != nil {

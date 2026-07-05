@@ -53,6 +53,7 @@ func (r *SidecarMetadataResolver) ResolveRootfsRwLayer(
 			VolumeName:   entry.VolumeName,
 			Path:         entry.Path,
 			PVCClaimName: entry.PVCClaimName,
+			sidecarSpec:  sidecarSpec,
 		}, nil
 	}
 	return RootfsRwLayerSpec{}, ErrRootfsRwLayerNotConfigured

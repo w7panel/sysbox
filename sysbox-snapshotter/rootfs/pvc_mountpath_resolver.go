@@ -36,9 +36,13 @@ func (r *PVCMountPathResolverFromSidecar) ResolvePVCMountPath(
 	if spec.VolumeName == "" {
 		return "", fmt.Errorf("volume name is required to resolve sidecar pvc mount path: %w", ErrSidecarSpecMalformed)
 	}
-	sidecarSpec, err := r.store.LoadSidecarSpec(ctx, request)
-	if err != nil {
-		return "", err
+	sidecarSpec := spec.sidecarSpec
+	if sidecarSpec == nil {
+		loaded, err := r.store.LoadSidecarSpec(ctx, request)
+		if err != nil {
+			return "", err
+		}
+		sidecarSpec = loaded
 	}
 	if sidecarSpec == nil {
 		return "", ErrSidecarSpecUnavailable

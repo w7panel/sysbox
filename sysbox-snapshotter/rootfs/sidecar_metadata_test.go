@@ -21,11 +21,9 @@ func TestSidecarMetadataResolver_returnsSpecFromSidecarEnv_whenContainerEntryExi
 
 	// Then
 	require.NoError(t, err)
-	require.Equal(t, rootfs.RootfsRwLayerSpec{
-		VolumeName:   "rootfs-b",
-		Path:         "containers/app-b",
-		PVCClaimName: "pvc-b",
-	}, spec)
+	require.Equal(t, "rootfs-b", spec.VolumeName)
+	require.Equal(t, "containers/app-b", spec.Path)
+	require.Equal(t, "pvc-b", spec.PVCClaimName)
 }
 
 func TestSidecarMetadataResolver_returnsNotConfigured_whenContainerEntryIsMissing(t *testing.T) {

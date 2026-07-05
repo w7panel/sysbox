@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 )
 
@@ -160,6 +161,9 @@ func (p *LocalPreparer) ensureManagedLayer(layerRoot string, metaPath string, re
 	if !metadata.compatibleWith(request) {
 		return ErrIncompatibleRootfsLayer
 	}
+	if metadata.mappingsMatch(request) {
+		return nil
+	}
 	if err := p.ensureContainerRootOwnership(layerRoot, request); err != nil {
 		return err
 	}
@@ -209,6 +213,10 @@ func (m layerMetadata) compatibleWith(request PrepareRootfsRequest) bool {
 		return false
 	}
 	return true
+}
+
+func (m layerMetadata) mappingsMatch(request PrepareRootfsRequest) bool {
+	return slices.Equal(m.UIDMappings, request.UIDMappings) && slices.Equal(m.GIDMappings, request.GIDMappings)
 }
 
 func rejectSymlink(path string) error {

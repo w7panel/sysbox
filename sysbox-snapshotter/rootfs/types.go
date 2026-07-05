@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 )
 
 var ErrRootfsRwLayerNotConfigured = errors.New("rootfs rw-layer not configured")
@@ -44,6 +46,7 @@ type RootfsRwLayerSpec struct {
 	ImageChainID string
 	UIDMappings  []IDMapping
 	GIDMappings  []IDMapping
+	sidecarSpec  *runtimespec.Spec
 }
 
 type PrepareRootfsRequest struct {
