@@ -15,7 +15,7 @@ rootfs 读写层持久化让用户通过 Pod annotation 为指定容器声明一
 1. 不创建、删除或管理 PVC、PV、StorageClass。
 2. 不持久化 `/proc`、`/sys`、`/dev`、tmpfs、Kubernetes volume 或 bind mount 内容。
 3. 不支持非 PVC Volume 作为 rootfs rw-layer backing store。
-4. 不实现跨镜像自动迁移旧 `upper/`。
+4. 不实现跨镜像自动迁移或转换旧 `upper/`；同一 PVC/path 的复用由用户显式选择。
 5. 不通过停止时 rsync 或打包 merged rootfs 实现持久化。
 6. 不把业务容器可见 mount 或 `sysbox-runc` remount 作为主实现路径。
 7. 不使用文件型 Pod metadata registry；rootfs intent 来自 sidecar OCI spec 中的 `ROOTFS_RW_LAYER_SPEC`。
@@ -154,7 +154,9 @@ merged   = task rootfs
 3. `upper/` 与 `work/` 必须存在或可创建，并满足 overlayfs 的基本目录要求。
 4. `meta.json` 是本地目录状态，不是 Pod 间 intent registry。
 
-当前实现保留 `imageChainID` 字段用于 metadata 记录与后续兼容性校验扩展，但 Kubernetes sidecar intent 路径不把它作为解析 PVC 或匹配业务容器的主身份。
+同一个 rootfs rw-layer 的复用身份是用户配置的 PVC-backed `volumeName + path`，不是容器镜像。Pod 使用相同 PVC/path 重建时，可以在不同镜像上复用已有 `upper/` 与 `work/`；这是当前持久化语义的一部分，用于允许用户显式保留 rootfs 写入状态。用户需要为不同生命周期或不希望共享状态的容器选择不同 `path`。
+
+当前实现保留 `imageChainID` 字段用于 metadata 记录与未来扩展，但 Kubernetes sidecar intent 路径不使用 image chain identity 拒绝跨镜像复用，也不把它作为解析 PVC 或匹配业务容器的主身份。
 
 ## Idmapped Mount 契约
 
