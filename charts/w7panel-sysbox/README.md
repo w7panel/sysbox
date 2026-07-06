@@ -1,39 +1,42 @@
 # w7panel-sysbox Helm Chart
 
-This chart installs the Sysbox Kubernetes resources. By default, the admission
-backend is disabled and the chart keeps the existing runtime installer behavior.
+This chart installs the Sysbox Kubernetes resources, including the runtime
+installer and admission backend.
 
-## Admission Image Configuration
+## Node Selector Configuration
 
-The runtime installer DaemonSet image is controlled by:
+By default, the chart does not restrict Sysbox resources to labeled nodes. To
+install Sysbox only on nodes with a specific label, set the shared node selector:
+
+```yaml
+nodeSelector:
+  sysbox-runtime: running
+```
+
+When enabled, the same label selector is applied to the installer DaemonSet, the
+admission Deployment when admission is enabled, and the RuntimeClass scheduling
+node selector. Label the target nodes before enabling this option:
+
+```bash
+kubectl label node <node-name> sysbox-runtime=running
+```
+
+To use a custom label, set `nodeSelector` to the desired key/value map.
+
+## Image Configuration
+
+The installer and admission backend use the same image configuration:
 
 | Value | Default | Description |
 | --- | --- | --- |
-| `daemonSet.image.repository` | `ghcr.io/w7panel/sysbox-deploy-k3s` | Runtime installer image repository. |
-| `daemonSet.image.tag` | chart app version with `v` prefix | Runtime installer image tag. |
-| `daemonSet.image.pullPolicy` | `Always` | Runtime installer image pull policy. |
+| `image.repository` | `ghcr.io/w7panel/sysbox-deploy-k3s` | Installer and admission image repository. |
+| `image.tag` | `latest` | Installer and admission image tag. |
 
-The admission backend can use a separate image source:
-
-| Value | Default | Description |
-| --- | --- | --- |
-| `admission.image.repository` | `ghcr.io/w7panel/sysbox-deploy-k3s` | Admission backend image repository. Defaults to the same repository as `daemonSet.image.repository`. |
-| `admission.image.tag` | chart app version with `v` prefix | Admission backend image tag. Defaults to the same tag resolution as `daemonSet.image.tag`. |
-| `admission.image.pullPolicy` | `Always` | Admission backend image pull policy. Defaults to the same pull policy as `daemonSet.image.pullPolicy`. |
-
-For domestic registry access, set the admission image repository to the CDN
-mirror without changing the runtime installer DaemonSet image:
+For domestic registry access, set the shared image repository to the CDN mirror:
 
 ```bash
 helm upgrade --install w7panel-sysbox ./charts/w7panel-sysbox \
   -n default \
-  --set admission.enabled=true \
-  --set admission.image.repository=ghcr.registry.cdn.w7.cc/w7panel/sysbox-deploy-k3s \
-  --set admission.image.tag=v0.7.0-1 \
-  --set admission.image.pullPolicy=IfNotPresent
+  --set image.repository=ghcr.registry.cdn.w7.cc/w7panel/sysbox-deploy-k3s \
+  --set image.tag=latest
 ```
-
-For admission-only testing, do not run a full chart upgrade unless you intend to
-reconcile the Sysbox runtime installer DaemonSet too. Render and apply only the
-admission Service, admission Deployment, and required RBAC templates for isolated
-admission backend tests.
