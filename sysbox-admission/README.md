@@ -33,6 +33,9 @@ Relevant chart values:
 | `admission.enabled` | `false` | Enables the backend Deployment and Service. |
 | `admission.replicas` | `1` | Backend Deployment replica count. |
 | `admission.binaryPath` | `/opt/sysbox/bin/generic/sysbox-admission` | Image-internal backend binary path. |
+| `admission.image.repository` | `ghcr.io/w7panel/sysbox-deploy-k3s` | Backend image repository; defaults to the same repository as `daemonSet.image.repository`. |
+| `admission.image.tag` | chart app version with `v` prefix | Backend image tag; defaults to the same tag resolution as `daemonSet.image.tag`. |
+| `admission.image.pullPolicy` | `Always` | Backend image pull policy; defaults to the same pull policy as `daemonSet.image.pullPolicy`. |
 | `admission.service.port` | `443` | Service port used by the webhook client config. |
 | `admission.containerPort` | `9443` | HTTPS listen port passed to `sysbox-admission -addr`. |
 | `admission.tls.caSecretName` | `sysbox-admission-webhook-ca` | Backend-owned CA Secret. |
@@ -127,7 +130,11 @@ kubectl get mutatingwebhookconfiguration sysbox-webhook-mutator
 kubectl get secret -n kube-system sysbox-admission-webhook-ca sysbox-admission-webhook-tls
 ```
 
-The admission Deployment reuses `daemonSet.image.*`; there is no separate
+The admission Deployment image values default to the same repository, tag
+resolution, and pull policy as `daemonSet.image.*`, but can be configured
+independently through `admission.image.*`. For domestic
+registry access, set `admission.image.repository` to
+`ghcr.registry.cdn.w7.cc/w7panel/sysbox-deploy-k3s`. There is no separate
 `sysbox-admission` image build requirement.
 
 If the backend pod fails to start, first confirm the deploy image contains
