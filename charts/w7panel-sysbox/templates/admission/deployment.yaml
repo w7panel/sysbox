@@ -1,4 +1,7 @@
 {{- if .Values.admission.enabled }}
+{{- $admissionImageRepository := default .Values.daemonSet.image.repository .Values.admission.image.repository }}
+{{- $admissionImageTag := default (.Values.daemonSet.image.tag | default (printf "v%s" .Chart.AppVersion)) .Values.admission.image.tag }}
+{{- $admissionImagePullPolicy := default .Values.daemonSet.image.pullPolicy .Values.admission.image.pullPolicy }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -48,8 +51,8 @@ spec:
         {{- end }}
       containers:
         - name: sysbox-admission
-          image: {{ printf "%s:%s" .Values.daemonSet.image.repository (.Values.daemonSet.image.tag | default (printf "v%s" .Chart.AppVersion)) | quote }}
-          imagePullPolicy: {{ .Values.daemonSet.image.pullPolicy }}
+          image: {{ printf "%s:%s" $admissionImageRepository $admissionImageTag | quote }}
+          imagePullPolicy: {{ $admissionImagePullPolicy }}
           command:
             - {{ .Values.admission.binaryPath | quote }}
           args:

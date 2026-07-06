@@ -38,6 +38,10 @@ admission:
   name: ""
   replicas: 1
   binaryPath: /opt/sysbox/bin/generic/sysbox-admission
+  image:
+    repository: ghcr.io/w7panel/sysbox-deploy-k3s
+    pullPolicy: Always
+    tag: ""
   service:
     name: ""
     port: 443
