@@ -50,7 +50,7 @@ func (m *LifecycleManager) ensureCertificateResources(ctx context.Context) (cert
 }
 
 func (m *LifecycleManager) readCertificateResources(ctx context.Context) (certificateResources, bool, error) {
-	secrets := m.client.CoreV1().Secrets(m.config.Namespace)
+	secrets := m.clients.Secrets
 	caSecret, err := secrets.Get(ctx, m.config.CASecretName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return certificateResources{}, false, nil
@@ -135,7 +135,7 @@ func (m *LifecycleManager) rotateLeafCertificate(ctx context.Context, caCertPEM,
 }
 
 func (m *LifecycleManager) applyCASecret(ctx context.Context, caCertPEM, caKeyPEM []byte) (*corev1.Secret, error) {
-	secrets := m.client.CoreV1().Secrets(m.config.Namespace)
+	secrets := m.clients.Secrets
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: m.config.CASecretName, Namespace: m.config.Namespace},
 		Data: map[string][]byte{
@@ -182,7 +182,7 @@ func (m *LifecycleManager) applyCASecret(ctx context.Context, caCertPEM, caKeyPE
 }
 
 func (m *LifecycleManager) applyTLSSecret(ctx context.Context, tlsCertPEM, tlsKeyPEM []byte) (*corev1.Secret, error) {
-	secrets := m.client.CoreV1().Secrets(m.config.Namespace)
+	secrets := m.clients.Secrets
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: m.config.TLSSecretName, Namespace: m.config.Namespace},
 		Type:       corev1.SecretTypeTLS,

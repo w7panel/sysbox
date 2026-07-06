@@ -22,7 +22,7 @@ func TestLifecycleManager_Ensure_rotatesCAAndTLSSecret_whenTLSMissingAndCAInside
 	webhook := mustLifecycleWebhook(t, expiringBundle.CACertPEM)
 	_, err := client.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(ctx, webhook, metav1.CreateOptions{})
 	require.NoError(t, err)
-	manager := NewLifecycleManager(client, lifecycleRotationConfig())
+	manager := newTestLifecycleManager(client, lifecycleRotationConfig())
 
 	// When: lifecycle reconciliation finds the TLS Secret missing.
 	result, err := manager.Ensure(ctx)
@@ -49,7 +49,7 @@ func TestLifecycleManager_Ensure_rotatesCAAndTLSSecret_whenTLSMissingAndCAKeyMis
 	webhook := mustLifecycleWebhook(t, bundle.CACertPEM)
 	_, err := client.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(ctx, webhook, metav1.CreateOptions{})
 	require.NoError(t, err)
-	manager := NewLifecycleManager(client, lifecycleRotationConfig())
+	manager := newTestLifecycleManager(client, lifecycleRotationConfig())
 
 	// When: lifecycle reconciliation finds the TLS Secret missing.
 	result, err := manager.Ensure(ctx)
@@ -86,7 +86,7 @@ func TestLifecycleManager_Ensure_updatesWebhookCABundle_whenCreateLosesRace(t *t
 		require.NoError(t, client.Tracker().Add(createdWebhook))
 		return true, nil, apierrors.NewAlreadyExists(action.GetResource().GroupResource(), WebhookName)
 	})
-	manager := NewLifecycleManager(client, lifecycleRotationConfig())
+	manager := newTestLifecycleManager(client, lifecycleRotationConfig())
 
 	// When: lifecycle reconciliation loses the webhook create race.
 	_, err := manager.Ensure(ctx)

@@ -8,6 +8,7 @@ import (
 
 	admissionv1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -18,8 +19,9 @@ type Server struct {
 }
 
 type appWorkload struct {
-	metadata *metav1.ObjectMeta
-	template *corev1.PodTemplateSpec
+	metadata  *metav1.ObjectMeta
+	template  *corev1.PodTemplateSpec
+	patchPath string
 }
 
 func NewServer(mutator *Mutator) *Server {
@@ -78,7 +80,7 @@ func (s *Server) patch(r *http.Request, request *admissionv1.AdmissionRequest) (
 			return nil, err
 		}
 		return patchForPod(&pod, mutated)
-	case "deployments", "statefulsets", "daemonsets":
+	case "deployments", "statefulsets", "daemonsets", "jobs", "cronjobs":
 		workload, err := appWorkloadFromRaw(request.Resource.Resource, request.Object.Raw)
 		if err != nil {
 			return nil, err
@@ -87,7 +89,7 @@ func (s *Server) patch(r *http.Request, request *admissionv1.AdmissionRequest) (
 		if err := s.mutator.mutateAppWorkload(r.Context(), workload.metadata, workload.template); err != nil {
 			return nil, err
 		}
-		return patchForAppWorkload(original, workload.template)
+		return patchForAppWorkload(original, workload.template, workload.patchPath)
 	default:
 		return nil, fmt.Errorf("unsupported resource %s", request.Resource.Resource)
 	}
@@ -100,19 +102,31 @@ func appWorkloadFromRaw(resource string, raw []byte) (appWorkload, error) {
 		if err := json.Unmarshal(raw, &deployment); err != nil {
 			return appWorkload{}, err
 		}
-		return appWorkload{metadata: &deployment.ObjectMeta, template: &deployment.Spec.Template}, nil
+		return appWorkload{metadata: &deployment.ObjectMeta, template: &deployment.Spec.Template, patchPath: "/spec/template"}, nil
 	case "statefulsets":
 		var statefulSet appsv1.StatefulSet
 		if err := json.Unmarshal(raw, &statefulSet); err != nil {
 			return appWorkload{}, err
 		}
-		return appWorkload{metadata: &statefulSet.ObjectMeta, template: &statefulSet.Spec.Template}, nil
+		return appWorkload{metadata: &statefulSet.ObjectMeta, template: &statefulSet.Spec.Template, patchPath: "/spec/template"}, nil
 	case "daemonsets":
 		var daemonSet appsv1.DaemonSet
 		if err := json.Unmarshal(raw, &daemonSet); err != nil {
 			return appWorkload{}, err
 		}
-		return appWorkload{metadata: &daemonSet.ObjectMeta, template: &daemonSet.Spec.Template}, nil
+		return appWorkload{metadata: &daemonSet.ObjectMeta, template: &daemonSet.Spec.Template, patchPath: "/spec/template"}, nil
+	case "jobs":
+		var job batchv1.Job
+		if err := json.Unmarshal(raw, &job); err != nil {
+			return appWorkload{}, err
+		}
+		return appWorkload{metadata: &job.ObjectMeta, template: &job.Spec.Template, patchPath: "/spec/template"}, nil
+	case "cronjobs":
+		var cronJob batchv1.CronJob
+		if err := json.Unmarshal(raw, &cronJob); err != nil {
+			return appWorkload{}, err
+		}
+		return appWorkload{metadata: &cronJob.ObjectMeta, template: &cronJob.Spec.JobTemplate.Spec.Template, patchPath: "/spec/jobTemplate/spec/template"}, nil
 	default:
 		return appWorkload{}, fmt.Errorf("unsupported app resource %s", resource)
 	}

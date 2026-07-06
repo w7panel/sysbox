@@ -11,7 +11,9 @@ import (
 
 	"github.com/nestybox/sysbox-admission/admission"
 	containerdUtils "github.com/nestybox/sysbox-libs/containerdUtils"
-	"k8s.io/client-go/kubernetes"
+	admissionregistrationv1client "k8s.io/client-go/kubernetes/typed/admissionregistration/v1"
+	coordinationv1client "k8s.io/client-go/kubernetes/typed/coordination/v1"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/leaderelection"
 )
@@ -21,7 +23,7 @@ const defaultCertificateRenewalWindow = 90 * 24 * time.Hour
 const defaultCertificateSecretRefreshInterval = time.Minute
 
 type bootstrapTLSRuntime struct {
-	client   kubernetes.Interface
+	clients  admission.LifecycleClients
 	manager  *admission.LifecycleManager
 	reloader *admission.CertificateReloader
 }
@@ -72,7 +74,7 @@ func main() {
 			log.Fatal(err)
 		}
 		startCertificateRotationLeaderElection(ctx, certificateRotationLeaderRuntime{
-			client:   bootstrapRuntime.client,
+			leases:   bootstrapRuntime.clients.LeaseClient,
 			config:   lifecycleConfig,
 			identity: identity,
 			interval: *rotationInterval,
@@ -80,11 +82,10 @@ func main() {
 			reloader: bootstrapRuntime.reloader,
 		})
 		refreshConfig := admission.TLSCertificateRefreshConfig{
-			Client:    bootstrapRuntime.client,
-			Namespace: lifecycleConfig.Namespace,
-			Secret:    lifecycleConfig.TLSSecretName,
-			Interval:  *secretRefreshInterval,
-			Reloader:  bootstrapRuntime.reloader,
+			Secrets:  bootstrapRuntime.clients.Secrets,
+			Secret:   lifecycleConfig.TLSSecretName,
+			Interval: *secretRefreshInterval,
+			Reloader: bootstrapRuntime.reloader,
 			ErrorHandler: func(err error) {
 				log.Printf("refresh tls certificate from secret failed: %v", err)
 			},
@@ -129,36 +130,49 @@ func dynamicTLSConfig(reloader *admission.CertificateReloader) *tls.Config {
 }
 
 func bootstrapTLS(config admission.LifecycleConfig) (bootstrapTLSRuntime, error) {
-	client, err := inClusterClient()
+	clients, err := inClusterLifecycleClients(config.Namespace)
 	if err != nil {
 		return bootstrapTLSRuntime{}, err
 	}
-	return bootstrapTLSWithClient(client, config), nil
+	return bootstrapTLSWithClients(clients, config), nil
 }
 
-func bootstrapTLSWithClient(client kubernetes.Interface, config admission.LifecycleConfig) bootstrapTLSRuntime {
-	manager := admission.NewLifecycleManager(client, config)
+func bootstrapTLSWithClients(clients admission.LifecycleClients, config admission.LifecycleConfig) bootstrapTLSRuntime {
+	manager := admission.NewLifecycleManager(clients, config)
 	return bootstrapTLSRuntime{
-		client:   client,
+		clients:  clients,
 		manager:  manager,
 		reloader: admission.NewEmptyCertificateReloader(),
 	}
 }
 
-func inClusterClient() (kubernetes.Interface, error) {
+func inClusterLifecycleClients(namespace string) (admission.LifecycleClients, error) {
 	restConfig, err := rest.InClusterConfig()
 	if err != nil {
-		return nil, err
+		return admission.LifecycleClients{}, err
 	}
-	client, err := kubernetes.NewForConfig(restConfig)
+	coreClient, err := corev1client.NewForConfig(restConfig)
 	if err != nil {
-		return nil, err
+		return admission.LifecycleClients{}, err
 	}
-	return client, nil
+	coordinationClient, err := coordinationv1client.NewForConfig(restConfig)
+	if err != nil {
+		return admission.LifecycleClients{}, err
+	}
+	admissionregistrationClient, err := admissionregistrationv1client.NewForConfig(restConfig)
+	if err != nil {
+		return admission.LifecycleClients{}, err
+	}
+	return admission.LifecycleClients{
+		Secrets:                       coreClient.Secrets(namespace),
+		Leases:                        coordinationClient.Leases(namespace),
+		LeaseClient:                   coordinationClient,
+		MutatingWebhookConfigurations: admissionregistrationClient.MutatingWebhookConfigurations(),
+	}, nil
 }
 
 type certificateRotationLeaderRuntime struct {
-	client   kubernetes.Interface
+	leases   coordinationv1client.LeasesGetter
 	config   admission.LifecycleConfig
 	identity string
 	interval time.Duration
@@ -167,7 +181,7 @@ type certificateRotationLeaderRuntime struct {
 }
 
 func startCertificateRotationLeaderElection(ctx context.Context, runtime certificateRotationLeaderRuntime) {
-	lock := admission.NewLeaseLock(runtime.client, runtime.config, runtime.identity)
+	lock := admission.NewLeaseLock(runtime.leases, runtime.config, runtime.identity)
 	go func() {
 		err := admission.RunLeaderElection(ctx, lock, admission.DefaultLeaderElectionConfig(), leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {

@@ -16,7 +16,7 @@ func TestNewLeaseLock_usesLifecycleNamespaceLeaseNameAndIdentity(t *testing.T) {
 	config := LifecycleConfig{Namespace: "sysbox-system", LeaseName: "sysbox-admission-lifecycle"}
 
 	// When: a LeaseLock is created for leader election.
-	lock := NewLeaseLock(client, config, "pod-a")
+	lock := NewLeaseLock(client.CoordinationV1(), config, "pod-a")
 
 	// Then: client-go will coordinate through that lifecycle Lease and holder identity.
 	require.Equal(t, "sysbox-system", lock.LeaseMeta.Namespace)
@@ -29,7 +29,7 @@ func TestRunLeaderElection_runsLeaderCallbackForSingleCandidateAndReturnsOnConte
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	client := fake.NewSimpleClientset()
-	lock := NewLeaseLock(client, LifecycleConfig{Namespace: "sysbox-system", LeaseName: "sysbox-admission-lifecycle"}, "pod-a")
+	lock := NewLeaseLock(client.CoordinationV1(), LifecycleConfig{Namespace: "sysbox-system", LeaseName: "sysbox-admission-lifecycle"}, "pod-a")
 	started := make(chan struct{})
 	done := make(chan error, 1)
 	leaderConfig := LeaderElectionConfig{
@@ -69,7 +69,7 @@ func TestRunLeaderElection_cancelsLeaderCallbackBeforeReturningOnContextCancel(t
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	client := fake.NewSimpleClientset()
-	lock := NewLeaseLock(client, LifecycleConfig{Namespace: "sysbox-system", LeaseName: "sysbox-admission-lifecycle"}, "pod-a")
+	lock := NewLeaseLock(client.CoordinationV1(), LifecycleConfig{Namespace: "sysbox-system", LeaseName: "sysbox-admission-lifecycle"}, "pod-a")
 	leaderConfig := LeaderElectionConfig{
 		LeaseDuration: 200 * time.Millisecond,
 		RenewDeadline: 100 * time.Millisecond,

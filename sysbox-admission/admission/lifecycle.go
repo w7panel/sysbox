@@ -9,7 +9,9 @@ import (
 	coordinationv1 "k8s.io/api/coordination/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
+	admissionregistrationv1client "k8s.io/client-go/kubernetes/typed/admissionregistration/v1"
+	coordinationv1client "k8s.io/client-go/kubernetes/typed/coordination/v1"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/util/retry"
 )
 
@@ -34,13 +36,20 @@ type LifecycleResult struct {
 	TLSCertificate tls.Certificate
 }
 
-type LifecycleManager struct {
-	client kubernetes.Interface
-	config LifecycleConfig
+type LifecycleClients struct {
+	Secrets                       corev1client.SecretInterface
+	Leases                        coordinationv1client.LeaseInterface
+	LeaseClient                   coordinationv1client.LeasesGetter
+	MutatingWebhookConfigurations admissionregistrationv1client.MutatingWebhookConfigurationInterface
 }
 
-func NewLifecycleManager(client kubernetes.Interface, config LifecycleConfig) *LifecycleManager {
-	return &LifecycleManager{client: client, config: config}
+type LifecycleManager struct {
+	clients LifecycleClients
+	config  LifecycleConfig
+}
+
+func NewLifecycleManager(clients LifecycleClients, config LifecycleConfig) *LifecycleManager {
+	return &LifecycleManager{clients: clients, config: config}
 }
 
 func (m *LifecycleManager) Ensure(ctx context.Context) (LifecycleResult, error) {
@@ -62,7 +71,7 @@ func (m *LifecycleManager) Ensure(ctx context.Context) (LifecycleResult, error) 
 }
 
 func (m *LifecycleManager) ensureLease(ctx context.Context) error {
-	leases := m.client.CoordinationV1().Leases(m.config.Namespace)
+	leases := m.clients.Leases
 	_, err := leases.Get(ctx, m.config.LeaseName, metav1.GetOptions{})
 	if err == nil {
 		return nil
@@ -90,7 +99,7 @@ func (m *LifecycleManager) ensureWebhook(ctx context.Context, caBundle []byte) e
 	if err != nil {
 		return fmt.Errorf("build mutating webhook configuration: %w", err)
 	}
-	webhooks := m.client.AdmissionregistrationV1().MutatingWebhookConfigurations()
+	webhooks := m.clients.MutatingWebhookConfigurations
 	current, err := webhooks.Get(ctx, m.config.WebhookName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		_, err = webhooks.Create(ctx, webhook, metav1.CreateOptions{})

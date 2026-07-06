@@ -6,7 +6,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
+	coordinationv1client "k8s.io/client-go/kubernetes/typed/coordination/v1"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
@@ -25,13 +25,13 @@ func DefaultLeaderElectionConfig() LeaderElectionConfig {
 	}
 }
 
-func NewLeaseLock(client kubernetes.Interface, config LifecycleConfig, identity string) *resourcelock.LeaseLock {
+func NewLeaseLock(leases coordinationv1client.LeasesGetter, config LifecycleConfig, identity string) *resourcelock.LeaseLock {
 	return &resourcelock.LeaseLock{
 		LeaseMeta: metav1.ObjectMeta{
 			Namespace: config.Namespace,
 			Name:      config.LeaseName,
 		},
-		Client: client.CoordinationV1(),
+		Client: leases,
 		LockConfig: resourcelock.ResourceLockConfig{
 			Identity: identity,
 		},

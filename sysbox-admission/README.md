@@ -63,6 +63,10 @@ It targets:
   resources: ["deployments", "statefulsets", "daemonsets"]
 - operations: ["CREATE", "UPDATE"]
   apiVersions: ["v1"]
+  apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+- operations: ["CREATE", "UPDATE"]
+  apiVersions: ["v1"]
   apiGroups: [""]
   resources: ["pods"]
 ```
@@ -97,10 +101,11 @@ spec:
   runtimeClassName: sysbox-runc
 ```
 
-For Deployments, StatefulSets, and DaemonSets, set `sysbox/rootfs-rw-layer` on
-the workload top-level metadata. The webhook selects the admitted object by its
-own top-level metadata annotations, so `spec.template.metadata.annotations` does
-not trigger workload admission by itself.
+For Deployments, StatefulSets, DaemonSets, Jobs, and CronJobs, set
+`sysbox/rootfs-rw-layer` on the workload top-level metadata. The webhook selects
+the admitted object by its own top-level metadata annotations, so
+`spec.template.metadata.annotations` does not trigger workload admission by
+itself.
 
 ```yaml
 apiVersion: apps/v1
@@ -114,10 +119,11 @@ spec:
       runtimeClassName: sysbox-runc
 ```
 
-The backend treats Pods and app workloads separately: Pods are patched at
-`/metadata` and `/spec`, while app workloads are patched at `/spec/template`.
-The backend does not copy workload annotations into
-`spec.template.metadata.annotations`.
+The backend treats Pods and workload templates separately: Pods are patched at
+`/metadata` and `/spec`; Deployments, StatefulSets, DaemonSets, and Jobs are
+patched at `/spec/template`; CronJobs are patched at
+`/spec/jobTemplate/spec/template`. The backend does not copy workload
+annotations into `spec.template.metadata.annotations`.
 
 ## Verification
 

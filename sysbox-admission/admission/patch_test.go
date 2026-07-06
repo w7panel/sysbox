@@ -29,7 +29,7 @@ func TestPatchForDeployment_returnsEmptyPatch_whenDeploymentUnchanged(t *testing
 	mutated := original.DeepCopy()
 
 	// When
-	patch, err := patchForAppWorkload(&original, mutated)
+	patch, err := patchForAppWorkload(&original, mutated, "/spec/template")
 
 	// Then
 	require.NoError(t, err)
@@ -82,7 +82,7 @@ func TestPatchForDeployment_patchesChangedContainersAndAnnotations(t *testing.T)
 	mutated.Annotations["sysbox.example/injected"] = "true"
 
 	// When
-	patch, err := patchForAppWorkload(&original, mutated)
+	patch, err := patchForAppWorkload(&original, mutated, "/spec/template")
 
 	// Then
 	require.NoError(t, err)
@@ -103,7 +103,7 @@ func TestPatchForDeployment_addsAnnotations_whenOriginalAnnotationsNil(t *testin
 	mutated.Annotations = map[string]string{"sysbox.example/injected": "true"}
 
 	// When
-	patch, err := patchForAppWorkload(&original, mutated)
+	patch, err := patchForAppWorkload(&original, mutated, "/spec/template")
 
 	// Then
 	require.NoError(t, err)
@@ -120,7 +120,7 @@ func TestPatchForAppWorkload_patchesChangedTemplate(t *testing.T) {
 	mutated.Annotations["sysbox.example/injected"] = "true"
 
 	// When
-	patch, err := patchForAppWorkload(&original, mutated)
+	patch, err := patchForAppWorkload(&original, mutated, "/spec/template")
 
 	// Then
 	require.NoError(t, err)

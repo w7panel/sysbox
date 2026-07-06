@@ -62,6 +62,14 @@ func BuildMutatingWebhookConfiguration(config WebhookConfig) (*admissionregistra
 					{
 						Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Create, admissionregistrationv1.Update},
 						Rule: admissionregistrationv1.Rule{
+							APIGroups:   []string{"batch"},
+							APIVersions: []string{"v1"},
+							Resources:   []string{"jobs", "cronjobs"},
+						},
+					},
+					{
+						Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Create, admissionregistrationv1.Update},
+						Rule: admissionregistrationv1.Rule{
 							APIGroups:   []string{""},
 							APIVersions: []string{"v1"},
 							Resources:   []string{"pods"},

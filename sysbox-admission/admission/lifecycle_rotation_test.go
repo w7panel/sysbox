@@ -24,7 +24,7 @@ func TestLifecycleManager_Ensure_keepsCertificateResources_whenExistingBundleHea
 	webhook := mustLifecycleWebhook(t, bundle.CACertPEM)
 	_, err := client.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(ctx, webhook, metav1.CreateOptions{})
 	require.NoError(t, err)
-	manager := NewLifecycleManager(client, lifecycleRotationConfig())
+	manager := newTestLifecycleManager(client, lifecycleRotationConfig())
 
 	// When: lifecycle reconciliation runs outside the renewal window.
 	result, err := manager.Ensure(ctx)
@@ -52,7 +52,7 @@ func TestLifecycleManager_Ensure_rotatesOnlyTLSSecret_whenLeafInsideRenewalWindo
 	webhook := mustLifecycleWebhook(t, bundle.CACertPEM)
 	_, err := client.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(ctx, webhook, metav1.CreateOptions{})
 	require.NoError(t, err)
-	manager := NewLifecycleManager(client, lifecycleRotationConfig())
+	manager := newTestLifecycleManager(client, lifecycleRotationConfig())
 
 	// When: lifecycle reconciliation evaluates the persisted certificate health.
 	result, err := manager.Ensure(ctx)
@@ -82,7 +82,7 @@ func TestLifecycleManager_Ensure_rotatesCAAndTLSSecret_whenCAInsideRenewalWindow
 	webhook := mustLifecycleWebhook(t, expiringBundle.CACertPEM)
 	_, err := client.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(ctx, webhook, metav1.CreateOptions{})
 	require.NoError(t, err)
-	manager := NewLifecycleManager(client, lifecycleRotationConfig())
+	manager := newTestLifecycleManager(client, lifecycleRotationConfig())
 
 	// When: lifecycle reconciliation evaluates the persisted certificate health.
 	result, err := manager.Ensure(ctx)
@@ -115,7 +115,7 @@ func TestLifecycleManager_Ensure_rotatesCAAndTLSSecret_whenCAKeyMismatchesCACert
 	webhook := mustLifecycleWebhook(t, bundle.CACertPEM)
 	_, err := client.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(ctx, webhook, metav1.CreateOptions{})
 	require.NoError(t, err)
-	manager := NewLifecycleManager(client, lifecycleRotationConfig())
+	manager := newTestLifecycleManager(client, lifecycleRotationConfig())
 
 	// When: lifecycle reconciliation evaluates the persisted certificate health.
 	result, err := manager.Ensure(ctx)

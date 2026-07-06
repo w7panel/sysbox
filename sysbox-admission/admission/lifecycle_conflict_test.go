@@ -38,7 +38,7 @@ func TestLifecycleManager_Ensure_retriesCASecretUpdateConflict_whenFullBundleRot
 		}
 		return false, nil, nil
 	})
-	manager := NewLifecycleManager(client, lifecycleRotationConfig())
+	manager := newTestLifecycleManager(client, lifecycleRotationConfig())
 
 	// When: lifecycle reconciliation rotates the full certificate bundle.
 	result, err := manager.Ensure(ctx)
@@ -79,7 +79,7 @@ func TestLifecycleManager_Ensure_retriesTLSSecretUpdateConflict_whenLeafRotates(
 		}
 		return false, nil, nil
 	})
-	manager := NewLifecycleManager(client, lifecycleRotationConfig())
+	manager := newTestLifecycleManager(client, lifecycleRotationConfig())
 
 	// When: lifecycle reconciliation rotates only the leaf certificate.
 	result, err := manager.Ensure(ctx)
@@ -118,7 +118,7 @@ func TestLifecycleManager_Ensure_retriesTLSSecretUpdateConflict_whenFullBundleRo
 		}
 		return false, nil, nil
 	})
-	manager := NewLifecycleManager(client, lifecycleRotationConfig())
+	manager := newTestLifecycleManager(client, lifecycleRotationConfig())
 
 	// When: lifecycle reconciliation rotates the full certificate bundle.
 	result, err := manager.Ensure(ctx)
@@ -152,7 +152,7 @@ func TestLifecycleManager_Ensure_retriesWebhookUpdateConflict_whenCABundleChange
 		}
 		return false, nil, nil
 	})
-	manager := NewLifecycleManager(client, lifecycleRotationConfig())
+	manager := newTestLifecycleManager(client, lifecycleRotationConfig())
 
 	// When: lifecycle reconciliation updates the webhook trust bundle.
 	_, err = manager.Ensure(ctx)
@@ -188,7 +188,7 @@ func TestLifecycleManager_Ensure_appliesIntendedCASecret_whenCreateReturnsAlread
 		require.NoError(t, client.Tracker().Add(lifecycleCASecret(staleRacedBundle)))
 		return true, nil, apierrors.NewAlreadyExists(corev1.Resource("secrets"), "sysbox-admission-ca")
 	})
-	manager := NewLifecycleManager(client, lifecycleRotationConfig())
+	manager := newTestLifecycleManager(client, lifecycleRotationConfig())
 
 	// When: lifecycle reconciliation rotates the full bundle and loses the CA Secret create race.
 	result, err := manager.Ensure(ctx)
@@ -227,7 +227,7 @@ func TestLifecycleManager_Ensure_appliesIntendedTLSSecret_whenCreateReturnsAlrea
 		require.NoError(t, client.Tracker().Add(lifecycleTLSSecret(staleTLSCertPEM, staleTLSKeyPEM)))
 		return true, nil, apierrors.NewAlreadyExists(corev1.Resource("secrets"), "sysbox-admission-tls")
 	})
-	manager := NewLifecycleManager(client, lifecycleRotationConfig())
+	manager := newTestLifecycleManager(client, lifecycleRotationConfig())
 
 	// When: lifecycle reconciliation loses the TLS Secret create race.
 	result, err := manager.Ensure(ctx)
@@ -263,7 +263,7 @@ func TestLifecycleManager_Ensure_retriesWebhookUpdateConflict_whenCreateReturnsA
 		}
 		return false, nil, nil
 	})
-	manager := NewLifecycleManager(client, lifecycleRotationConfig())
+	manager := newTestLifecycleManager(client, lifecycleRotationConfig())
 
 	// When: lifecycle reconciliation repairs the raced webhook after create AlreadyExists.
 	_, err := manager.Ensure(ctx)

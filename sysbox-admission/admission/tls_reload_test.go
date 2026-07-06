@@ -61,7 +61,9 @@ func TestLoadTLSCertificateFromSecret_loadsCertificateUsingOnlyGet(t *testing.T)
 	client := fake.NewSimpleClientset(lifecycleTLSSecret(bundle.TLSCertPEM, bundle.TLSKeyPEM))
 
 	// When
-	certificate, err := LoadTLSCertificateFromSecret(ctx, client, "sysbox-system", "sysbox-admission-tls")
+	secrets := client.CoreV1().Secrets("sysbox-system")
+
+	certificate, err := LoadTLSCertificateFromSecret(ctx, secrets, "sysbox-admission-tls")
 
 	// Then
 	require.NoError(t, err)
@@ -77,7 +79,9 @@ func TestLoadTLSCertificateFromSecret_returnsNotFound_whenSecretMissing(t *testi
 	client := fake.NewSimpleClientset()
 
 	// When
-	_, err := LoadTLSCertificateFromSecret(ctx, client, "sysbox-system", "sysbox-admission-tls")
+	secrets := client.CoreV1().Secrets("sysbox-system")
+
+	_, err := LoadTLSCertificateFromSecret(ctx, secrets, "sysbox-admission-tls")
 
 	// Then
 	require.True(t, apierrors.IsNotFound(err))
@@ -94,11 +98,10 @@ func TestRefreshTLSCertificateFromSecret_updatesReloaderUsingOnlyGet(t *testing.
 
 	// When
 	config := TLSCertificateRefreshConfig{
-		Client:    client,
-		Namespace: "sysbox-system",
-		Secret:    "sysbox-admission-tls",
-		Interval:  time.Minute,
-		Reloader:  reloader,
+		Secrets:  client.CoreV1().Secrets("sysbox-system"),
+		Secret:   "sysbox-admission-tls",
+		Interval: time.Minute,
+		Reloader: reloader,
 	}
 	err := RefreshTLSCertificateFromSecret(ctx, config)
 	require.NoError(t, err)
@@ -130,11 +133,10 @@ func TestWaitForTLSCertificateFromSecret_reportsLoadError_whenSecretMissing(t *t
 
 	// When
 	config := TLSCertificateRefreshConfig{
-		Client:    client,
-		Namespace: "sysbox-system",
-		Secret:    "sysbox-admission-tls",
-		Interval:  time.Millisecond,
-		Reloader:  NewEmptyCertificateReloader(),
+		Secrets:  client.CoreV1().Secrets("sysbox-system"),
+		Secret:   "sysbox-admission-tls",
+		Interval: time.Millisecond,
+		Reloader: NewEmptyCertificateReloader(),
 		ErrorHandler: func(err error) {
 			select {
 			case reportedErrors <- err:
@@ -164,11 +166,10 @@ func TestRunTLSCertificateRefreshLoop_reportsLoadErrorAndKeepsRunning_whenSecret
 
 	// When
 	config := TLSCertificateRefreshConfig{
-		Client:    client,
-		Namespace: "sysbox-system",
-		Secret:    "sysbox-admission-tls",
-		Interval:  time.Millisecond,
-		Reloader:  NewEmptyCertificateReloader(),
+		Secrets:  client.CoreV1().Secrets("sysbox-system"),
+		Secret:   "sysbox-admission-tls",
+		Interval: time.Millisecond,
+		Reloader: NewEmptyCertificateReloader(),
 		ErrorHandler: func(err error) {
 			select {
 			case reportedErrors <- err:

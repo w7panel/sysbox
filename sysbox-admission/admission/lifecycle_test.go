@@ -21,7 +21,7 @@ func TestLifecycleManager_Ensure_createsLeaseAndSecretsAndWebhook_whenMissing(t 
 	// Given: an empty cluster API and lifecycle config for the release namespace.
 	ctx := context.Background()
 	client := fake.NewSimpleClientset()
-	manager := NewLifecycleManager(client, LifecycleConfig{
+	manager := newTestLifecycleManager(client, LifecycleConfig{
 		Namespace:     "sysbox-system",
 		ServiceName:   "sysbox-admission",
 		ServicePort:   443,
@@ -77,7 +77,7 @@ func TestLifecycleManager_Ensure_reusesExistingCASecretAndUpdatesWebhookCABundle
 	require.NoError(t, err)
 	_, err = client.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(ctx, staleWebhook, metav1.CreateOptions{})
 	require.NoError(t, err)
-	manager := NewLifecycleManager(client, LifecycleConfig{
+	manager := newTestLifecycleManager(client, LifecycleConfig{
 		Namespace:     "sysbox-system",
 		ServiceName:   "sysbox-admission",
 		ServicePort:   443,
@@ -120,7 +120,7 @@ func TestLifecycleManager_Ensure_appliesIntendedCASecret_whenCreateReturnsAlread
 		require.NoError(t, client.Tracker().Add(persistedSecret))
 		return true, nil, apierrors.NewAlreadyExists(corev1.Resource("secrets"), "sysbox-admission-ca")
 	})
-	manager := NewLifecycleManager(client, LifecycleConfig{
+	manager := newTestLifecycleManager(client, LifecycleConfig{
 		Namespace:     "sysbox-system",
 		ServiceName:   "sysbox-admission",
 		ServicePort:   443,
@@ -154,7 +154,7 @@ func TestLifecycleManager_Ensure_signsTLSCertificateWithExistingCASecret(t *test
 		},
 	}, metav1.CreateOptions{})
 	require.NoError(t, err)
-	manager := NewLifecycleManager(client, LifecycleConfig{
+	manager := newTestLifecycleManager(client, LifecycleConfig{
 		Namespace:     "sysbox-system",
 		ServiceName:   "sysbox-admission",
 		ServicePort:   443,
@@ -189,7 +189,7 @@ func TestLifecycleManager_Ensure_returnsTLSCertificateFromSecret(t *testing.T) {
 	// Given: an empty fake cluster.
 	ctx := context.Background()
 	client := fake.NewSimpleClientset()
-	manager := NewLifecycleManager(client, LifecycleConfig{
+	manager := newTestLifecycleManager(client, LifecycleConfig{
 		Namespace:     "sysbox-system",
 		ServiceName:   "sysbox-admission",
 		ServicePort:   443,
@@ -250,7 +250,7 @@ func TestLifecycleManager_Ensure_returnsIntendedTLSCertificate_whenCreateReturns
 		require.NoError(t, client.Tracker().Add(persistedSecret))
 		return true, nil, apierrors.NewAlreadyExists(corev1.Resource("secrets"), "sysbox-admission-tls")
 	})
-	manager := NewLifecycleManager(client, LifecycleConfig{
+	manager := newTestLifecycleManager(client, LifecycleConfig{
 		Namespace:     "sysbox-system",
 		ServiceName:   "sysbox-admission",
 		ServicePort:   443,
@@ -271,3 +271,16 @@ func TestLifecycleManager_Ensure_returnsIntendedTLSCertificate_whenCreateReturns
 }
 
 var _ *admissionv1.MutatingWebhookConfiguration
+
+func newTestLifecycleManager(client *fake.Clientset, config LifecycleConfig) *LifecycleManager {
+	return NewLifecycleManager(testLifecycleClients(client, config.Namespace), config)
+}
+
+func testLifecycleClients(client *fake.Clientset, namespace string) LifecycleClients {
+	return LifecycleClients{
+		Secrets:                       client.CoreV1().Secrets(namespace),
+		Leases:                        client.CoordinationV1().Leases(namespace),
+		LeaseClient:                   client.CoordinationV1(),
+		MutatingWebhookConfigurations: client.AdmissionregistrationV1().MutatingWebhookConfigurations(),
+	}
+}

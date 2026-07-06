@@ -11,14 +11,13 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 )
 
 var ErrTLSCertificateNotLoaded = errors.New("tls certificate not loaded")
 
 type TLSCertificateRefreshConfig struct {
-	Client       kubernetes.Interface
-	Namespace    string
+	Secrets      corev1client.SecretInterface
 	Secret       string
 	Interval     time.Duration
 	Reloader     *CertificateReloader
@@ -53,8 +52,8 @@ func (r *CertificateReloader) GetCertificate(_ *tls.ClientHelloInfo) (*tls.Certi
 	return &certificate, nil
 }
 
-func LoadTLSCertificateFromSecret(ctx context.Context, client kubernetes.Interface, namespace, secretName string) (tls.Certificate, error) {
-	secret, err := client.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+func LoadTLSCertificateFromSecret(ctx context.Context, secrets corev1client.SecretInterface, secretName string) (tls.Certificate, error) {
+	secret, err := secrets.Get(ctx, secretName, metav1.GetOptions{})
 	if err != nil {
 		return tls.Certificate{}, fmt.Errorf("get tls secret: %w", err)
 	}
@@ -66,7 +65,7 @@ func LoadTLSCertificateFromSecret(ctx context.Context, client kubernetes.Interfa
 }
 
 func RefreshTLSCertificateFromSecret(ctx context.Context, config TLSCertificateRefreshConfig) error {
-	certificate, err := LoadTLSCertificateFromSecret(ctx, config.Client, config.Namespace, config.Secret)
+	certificate, err := LoadTLSCertificateFromSecret(ctx, config.Secrets, config.Secret)
 	if err != nil {
 		return err
 	}

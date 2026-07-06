@@ -68,10 +68,18 @@ func TestBootstrapTLSWithClient_doesNotEnsureLifecycleBeforeLeaderPath(t *testin
 	}
 
 	// When
-	runtime := bootstrapTLSWithClient(client, config)
+	runtime := bootstrapTLSWithClients(admission.LifecycleClients{
+		Secrets:                       client.CoreV1().Secrets(config.Namespace),
+		Leases:                        client.CoordinationV1().Leases(config.Namespace),
+		LeaseClient:                   client.CoordinationV1(),
+		MutatingWebhookConfigurations: client.AdmissionregistrationV1().MutatingWebhookConfigurations(),
+	}, config)
 
 	// Then
-	require.Same(t, client, runtime.client)
+	require.NotNil(t, runtime.clients.Secrets)
+	require.NotNil(t, runtime.clients.Leases)
+	require.NotNil(t, runtime.clients.LeaseClient)
+	require.NotNil(t, runtime.clients.MutatingWebhookConfigurations)
 	require.NotNil(t, runtime.manager)
 	require.NotNil(t, runtime.reloader)
 	require.Empty(t, client.Actions())
