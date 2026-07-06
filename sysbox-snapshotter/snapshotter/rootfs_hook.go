@@ -29,7 +29,10 @@ func applyRootfsHook(ctx context.Context, hooks RootfsHooks, snapshotKey string,
 	}
 	request, err := hooks.IdentityResolver.ResolveIdentity(ctx, snapshotKey)
 	if err != nil {
-		return mounts, nil
+		if errors.Is(err, rootfs.ErrContainerIdentityUnavailable) {
+			return mounts, nil
+		}
+		return nil, err
 	}
 	request = withSnapshotMappings(request, snapshotLabels)
 	spec, err := hooks.MetadataResolver.ResolveRootfsRwLayer(ctx, request)
@@ -57,7 +60,6 @@ func applyRootfsHook(ctx context.Context, hooks RootfsHooks, snapshotKey string,
 		Path:          spec.Path,
 		PVCClaimName:  spec.PVCClaimName,
 		PVCMountPath:  pvcMountPath,
-		ImageChainID:  spec.ImageChainID,
 		UIDMappings:   request.UIDMappings,
 		GIDMappings:   request.GIDMappings,
 	})

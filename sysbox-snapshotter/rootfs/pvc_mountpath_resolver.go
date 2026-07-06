@@ -12,6 +12,7 @@ import (
 
 var (
 	ErrSidecarSpecUnavailable = errors.New("sysbox sidecar oci spec unavailable")
+	ErrSidecarSpecAmbiguous   = errors.New("sysbox sidecar oci spec ambiguous")
 	ErrSidecarSpecMalformed   = errors.New("sysbox sidecar oci spec malformed")
 	ErrPVCMountNotFound       = errors.New("sysbox sidecar pvc mount not found")
 )

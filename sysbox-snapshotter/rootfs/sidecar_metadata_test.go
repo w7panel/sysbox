@@ -52,6 +52,21 @@ func TestSidecarMetadataResolver_returnsNotConfigured_whenSidecarSpecIsUnavailab
 	require.ErrorIs(t, err, rootfs.ErrRootfsRwLayerNotConfigured)
 }
 
+func TestSidecarMetadataResolver_returnsIdentityIncomplete_whenContainerNameIsEmpty(t *testing.T) {
+	// Given
+	store := fakeSidecarSpecStore{spec: &runtimespec.Spec{Process: &runtimespec.Process{Env: []string{
+		`ROOTFS_RW_LAYER_SPEC={"version":1,"entries":[{"containerName":"app","volumeName":"rootfs","path":"containers/app","pvcClaimName":"pvc"}]}`,
+	}}}}
+	resolver := rootfs.NewSidecarMetadataResolver(store)
+
+	// When
+	_, err := resolver.ResolveRootfsRwLayer(context.Background(), rootfs.RootfsRwLayerRequest{})
+
+	// Then
+	require.ErrorIs(t, err, rootfs.ErrContainerIdentityIncomplete)
+	require.NotErrorIs(t, err, rootfs.ErrRootfsRwLayerNotConfigured)
+}
+
 func TestSidecarMetadataResolver_rejectsPathTraversal_whenSidecarIntentEscapesVolume(t *testing.T) {
 	// Given
 	store := fakeSidecarSpecStore{spec: &runtimespec.Spec{Process: &runtimespec.Process{Env: []string{

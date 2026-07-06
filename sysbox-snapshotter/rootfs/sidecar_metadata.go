@@ -23,7 +23,7 @@ func (r *SidecarMetadataResolver) ResolveRootfsRwLayer(
 	request RootfsRwLayerRequest,
 ) (RootfsRwLayerSpec, error) {
 	if request.ContainerName == "" {
-		return RootfsRwLayerSpec{}, ErrRootfsRwLayerNotConfigured
+		return RootfsRwLayerSpec{}, fmt.Errorf("missing container name in rootfs rw-layer request: %w", ErrContainerIdentityIncomplete)
 	}
 	sidecarSpec, err := r.store.LoadSidecarSpec(ctx, request)
 	if err != nil {

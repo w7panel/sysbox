@@ -18,7 +18,7 @@ func NewContainerdSidecarSpecStore(socketPath string) *ContainerdSidecarSpecStor
 }
 
 func (s *ContainerdSidecarSpecStore) LoadSidecarSpec(ctx context.Context, request RootfsRwLayerRequest) (*runtimespec.Spec, error) {
-	if request.PodName == "" || request.Namespace == "" {
+	if request.PodUID == "" {
 		return nil, ErrSidecarSpecUnavailable
 	}
 	client, err := containerdclient.New(s.socketPath)
@@ -27,18 +27,17 @@ func (s *ContainerdSidecarSpecStore) LoadSidecarSpec(ctx context.Context, reques
 	}
 	defer client.Close()
 	ctx = namespaces.WithNamespace(ctx, "k8s.io")
-	containers, err := client.Containers(ctx)
+	containers, err := client.Containers(ctx, sidecarContainerFilters(request)...)
 	if err != nil {
 		return nil, fmt.Errorf("list containerd containers for sidecar spec lookup: %w", err)
 	}
+	specs := make([]*runtimespec.Spec, 0, len(containers))
 	for _, container := range containers {
 		labels, err := container.Labels(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("read container labels for sidecar spec lookup: %w", err)
 		}
-		if labels["io.kubernetes.pod.namespace"] != request.Namespace ||
-			labels["io.kubernetes.pod.name"] != request.PodName ||
-			labels["io.kubernetes.container.name"] != SidecarContainerName {
+		if !sidecarMatchesRequest(labels, request) {
 			continue
 		}
 		spec, err := container.Spec(ctx)
@@ -48,7 +47,46 @@ func (s *ContainerdSidecarSpecStore) LoadSidecarSpec(ctx context.Context, reques
 		if spec == nil {
 			return nil, ErrSidecarSpecMalformed
 		}
-		return spec, nil
+		specs = append(specs, spec)
 	}
-	return nil, ErrSidecarSpecUnavailable
+	return uniqueSidecarSpec(specs)
+}
+
+func uniqueSidecarSpec(specs []*runtimespec.Spec) (*runtimespec.Spec, error) {
+	switch len(specs) {
+	case 0:
+		return nil, ErrSidecarSpecUnavailable
+	case 1:
+		return specs[0], nil
+	default:
+		return nil, ErrSidecarSpecAmbiguous
+	}
+}
+
+func sidecarContainerFilters(request RootfsRwLayerRequest) []string {
+	if request.PodUID == "" {
+		return nil
+	}
+	podUIDFilter := containerLabelFilter("io.kubernetes.pod.uid", request.PodUID)
+	sidecarNameFilter := containerLabelFilter("io.kubernetes.container.name", SidecarContainerName)
+	return []string{
+		fmt.Sprintf("%s,%s", podUIDFilter, sidecarNameFilter),
+	}
+}
+
+func containerLabelFilter(key string, value string) string {
+	return fmt.Sprintf(`labels."%s"==%s`, key, value)
+}
+
+func sidecarMatchesRequest(labels map[string]string, request RootfsRwLayerRequest) bool {
+	if request.PodUID == "" {
+		return false
+	}
+	if labels["io.kubernetes.pod.uid"] != request.PodUID {
+		return false
+	}
+	if labels["io.kubernetes.container.name"] != SidecarContainerName {
+		return false
+	}
+	return true
 }
