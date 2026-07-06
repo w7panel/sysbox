@@ -16,7 +16,6 @@ type RootfsRwLayerRequest struct {
 	PodName       string
 	PodUID        string
 	ContainerName string
-	ImageChainID  string
 	UIDMappings   []IDMapping
 	GIDMappings   []IDMapping
 }
@@ -43,7 +42,6 @@ type RootfsRwLayerSpec struct {
 	VolumeName   string
 	Path         string
 	PVCClaimName string
-	ImageChainID string
 	UIDMappings  []IDMapping
 	GIDMappings  []IDMapping
 	sidecarSpec  *runtimespec.Spec
@@ -59,7 +57,6 @@ type PrepareRootfsRequest struct {
 	Path          string
 	PVCClaimName  string
 	PVCMountPath  string
-	ImageChainID  string
 	UIDMappings   []IDMapping
 	GIDMappings   []IDMapping
 }

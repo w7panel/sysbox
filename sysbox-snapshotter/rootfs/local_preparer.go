@@ -22,7 +22,6 @@ type layerMetadata struct {
 	VolumeName     string      `json:"volumeName"`
 	Path           string      `json:"path"`
 	PVCClaimName   string      `json:"pvcClaimName"`
-	ImageChainID   string      `json:"imageChainID"`
 	UIDMappings    []IDMapping `json:"uidMappings"`
 	GIDMappings    []IDMapping `json:"gidMappings"`
 	CreatedAt      time.Time   `json:"createdAt"`
@@ -99,7 +98,6 @@ func (p *LocalPreparer) initializeLayer(layerRoot string, metaPath string, reque
 		VolumeName:    request.VolumeName,
 		Path:          request.Path,
 		PVCClaimName:  request.PVCClaimName,
-		ImageChainID:  request.ImageChainID,
 		UIDMappings:   request.UIDMappings,
 		GIDMappings:   request.GIDMappings,
 		CreatedAt:     time.Now().UTC(),
@@ -158,7 +156,7 @@ func (p *LocalPreparer) ensureManagedLayer(layerRoot string, metaPath string, re
 	if err := json.Unmarshal(data, &metadata); err != nil {
 		return fmt.Errorf("decode rootfs rw-layer metadata: %w", err)
 	}
-	if !metadata.compatibleWith(request) {
+	if !metadata.compatible() {
 		return ErrIncompatibleRootfsLayer
 	}
 	if metadata.mappingsMatch(request) {
@@ -202,14 +200,11 @@ func (p *LocalPreparer) ensureContainerRootOwnership(layerRoot string, request P
 	return nil
 }
 
-func (m layerMetadata) compatibleWith(request PrepareRootfsRequest) bool {
+func (m layerMetadata) compatible() bool {
 	if m.Version != 1 {
 		return false
 	}
 	if m.State != "available" && m.State != "attached" {
-		return false
-	}
-	if m.ImageChainID != "" && request.ImageChainID != "" && m.ImageChainID != request.ImageChainID {
 		return false
 	}
 	return true

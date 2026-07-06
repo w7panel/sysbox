@@ -40,11 +40,10 @@ func TestLocalPreparer_reusesExistingManagedLayer_whenMetaExists(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(layerRoot, "upper"), 0o755))
 	require.NoError(t, os.MkdirAll(filepath.Join(layerRoot, "work"), 0o711))
 	writeLayerMeta(t, filepath.Join(layerRoot, "meta.json"), layerMetaFixture{
-		Version:      1,
-		State:        "available",
-		ImageChainID: "sha256:chain-a",
-		UIDMappings:  []rootfs.IDMapping{{ContainerID: 0, HostID: 100000, Size: 65536}},
-		GIDMappings:  []rootfs.IDMapping{{ContainerID: 0, HostID: 100000, Size: 65536}},
+		Version:     1,
+		State:       "available",
+		UIDMappings: []rootfs.IDMapping{{ContainerID: 0, HostID: 100000, Size: 65536}},
+		GIDMappings: []rootfs.IDMapping{{ContainerID: 0, HostID: 100000, Size: 65536}},
 	})
 	preparer := rootfs.NewLocalPreparer()
 
@@ -56,7 +55,6 @@ func TestLocalPreparer_reusesExistingManagedLayer_whenMetaExists(t *testing.T) {
 		Path:          "containers/app",
 		PVCClaimName:  "rootfs-rw-pvc",
 		PVCMountPath:  volumeRoot,
-		ImageChainID:  "sha256:chain-a",
 		UIDMappings:   []rootfs.IDMapping{{ContainerID: 0, HostID: 100000, Size: 65536}},
 		GIDMappings:   []rootfs.IDMapping{{ContainerID: 0, HostID: 100000, Size: 65536}},
 	})
@@ -68,28 +66,30 @@ func TestLocalPreparer_reusesExistingManagedLayer_whenMetaExists(t *testing.T) {
 	require.Equal(t, "attached", meta.State)
 }
 
-func TestLocalPreparer_rejectsExistingLayer_whenImageChainDiffers(t *testing.T) {
+func TestLocalPreparer_reusesExistingLayer_whenImageChainDiffers(t *testing.T) {
 	volumeRoot := t.TempDir()
 	layerRoot := filepath.Join(volumeRoot, "containers/app")
 	require.NoError(t, os.MkdirAll(filepath.Join(layerRoot, "upper"), 0o755))
 	require.NoError(t, os.MkdirAll(filepath.Join(layerRoot, "work"), 0o711))
 	writeLayerMeta(t, filepath.Join(layerRoot, "meta.json"), layerMetaFixture{
-		Version:      1,
-		State:        "available",
-		ImageChainID: "sha256:chain-a",
+		Version: 1,
+		State:   "available",
 	})
 	preparer := rootfs.NewLocalPreparer()
 
-	_, err := preparer.PrepareRootfsRwLayer(context.Background(), rootfs.PrepareRootfsRequest{
-		SnapshotKey:  "snapshot-key",
-		VolumeName:   "rootfs",
-		Path:         "containers/app",
-		PVCClaimName: "rootfs-rw-pvc",
-		PVCMountPath: volumeRoot,
-		ImageChainID: "sha256:chain-b",
+	prepared, err := preparer.PrepareRootfsRwLayer(context.Background(), rootfs.PrepareRootfsRequest{
+		SnapshotKey:   "snapshot-key",
+		PodUID:        "pod-123",
+		ContainerName: "app",
+		VolumeName:    "rootfs",
+		Path:          "containers/app",
+		PVCClaimName:  "rootfs-rw-pvc",
+		PVCMountPath:  volumeRoot,
 	})
 
-	require.ErrorIs(t, err, rootfs.ErrIncompatibleRootfsLayer)
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(layerRoot, "upper"), prepared.UpperDir)
+	require.Equal(t, filepath.Join(layerRoot, "work"), prepared.WorkDir)
 }
 
 func TestLocalPreparer_rejectsNonEmptyUnmanagedLayer(t *testing.T) {
@@ -148,11 +148,10 @@ func TestLocalPreparer_rejectsSymlinkLayerPath(t *testing.T) {
 }
 
 type layerMetaFixture struct {
-	Version      int                `json:"version"`
-	State        string             `json:"state"`
-	ImageChainID string             `json:"imageChainID"`
-	UIDMappings  []rootfs.IDMapping `json:"uidMappings"`
-	GIDMappings  []rootfs.IDMapping `json:"gidMappings"`
+	Version     int                `json:"version"`
+	State       string             `json:"state"`
+	UIDMappings []rootfs.IDMapping `json:"uidMappings"`
+	GIDMappings []rootfs.IDMapping `json:"gidMappings"`
 }
 
 func writeLayerMeta(t *testing.T, path string, meta layerMetaFixture) {

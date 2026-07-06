@@ -89,6 +89,13 @@ meta.json
 
 If `meta.json` is missing and the target directory is non-empty, startup fails closed to avoid reusing foreign data.
 
+The identity of a reusable rootfs rw-layer is the configured PVC-backed path, not
+the container image. Recreating a Pod with the same `volumeName` and `path` may
+reuse the existing `upper/` and `work/` over a different image. This is an
+intentional persistence semantic: users are responsible for choosing stable paths
+whose lifecycle matches the desired rootfs state. The current Kubernetes sidecar
+intent path does not use image chain identity to reject cross-image reuse.
+
 ## Snapshot Labels
 
 The current Kubernetes path does not depend on custom rootfs rw-layer snapshot labels. Stock containerd CRI does not pass pod rootfs persistence intent, PVC names, or pod volume data to app-container snapshot `Prepare` calls.
@@ -98,7 +105,6 @@ If a future CRI/containerd integration explicitly sets labels on `Prepare`, keep
 ```text
 io.nestybox.sysbox.rootfs-rw-layer.pod-uid
 io.nestybox.sysbox.rootfs-rw-layer.container-name
-io.nestybox.sysbox.rootfs-rw-layer.image-chain-id
 ```
 
 Those labels are not a replacement for resolving the node-side PVC mount path unless that future integration also provides a trusted path. If no sidecar intent exists, native overlay mounts are returned unchanged.

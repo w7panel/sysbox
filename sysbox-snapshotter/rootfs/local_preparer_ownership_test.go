@@ -45,11 +45,10 @@ func TestLocalPreparer_skipsOwnershipMigration_whenExistingLayerMappingsMatch(t 
 	require.NoError(t, os.Symlink("missing-target", filepath.Join(layerRoot, "upper", "dangling-link")))
 	require.NoError(t, os.MkdirAll(filepath.Join(layerRoot, "work"), 0o711))
 	writeLayerMeta(t, filepath.Join(layerRoot, "meta.json"), layerMetaFixture{
-		Version:      1,
-		State:        "attached",
-		ImageChainID: "sha256:chain-a",
-		UIDMappings:  uidMappings,
-		GIDMappings:  gidMappings,
+		Version:     1,
+		State:       "attached",
+		UIDMappings: uidMappings,
+		GIDMappings: gidMappings,
 	})
 	preparer := rootfs.NewLocalPreparer()
 
@@ -62,7 +61,6 @@ func TestLocalPreparer_skipsOwnershipMigration_whenExistingLayerMappingsMatch(t 
 		Path:          "containers/app",
 		PVCClaimName:  "rootfs-rw-pvc",
 		PVCMountPath:  volumeRoot,
-		ImageChainID:  "sha256:chain-a",
 		UIDMappings:   uidMappings,
 		GIDMappings:   gidMappings,
 	})
@@ -81,11 +79,10 @@ func TestLocalPreparer_migratesExistingLayerOwnership_whenIDMappingDiffers(t *te
 	require.NoError(t, os.WriteFile(filepath.Join(layerRoot, "upper", "root", "marker"), []byte("data"), 0o644))
 	require.NoError(t, os.MkdirAll(filepath.Join(layerRoot, "work"), 0o711))
 	writeLayerMeta(t, filepath.Join(layerRoot, "meta.json"), layerMetaFixture{
-		Version:      1,
-		State:        "attached",
-		ImageChainID: "sha256:chain-a",
-		UIDMappings:  []rootfs.IDMapping{{ContainerID: 0, HostID: 100000, Size: 65536}},
-		GIDMappings:  []rootfs.IDMapping{{ContainerID: 0, HostID: 100000, Size: 65536}},
+		Version:     1,
+		State:       "attached",
+		UIDMappings: []rootfs.IDMapping{{ContainerID: 0, HostID: 100000, Size: 65536}},
+		GIDMappings: []rootfs.IDMapping{{ContainerID: 0, HostID: 100000, Size: 65536}},
 	})
 	preparer := rootfs.NewLocalPreparer()
 
@@ -98,7 +95,6 @@ func TestLocalPreparer_migratesExistingLayerOwnership_whenIDMappingDiffers(t *te
 		Path:          "containers/app",
 		PVCClaimName:  "rootfs-rw-pvc",
 		PVCMountPath:  volumeRoot,
-		ImageChainID:  "sha256:chain-a",
 		UIDMappings:   []rootfs.IDMapping{{ContainerID: 0, HostID: 200000, Size: 65536}},
 		GIDMappings:   []rootfs.IDMapping{{ContainerID: 0, HostID: 200001, Size: 65536}},
 	})
