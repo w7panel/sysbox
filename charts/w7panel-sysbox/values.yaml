@@ -1,59 +1,17 @@
-namespaceOverride: ""
-
-nameOverride: ""
-fullnameOverride: ""
-
-serviceAccount:
-  name: ""
-
-rbac:
-  clusterRoleName: ""
-  clusterRoleBindingName: ""
-
 runtimeClass:
   name: sysbox-runc
-  handler: sysbox-runc
 
-installLabel:
-  key: sysbox-install
-  value: "yes"
+nodeSelector: {}
 
-runtimeLabel:
-  key: sysbox-runtime
-  value: running
+image:
+  repository: ghcr.io/w7panel/sysbox-deploy-k3s
+  tag: latest
 
-daemonSet:
-  name: ""
-  image:
-    repository: ghcr.io/w7panel/sysbox-deploy-k3s
-    pullPolicy: Always
-    tag: ""
+installer:
   podLabels: {}
   podAnnotations: {}
-  nodeSelector: {}
-  tolerations: []
 
 admission:
-  enabled: false
-  name: ""
   replicas: 1
-  binaryPath: /opt/sysbox/bin/generic/sysbox-admission
-  image:
-    repository: ghcr.io/w7panel/sysbox-deploy-k3s
-    pullPolicy: Always
-    tag: ""
-  service:
-    name: ""
-    port: 443
-  containerPort: 9443
   podLabels: {}
   podAnnotations: {}
-  nodeSelector: {}
-  tolerations: []
-  tls:
-    caSecretName: ""
-    certSecretName: ""
-  lease:
-    name: ""
-  webhook:
-    name: sysbox-webhook-mutator

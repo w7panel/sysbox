@@ -12,36 +12,25 @@ spec:
         {{- include "w7panel-sysbox.selectorLabels" . | nindent 8 }}
   template:
     metadata:
-        {{- with .Values.daemonSet.podAnnotations }}
+        {{- with .Values.installer.podAnnotations }}
         annotations:
           {{- toYaml . | nindent 10 }}
         {{- end }}
         labels:
           {{- include "w7panel-sysbox.labels" . | nindent 10 }}
-          {{ .Values.installLabel.key }}: {{ .Values.installLabel.value | quote }}
-          {{- with .Values.daemonSet.podLabels }}
+          {{- with .Values.installer.podLabels }}
           {{- toYaml . | nindent 10 }}
           {{- end }}
     spec:
       serviceAccountName: {{ include "w7panel-sysbox.serviceAccountName" . }}
+      {{- with .Values.nodeSelector }}
       nodeSelector:
-        {{ .Values.installLabel.key }}: {{ .Values.installLabel.value | quote }}
-        {{- with .Values.daemonSet.nodeSelector }}
         {{- toYaml . | nindent 8 }}
-        {{- end }}
-      tolerations:
-        - key: {{ $.Values.runtimeLabel.key }}
-          operator: Exists
-          effect: NoSchedule
-        {{- range .Values.daemonSet.tolerations }}
-        {{- if kindIs "map" . }}
-        {{- toYaml (list .) | nindent 8 }}
-        {{- end }}
-        {{- end }}
+      {{- end }}
       containers:
       - name: {{ include "w7panel-sysbox.name" . }}
-        image: {{ printf "%s:%s" .Values.daemonSet.image.repository (.Values.daemonSet.image.tag | default (printf "v%s" .Chart.AppVersion)) | quote }}
-        imagePullPolicy: {{ .Values.daemonSet.image.pullPolicy }}
+        image: {{ printf "%s:%s" .Values.image.repository .Values.image.tag | quote }}
+        imagePullPolicy: Always
         command: [ "bash", "-c", "/opt/sysbox/scripts/sysbox-deploy-k8s.sh ce install" ]
         env:
         - name: NODE_NAME

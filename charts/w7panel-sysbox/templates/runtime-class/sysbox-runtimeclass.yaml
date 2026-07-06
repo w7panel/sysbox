@@ -4,7 +4,9 @@ metadata:
   name: {{ include "w7panel-sysbox.runtimeClassName" . }}
   labels:
     {{- include "w7panel-sysbox.labels" . | nindent 4 }}
-handler: {{ .Values.runtimeClass.handler }}
+handler: sysbox-runc
+{{- with .Values.nodeSelector }}
 scheduling:
   nodeSelector:
-    {{ .Values.runtimeLabel.key }}: {{ .Values.runtimeLabel.value | quote }}
+    {{- toYaml . | nindent 4 }}
+{{- end }}
