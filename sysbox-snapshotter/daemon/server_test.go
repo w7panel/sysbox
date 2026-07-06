@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -84,7 +85,9 @@ func TestServerServe_createsUnixSocket_whenStarted(t *testing.T) {
 
 func TestServerServe_removesStaleSocket_beforeListening(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "sysbox-snapshotter.sock")
-	require.NoError(t, os.WriteFile(socketPath, []byte("stale"), 0o600))
+	staleListener, err := net.Listen("unix", socketPath)
+	require.NoError(t, err)
+	require.NoError(t, staleListener.Close())
 	server := daemon.NewServer(daemon.Config{
 		Address:     socketPath,
 		Snapshotter: fakeSnapshotter{},
@@ -107,4 +110,24 @@ func TestServerServe_removesStaleSocket_beforeListening(t *testing.T) {
 	cancel()
 
 	require.NoError(t, <-done)
+}
+
+func TestServerServe_returnsError_whenParentPathIsRegularFile(t *testing.T) {
+	// Given: the socket parent path cannot be created as a directory.
+	parentPath := filepath.Join(t.TempDir(), "not-dir")
+	require.NoError(t, os.WriteFile(parentPath, []byte("parent"), 0o600))
+	server := daemon.NewServer(daemon.Config{
+		Address:     filepath.Join(parentPath, "sysbox-snapshotter.sock"),
+		Snapshotter: fakeSnapshotter{},
+	})
+
+	// When: the server starts.
+	err := server.Serve(context.Background())
+
+	// Then: the original parent file is preserved.
+	require.Error(t, err)
+	data, readErr := os.ReadFile(parentPath)
+	require.NoError(t, readErr)
+	require.Equal(t, []byte("parent"), data)
+	require.False(t, errors.Is(err, os.ErrNotExist))
 }

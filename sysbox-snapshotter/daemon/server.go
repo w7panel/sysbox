@@ -37,7 +37,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	if err := os.MkdirAll(filepath.Dir(s.config.Address), 0o700); err != nil {
 		return fmt.Errorf("create snapshotter socket directory: %w", err)
 	}
-	if err := os.RemoveAll(s.config.Address); err != nil {
+	if err := removeStaleSocket(s.config.Address); err != nil {
 		return fmt.Errorf("remove stale snapshotter socket: %w", err)
 	}
 	listener, err := net.Listen("unix", s.config.Address)
@@ -57,4 +57,18 @@ func (s *Server) Serve(ctx context.Context) error {
 		return fmt.Errorf("serve snapshotter grpc: %w", err)
 	}
 	return nil
+}
+
+func removeStaleSocket(path string) error {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		return fmt.Errorf("%s exists and is not a unix socket", path)
+	}
+	return os.Remove(path)
 }
