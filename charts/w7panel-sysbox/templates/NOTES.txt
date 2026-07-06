@@ -1,12 +1,10 @@
 Sysbox installer manifests have been installed.
 
 Check installer pods:
-  kubectl get pods -n {{ include "w7panel-sysbox.namespace" . }} -l sysbox-install=yes
+  kubectl get pods -n {{ include "w7panel-sysbox.namespace" . }} -l app.kubernetes.io/name={{ include "w7panel-sysbox.name" . }},app.kubernetes.io/instance={{ .Release.Name }}
 
 Check RuntimeClass:
   kubectl get runtimeclass {{ include "w7panel-sysbox.runtimeClassName" . }}
-
-{{- if .Values.admission.enabled }}
 
 Check sysbox-admission backend pods:
   kubectl get pods -n {{ include "w7panel-sysbox.namespace" . }} -l app.kubernetes.io/component=sysbox-admission
@@ -19,4 +17,3 @@ Check MutatingWebhookConfiguration:
 
 Check backend-owned TLS resources:
   kubectl get secret -n {{ include "w7panel-sysbox.namespace" . }} {{ include "w7panel-sysbox.admissionCASecretName" . }} {{ include "w7panel-sysbox.admissionTLSSecretName" . }}
-{{- end }}
