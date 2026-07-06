@@ -17,6 +17,11 @@ type Server struct {
 	mutator *Mutator
 }
 
+type appWorkload struct {
+	metadata *metav1.ObjectMeta
+	template *corev1.PodTemplateSpec
+}
+
 func NewServer(mutator *Mutator) *Server {
 	return &Server{mutator: mutator}
 }
@@ -73,18 +78,43 @@ func (s *Server) patch(r *http.Request, request *admissionv1.AdmissionRequest) (
 			return nil, err
 		}
 		return patchForPod(&pod, mutated)
-	case "deployments":
-		var deployment appsv1.Deployment
-		if err := json.Unmarshal(request.Object.Raw, &deployment); err != nil {
-			return nil, err
-		}
-		mutated, err := s.mutator.MutateDeployment(r.Context(), &deployment)
+	case "deployments", "statefulsets", "daemonsets":
+		workload, err := appWorkloadFromRaw(request.Resource.Resource, request.Object.Raw)
 		if err != nil {
 			return nil, err
 		}
-		return patchForDeployment(&deployment, mutated)
+		original := workload.template.DeepCopy()
+		if err := s.mutator.mutateAppWorkload(r.Context(), workload.metadata, workload.template); err != nil {
+			return nil, err
+		}
+		return patchForAppWorkload(original, workload.template)
 	default:
 		return nil, fmt.Errorf("unsupported resource %s", request.Resource.Resource)
+	}
+}
+
+func appWorkloadFromRaw(resource string, raw []byte) (appWorkload, error) {
+	switch resource {
+	case "deployments":
+		var deployment appsv1.Deployment
+		if err := json.Unmarshal(raw, &deployment); err != nil {
+			return appWorkload{}, err
+		}
+		return appWorkload{metadata: &deployment.ObjectMeta, template: &deployment.Spec.Template}, nil
+	case "statefulsets":
+		var statefulSet appsv1.StatefulSet
+		if err := json.Unmarshal(raw, &statefulSet); err != nil {
+			return appWorkload{}, err
+		}
+		return appWorkload{metadata: &statefulSet.ObjectMeta, template: &statefulSet.Spec.Template}, nil
+	case "daemonsets":
+		var daemonSet appsv1.DaemonSet
+		if err := json.Unmarshal(raw, &daemonSet); err != nil {
+			return appWorkload{}, err
+		}
+		return appWorkload{metadata: &daemonSet.ObjectMeta, template: &daemonSet.Spec.Template}, nil
+	default:
+		return appWorkload{}, fmt.Errorf("unsupported app resource %s", resource)
 	}
 }
 

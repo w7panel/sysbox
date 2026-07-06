@@ -1,7 +1,12 @@
 package admission_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 
@@ -74,8 +79,10 @@ func TestMutator_injectsSidecarBeforeRootfsContainers_whenPodHasRootfsRwLayer(t 
 
 func TestMutator_replacesExistingSidecarWithCanonicalContainer_whenDeploymentTemplateSidecarWasTampered(t *testing.T) {
 	// Given
-	mutator := newTestMutator()
+	server := admission.NewServer(newTestMutator())
 	deployment := validRootfsDeployment()
+	deployment.Annotations = deployment.Spec.Template.Annotations
+	deployment.Spec.Template.Annotations = nil
 	deployment.Spec.Template.Spec.Containers = []corev1.Container{
 		{Name: "my-container"},
 		{
@@ -86,14 +93,17 @@ func TestMutator_replacesExistingSidecarWithCanonicalContainer_whenDeploymentTem
 			VolumeMounts: []corev1.VolumeMount{{Name: "extra", MountPath: "/extra"}},
 		},
 	}
+	request := httptest.NewRequest(http.MethodPost, "/mutate", bytes.NewReader(admissionReviewBody(t, "deployments", deployment)))
+	recorder := httptest.NewRecorder()
 
 	// When
-	mutated, err := mutator.MutateDeployment(context.Background(), deployment)
+	server.ServeHTTP(recorder, request)
 
 	// Then
-	require.NoError(t, err)
-	sidecar := mutated.Spec.Template.Spec.Containers[0]
-	require.Equal(t, "my-container", mutated.Spec.Template.Spec.Containers[1].Name)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	containers := appWorkloadContainersFromPatch(t, recorder.Body.Bytes())
+	sidecar := containers[0]
+	require.Equal(t, "my-container", containers[1].Name)
 	require.Equal(t, admission.SidecarContainerName, sidecar.Name)
 	require.Equal(t, testSandboxImage, sidecar.Image)
 	require.Empty(t, sidecar.Command)
@@ -103,6 +113,30 @@ func TestMutator_replacesExistingSidecarWithCanonicalContainer_whenDeploymentTem
 		Name:      "test",
 		MountPath: filepath.Join(admission.SidecarMountPath, "test"),
 	}}, sidecar.VolumeMounts)
+}
+
+func appWorkloadContainersFromPatch(t *testing.T, raw []byte) []corev1.Container {
+	t.Helper()
+	var review struct {
+		Response struct {
+			Patch string `json:"patch"`
+		} `json:"response"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &review))
+	decoded, err := base64.StdEncoding.DecodeString(review.Response.Patch)
+	require.NoError(t, err)
+	var patches []struct {
+		Path  string             `json:"path"`
+		Value []corev1.Container `json:"value"`
+	}
+	require.NoError(t, json.Unmarshal(decoded, &patches))
+	for _, patch := range patches {
+		if patch.Path == "/spec/template/spec/containers" {
+			return patch.Value
+		}
+	}
+	require.Fail(t, "missing /spec/template/spec/containers patch")
+	return nil
 }
 
 func TestMutator_injectsDistinctSidecarMounts_whenEntriesUseDifferentPVCs(t *testing.T) {

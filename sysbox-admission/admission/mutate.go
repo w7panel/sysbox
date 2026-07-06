@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"path/filepath"
 
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -42,25 +41,9 @@ func (m *Mutator) Mutate(ctx context.Context, pod *corev1.Pod) (*corev1.Pod, err
 	return mutated, nil
 }
 
-func (m *Mutator) MutateDeployment(ctx context.Context, deployment *appsv1.Deployment) (*appsv1.Deployment, error) {
-	mutated := deployment.DeepCopy()
-	copyRootfsAnnotation(&mutated.ObjectMeta, &mutated.Spec.Template.ObjectMeta)
-	_, _, err := m.mutatePodTemplate(ctx, &mutated.Spec.Template.ObjectMeta, &mutated.Spec.Template.Spec)
-	return mutated, err
-}
-
-func copyRootfsAnnotation(source *metav1.ObjectMeta, target *metav1.ObjectMeta) {
-	if target.Annotations[AnnotationRootfsRwLayer] != "" {
-		return
-	}
-	value := source.Annotations[AnnotationRootfsRwLayer]
-	if value == "" {
-		return
-	}
-	if target.Annotations == nil {
-		target.Annotations = map[string]string{}
-	}
-	target.Annotations[AnnotationRootfsRwLayer] = value
+func (m *Mutator) mutateAppWorkload(ctx context.Context, metadata *metav1.ObjectMeta, template *corev1.PodTemplateSpec) error {
+	_, _, err := m.mutatePodTemplate(ctx, metadata, &template.Spec)
+	return err
 }
 
 func (m *Mutator) mutatePodTemplate(ctx context.Context, metadata *metav1.ObjectMeta, spec *corev1.PodSpec) ([]RootfsRwLayerEntry, bool, error) {

@@ -1,8 +1,11 @@
 package admission_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 
@@ -44,24 +47,18 @@ func TestMutator_injectsSidecarIntent_whenAnnotationIsValid(t *testing.T) {
 	require.Len(t, mutated.Spec.Containers[2].VolumeMounts, 0)
 }
 
-func TestMutator_mutatesDeploymentPodTemplate_whenTemplateAnnotationIsValid(t *testing.T) {
+func TestServer_leavesAppWorkloadUnchanged_whenOnlyTemplateAnnotationIsValid(t *testing.T) {
 	// Given
-	mutator := newTestMutator()
-	deployment := validRootfsDeployment()
+	server := admission.NewServer(newTestMutator())
+	request := httptest.NewRequest(http.MethodPost, "/mutate", bytes.NewReader(admissionReviewBody(t, "deployments", validRootfsDeployment())))
+	recorder := httptest.NewRecorder()
 
 	// When
-	mutated, err := mutator.MutateDeployment(context.Background(), deployment)
+	server.ServeHTTP(recorder, request)
 
 	// Then
-	require.NoError(t, err)
-	require.Len(t, mutated.Spec.Template.Spec.Containers, 2)
-	sidecar := mutated.Spec.Template.Spec.Containers[0]
-	require.Equal(t, admission.SidecarContainerName, sidecar.Name)
-	require.Equal(t, testSandboxImage, sidecar.Image)
-	require.Empty(t, sidecar.Command)
-	require.Len(t, sidecar.VolumeMounts, 1)
-	require.Equal(t, "test", sidecar.VolumeMounts[0].Name)
-	require.Equal(t, filepath.Join(admission.SidecarMountPath, "test"), sidecar.VolumeMounts[0].MountPath)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assertPatchEquals(t, recorder.Body.Bytes(), `[]`)
 }
 
 func TestMutator_injectsSidecarIntent_whenPodNameIsEmpty(t *testing.T) {
@@ -80,35 +77,58 @@ func TestMutator_injectsSidecarIntent_whenPodNameIsEmpty(t *testing.T) {
 	require.Len(t, mutated.Spec.Containers[0].Env, 1)
 }
 
-func TestMutator_mutatesDeploymentPodTemplate_whenDeploymentAnnotationIsValid(t *testing.T) {
+func TestServer_mutatesAppWorkloadPodTemplate_whenWorkloadAnnotationIsValid(t *testing.T) {
 	// Given
-	mutator := newTestMutator()
 	deployment := validRootfsDeployment()
 	deployment.Annotations = deployment.Spec.Template.Annotations
 	deployment.Spec.Template.Annotations = nil
+	server := admission.NewServer(newTestMutator())
+	request := httptest.NewRequest(http.MethodPost, "/mutate", bytes.NewReader(admissionReviewBody(t, "deployments", deployment)))
+	recorder := httptest.NewRecorder()
 
 	// When
-	mutated, err := mutator.MutateDeployment(context.Background(), deployment)
+	server.ServeHTTP(recorder, request)
 
 	// Then
-	require.NoError(t, err)
-	require.Equal(t, deployment.Annotations[admission.AnnotationRootfsRwLayer], mutated.Spec.Template.Annotations[admission.AnnotationRootfsRwLayer])
-	require.Len(t, mutated.Spec.Template.Spec.Containers, 2)
-	require.Equal(t, admission.SidecarContainerName, mutated.Spec.Template.Spec.Containers[0].Name)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assertPatchContainsPath(t, recorder.Body.Bytes(), "/spec/template/spec/containers")
+	assertPatchDoesNotContainPath(t, recorder.Body.Bytes(), "/spec/template/metadata/annotations")
+}
+
+func TestServer_usesWorkloadAnnotation_whenTemplateAnnotationDiffers(t *testing.T) {
+	// Given
+	deployment := validRootfsDeployment()
+	deployment.Annotations = map[string]string{
+		admission.AnnotationRootfsRwLayer: `[{"name":"my-container","volumeName":"test","path":"from-workload"}]`,
+	}
+	server := admission.NewServer(newTestMutator())
+	request := httptest.NewRequest(http.MethodPost, "/mutate", bytes.NewReader(admissionReviewBody(t, "deployments", deployment)))
+	recorder := httptest.NewRecorder()
+
+	// When
+	server.ServeHTTP(recorder, request)
+
+	// Then
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assertPatchContainsPath(t, recorder.Body.Bytes(), "/spec/template/spec/containers")
+	assertPatchDoesNotContainPath(t, recorder.Body.Bytes(), "/spec/template/metadata/annotations")
+	assertPatchContainsSidecarIntent(t, recorder.Body.Bytes(), "from-workload")
 }
 
 func TestMutator_leavesDeploymentUnchanged_whenTemplateAnnotationMissing(t *testing.T) {
 	// Given
-	mutator := newTestMutator()
 	deployment := validRootfsDeployment()
 	deployment.Spec.Template.Annotations = nil
+	server := admission.NewServer(newTestMutator())
+	request := httptest.NewRequest(http.MethodPost, "/mutate", bytes.NewReader(admissionReviewBody(t, "deployments", deployment)))
+	recorder := httptest.NewRecorder()
 
 	// When
-	mutated, err := mutator.MutateDeployment(context.Background(), deployment)
+	server.ServeHTTP(recorder, request)
 
 	// Then
-	require.NoError(t, err)
-	require.Len(t, mutated.Spec.Template.Spec.Containers, 1)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assertPatchEquals(t, recorder.Body.Bytes(), `[]`)
 }
 
 func TestMutator_rejectsDuplicateContainerEntries(t *testing.T) {
@@ -224,4 +244,41 @@ func assertSidecarIntent(t *testing.T, raw string, expected []map[string]any) {
 	require.NoError(t, json.Unmarshal([]byte(raw), &decoded))
 	require.Equal(t, 1, decoded.Version)
 	require.Equal(t, expected, decoded.Entries)
+}
+
+func assertPatchContainsPath(t *testing.T, raw []byte, path string) {
+	t.Helper()
+	patches := patchFromAdmissionResponse(t, raw)
+	for _, patch := range patches {
+		if patch.Path == path {
+			return
+		}
+	}
+	require.Failf(t, "patch path missing", "path %s not found in %s", path, string(raw))
+}
+
+func assertPatchDoesNotContainPath(t *testing.T, raw []byte, path string) {
+	t.Helper()
+	patches := patchFromAdmissionResponse(t, raw)
+	for _, patch := range patches {
+		require.NotEqualf(t, path, patch.Path, "path %s found in %s", path, string(raw))
+	}
+}
+
+func assertPatchContainsSidecarIntent(t *testing.T, raw []byte, expectedPath string) {
+	t.Helper()
+	patches := patchValuesFromAdmissionResponse(t, raw)
+	for _, patch := range patches {
+		if patch.Path != "/spec/template/spec/containers" {
+			continue
+		}
+		var containers []corev1.Container
+		require.NoError(t, json.Unmarshal(patch.Value, &containers))
+		require.NotEmpty(t, containers)
+		require.Equal(t, admission.SidecarContainerName, containers[0].Name)
+		require.Len(t, containers[0].Env, 1)
+		require.Contains(t, containers[0].Env[0].Value, expectedPath)
+		return
+	}
+	require.Failf(t, "containers patch missing", "containers patch not found in %s", string(raw))
 }

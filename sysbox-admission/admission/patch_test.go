@@ -25,11 +25,11 @@ func TestPatchForPod_returnsEmptyPatch_whenPodUnchanged(t *testing.T) {
 
 func TestPatchForDeployment_returnsEmptyPatch_whenDeploymentUnchanged(t *testing.T) {
 	// Given
-	original := testPatchDeployment()
+	original := testPatchDeployment().Spec.Template
 	mutated := original.DeepCopy()
 
 	// When
-	patch, err := patchForDeployment(original, mutated)
+	patch, err := patchForAppWorkload(&original, mutated)
 
 	// Then
 	require.NoError(t, err)
@@ -76,13 +76,13 @@ func TestPatchForPod_addsLabels_whenOriginalLabelsNil(t *testing.T) {
 
 func TestPatchForDeployment_patchesChangedContainersAndAnnotations(t *testing.T) {
 	// Given
-	original := testPatchDeployment()
+	original := testPatchDeployment().Spec.Template
 	mutated := original.DeepCopy()
-	mutated.Spec.Template.Spec.Containers = append([]corev1.Container{{Name: "sidecar", Image: "registry.example/sidecar:v1"}}, mutated.Spec.Template.Spec.Containers...)
-	mutated.Spec.Template.Annotations["sysbox.example/injected"] = "true"
+	mutated.Spec.Containers = append([]corev1.Container{{Name: "sidecar", Image: "registry.example/sidecar:v1"}}, mutated.Spec.Containers...)
+	mutated.Annotations["sysbox.example/injected"] = "true"
 
 	// When
-	patch, err := patchForDeployment(original, mutated)
+	patch, err := patchForAppWorkload(&original, mutated)
 
 	// Then
 	require.NoError(t, err)
@@ -97,18 +97,39 @@ func TestPatchForDeployment_patchesChangedContainersAndAnnotations(t *testing.T)
 
 func TestPatchForDeployment_addsAnnotations_whenOriginalAnnotationsNil(t *testing.T) {
 	// Given
-	original := testPatchDeployment()
-	original.Spec.Template.Annotations = nil
+	original := testPatchDeployment().Spec.Template
+	original.Annotations = nil
 	mutated := original.DeepCopy()
-	mutated.Spec.Template.Annotations = map[string]string{"sysbox.example/injected": "true"}
+	mutated.Annotations = map[string]string{"sysbox.example/injected": "true"}
 
 	// When
-	patch, err := patchForDeployment(original, mutated)
+	patch, err := patchForAppWorkload(&original, mutated)
 
 	// Then
 	require.NoError(t, err)
 	require.JSONEq(t, `[
 		{"op":"add","path":"/spec/template/metadata/annotations","value":{"sysbox.example/injected":"true"}}
+	]`, string(patch))
+}
+
+func TestPatchForAppWorkload_patchesChangedTemplate(t *testing.T) {
+	// Given
+	original := testPatchDeployment().Spec.Template
+	mutated := original.DeepCopy()
+	mutated.Spec.Containers = append([]corev1.Container{{Name: "sidecar", Image: "registry.example/sidecar:v1"}}, mutated.Spec.Containers...)
+	mutated.Annotations["sysbox.example/injected"] = "true"
+
+	// When
+	patch, err := patchForAppWorkload(&original, mutated)
+
+	// Then
+	require.NoError(t, err)
+	require.JSONEq(t, `[
+		{"op":"replace","path":"/spec/template/spec/containers","value":[
+			{"name":"sidecar","image":"registry.example/sidecar:v1","resources":{}},
+			{"name":"app","image":"registry.example/app:v1","resources":{}}
+		]},
+		{"op":"replace","path":"/spec/template/metadata/annotations","value":{"sysbox.example/config":"enabled","sysbox.example/injected":"true"}}
 	]`, string(patch))
 }
 
