@@ -1,0 +1,20 @@
+{{- if .Values.admission.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "w7panel-sysbox.admissionServiceName" . }}
+  namespace: {{ include "w7panel-sysbox.namespace" . }}
+  labels:
+    {{- include "w7panel-sysbox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sysbox-admission
+spec:
+  type: ClusterIP
+  ports:
+    - name: https
+      port: {{ .Values.admission.service.port }}
+      targetPort: https
+      protocol: TCP
+  selector:
+    {{- include "w7panel-sysbox.admissionSelectorLabels" . | nindent 4 }}
+{{- end }}
