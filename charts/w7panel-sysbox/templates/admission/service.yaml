@@ -1,4 +1,3 @@
-{{- if .Values.admission.enabled }}
 ---
 apiVersion: v1
 kind: Service
@@ -12,9 +11,8 @@ spec:
   type: ClusterIP
   ports:
     - name: https
-      port: {{ .Values.admission.service.port }}
+      port: 443
       targetPort: https
       protocol: TCP
   selector:
     {{- include "w7panel-sysbox.admissionSelectorLabels" . | nindent 4 }}
-{{- end }}
