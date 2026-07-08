@@ -157,6 +157,23 @@ func TestWaitForTLSCertificateFromSecret_reportsLoadError_whenSecretMissing(t *t
 	requireOnlySecretGets(t, client.Actions())
 }
 
+func TestWaitForTLSCertificateFromSecret_returnsError_whenIntervalIsNotPositive(t *testing.T) {
+	// Given: a refresh config with a non-positive interval.
+	client := fake.NewSimpleClientset()
+	config := TLSCertificateRefreshConfig{
+		Secrets:  client.CoreV1().Secrets("sysbox-system"),
+		Secret:   "sysbox-admission-tls",
+		Interval: 0,
+		Reloader: NewEmptyCertificateReloader(),
+	}
+
+	// When: waiting for a TLS certificate starts.
+	err := WaitForTLSCertificateFromSecret(context.Background(), config)
+
+	// Then: the interval is rejected before time.NewTicker can panic.
+	require.ErrorContains(t, err, "tls certificate refresh interval must be positive")
+}
+
 func TestRunTLSCertificateRefreshLoop_reportsLoadErrorAndKeepsRunning_whenSecretMissing(t *testing.T) {
 	// Given
 	ctx, cancel := context.WithCancel(context.Background())
@@ -189,6 +206,23 @@ func TestRunTLSCertificateRefreshLoop_reportsLoadErrorAndKeepsRunning_whenSecret
 		t.Fatal("expected TLS secret refresh error to be reported")
 	}
 	requireOnlySecretGets(t, client.Actions())
+}
+
+func TestRunTLSCertificateRefreshLoop_returnsError_whenIntervalIsNotPositive(t *testing.T) {
+	// Given: a refresh config with a non-positive interval.
+	client := fake.NewSimpleClientset()
+	config := TLSCertificateRefreshConfig{
+		Secrets:  client.CoreV1().Secrets("sysbox-system"),
+		Secret:   "sysbox-admission-tls",
+		Interval: 0,
+		Reloader: NewEmptyCertificateReloader(),
+	}
+
+	// When: the refresh loop starts.
+	err := RunTLSCertificateRefreshLoop(context.Background(), config)
+
+	// Then: the interval is rejected before time.NewTicker can panic.
+	require.ErrorContains(t, err, "tls certificate refresh interval must be positive")
 }
 
 func mustGenerateTLSCertificate(t *testing.T) tls.Certificate {

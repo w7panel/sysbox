@@ -74,6 +74,9 @@ func RefreshTLSCertificateFromSecret(ctx context.Context, config TLSCertificateR
 }
 
 func WaitForTLSCertificateFromSecret(ctx context.Context, config TLSCertificateRefreshConfig) error {
+	if config.Interval <= 0 {
+		return fmt.Errorf("tls certificate refresh interval must be positive")
+	}
 	ticker := time.NewTicker(config.Interval)
 	defer ticker.Stop()
 	for {
@@ -91,6 +94,9 @@ func WaitForTLSCertificateFromSecret(ctx context.Context, config TLSCertificateR
 }
 
 func RunTLSCertificateRefreshLoop(ctx context.Context, config TLSCertificateRefreshConfig) error {
+	if config.Interval <= 0 {
+		return fmt.Errorf("tls certificate refresh interval must be positive")
+	}
 	ticker := time.NewTicker(config.Interval)
 	defer ticker.Stop()
 	for {

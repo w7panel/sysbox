@@ -36,6 +36,9 @@ func (l *CertificateRotationLoop) SetErrorHandler(handler func(error)) {
 }
 
 func (l *CertificateRotationLoop) Run(ctx context.Context) error {
+	if l.interval <= 0 {
+		return fmt.Errorf("certificate rotation interval must be positive")
+	}
 	ticker := time.NewTicker(l.interval)
 	defer ticker.Stop()
 	return l.run(ctx, ticker.C)

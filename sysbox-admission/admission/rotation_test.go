@@ -40,6 +40,17 @@ func TestRotationLoop_run_ensuresImmediatelyAndReloadsCertificate(t *testing.T) 
 	require.Equal(t, refreshedCertificate.Certificate, got.Certificate)
 }
 
+func TestRotationLoop_Run_returnsError_whenIntervalIsNotPositive(t *testing.T) {
+	// Given: a rotation loop configured with a non-positive interval.
+	loop := newCertificateRotationLoop(&recordingLifecycleManager{}, NewEmptyCertificateReloader(), 0)
+
+	// When: the loop starts.
+	err := loop.Run(context.Background())
+
+	// Then: the loop rejects the interval instead of panicking in time.NewTicker.
+	require.ErrorContains(t, err, "certificate rotation interval must be positive")
+}
+
 func TestRotationLoop_run_ensuresAndReloadsCertificateOnEachTick(t *testing.T) {
 	// Given: a rotation loop with deterministic ticks and two lifecycle results.
 	ctx, cancel := context.WithCancel(context.Background())
