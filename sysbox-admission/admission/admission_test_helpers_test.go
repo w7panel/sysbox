@@ -19,7 +19,7 @@ func admissionReviewBody(t *testing.T, resource string, object runtime.Object) [
 	review := admissionv1.AdmissionReview{
 		Request: &admissionv1.AdmissionRequest{
 			UID:      types.UID("test-uid"),
-			Resource: metav1.GroupVersionResource{Group: "apps", Version: "v1", Resource: resource},
+			Resource: admissionTestResource(resource),
 			Object:   runtime.RawExtension{Raw: raw},
 		},
 	}
@@ -28,40 +28,18 @@ func admissionReviewBody(t *testing.T, resource string, object runtime.Object) [
 	return body
 }
 
-func assertPatchEquals(t *testing.T, raw []byte, expected string) {
-	t.Helper()
-	patches := patchFromAdmissionResponse(t, raw)
-	encoded, err := json.Marshal(patches)
-	require.NoError(t, err)
-	require.JSONEq(t, expected, string(encoded))
+func admissionTestResource(resource string) metav1.GroupVersionResource {
+	if resource == "pods" {
+		return metav1.GroupVersionResource{Version: "v1", Resource: resource}
+	}
+	return metav1.GroupVersionResource{Group: "apps", Version: "v1", Resource: resource}
 }
 
-func patchFromAdmissionResponse(t *testing.T, raw []byte) []struct {
-	Path string `json:"path"`
-} {
+func assertAdmissionDenied(t *testing.T, raw []byte, expectedMessage string) {
 	t.Helper()
 	var review admissionv1.AdmissionReview
 	require.NoError(t, json.Unmarshal(raw, &review))
 	require.NotNil(t, review.Response)
-	var patches []struct {
-		Path string `json:"path"`
-	}
-	require.NoError(t, json.Unmarshal(review.Response.Patch, &patches))
-	return patches
-}
-
-func patchValuesFromAdmissionResponse(t *testing.T, raw []byte) []struct {
-	Path  string          `json:"path"`
-	Value json.RawMessage `json:"value"`
-} {
-	t.Helper()
-	var review admissionv1.AdmissionReview
-	require.NoError(t, json.Unmarshal(raw, &review))
-	require.NotNil(t, review.Response)
-	var patches []struct {
-		Path  string          `json:"path"`
-		Value json.RawMessage `json:"value"`
-	}
-	require.NoError(t, json.Unmarshal(review.Response.Patch, &patches))
-	return patches
+	require.False(t, review.Response.Allowed)
+	require.Contains(t, review.Response.Result.Message, expectedMessage)
 }

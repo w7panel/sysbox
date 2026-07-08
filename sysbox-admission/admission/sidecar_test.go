@@ -3,8 +3,6 @@ package admission_test
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -77,13 +75,11 @@ func TestMutator_injectsSidecarBeforeRootfsContainers_whenPodHasRootfsRwLayer(t 
 	require.Equal(t, "c2", mutated.Spec.Containers[2].Name)
 }
 
-func TestMutator_replacesExistingSidecarWithCanonicalContainer_whenDeploymentTemplateSidecarWasTampered(t *testing.T) {
+func TestServer_rejectsWorkloadResource_whenDeploymentTemplateSidecarWasTampered(t *testing.T) {
 	// Given
 	server := admission.NewServer(newTestMutator())
-	deployment := validRootfsDeployment()
-	deployment.Annotations = deployment.Spec.Template.Annotations
-	deployment.Spec.Template.Annotations = nil
-	deployment.Spec.Template.Spec.Containers = []corev1.Container{
+	pod := validRootfsPod()
+	pod.Spec.Containers = []corev1.Container{
 		{Name: "my-container"},
 		{
 			Name:         admission.SidecarContainerName,
@@ -93,7 +89,7 @@ func TestMutator_replacesExistingSidecarWithCanonicalContainer_whenDeploymentTem
 			VolumeMounts: []corev1.VolumeMount{{Name: "extra", MountPath: "/extra"}},
 		},
 	}
-	request := httptest.NewRequest(http.MethodPost, "/mutate", bytes.NewReader(admissionReviewBody(t, "deployments", deployment)))
+	request := httptest.NewRequest(http.MethodPost, "/mutate", bytes.NewReader(admissionReviewBody(t, "deployments", pod)))
 	recorder := httptest.NewRecorder()
 
 	// When
@@ -101,42 +97,7 @@ func TestMutator_replacesExistingSidecarWithCanonicalContainer_whenDeploymentTem
 
 	// Then
 	require.Equal(t, http.StatusOK, recorder.Code)
-	containers := appWorkloadContainersFromPatch(t, recorder.Body.Bytes())
-	sidecar := containers[0]
-	require.Equal(t, "my-container", containers[1].Name)
-	require.Equal(t, admission.SidecarContainerName, sidecar.Name)
-	require.Equal(t, testSandboxImage, sidecar.Image)
-	require.Empty(t, sidecar.Command)
-	require.Len(t, sidecar.Env, 1)
-	require.Equal(t, admission.SpecEnv, sidecar.Env[0].Name)
-	require.Equal(t, []corev1.VolumeMount{{
-		Name:      "test",
-		MountPath: filepath.Join(admission.SidecarMountPath, "test"),
-	}}, sidecar.VolumeMounts)
-}
-
-func appWorkloadContainersFromPatch(t *testing.T, raw []byte) []corev1.Container {
-	t.Helper()
-	var review struct {
-		Response struct {
-			Patch string `json:"patch"`
-		} `json:"response"`
-	}
-	require.NoError(t, json.Unmarshal(raw, &review))
-	decoded, err := base64.StdEncoding.DecodeString(review.Response.Patch)
-	require.NoError(t, err)
-	var patches []struct {
-		Path  string             `json:"path"`
-		Value []corev1.Container `json:"value"`
-	}
-	require.NoError(t, json.Unmarshal(decoded, &patches))
-	for _, patch := range patches {
-		if patch.Path == "/spec/template/spec/containers" {
-			return patch.Value
-		}
-	}
-	require.Fail(t, "missing /spec/template/spec/containers patch")
-	return nil
+	assertAdmissionDenied(t, recorder.Body.Bytes(), "unsupported resource deployments")
 }
 
 func TestMutator_injectsDistinctSidecarMounts_whenEntriesUseDifferentPVCs(t *testing.T) {
