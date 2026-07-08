@@ -80,7 +80,7 @@ ClusterRoleBinding name.
 RuntimeClass name.
 */}}
 {{- define "w7panel-sysbox.runtimeClassName" -}}
-{{- default "sysbox-runc" .Values.runtimeClass.name | trunc 63 | trimSuffix "-" }}
+{{- "sysbox-runc" }}
 {{- end }}
 
 {{/*

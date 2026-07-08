@@ -1,6 +1,3 @@
-runtimeClass:
-  name: sysbox-runc
-
 nodeSelector: {}
 
 image:

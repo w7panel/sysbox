@@ -7,9 +7,9 @@ installer and admission backend.
 
 ### RuntimeClass
 
-| Value | Default | Description |
-| --- | --- | --- |
-| `runtimeClass.name` | `sysbox-runc` | RuntimeClass name and runtime handler. |
+The chart always creates the `sysbox-runc` RuntimeClass. This name is fixed
+because Sysbox admission only mutates Pods that use `runtimeClassName:
+sysbox-runc`.
 
 ### Node Selector
 
