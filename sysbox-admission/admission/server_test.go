@@ -53,6 +53,25 @@ func TestServer_routesSupportedResourcesToMatchingMutator(t *testing.T) {
 	}
 }
 
+func TestServer_rejectsMutationRequest_whenBodyExceedsLimit(t *testing.T) {
+	// Given: a mutate request larger than the admission body limit.
+	server := NewServer(NewMutator(Config{SandboxImage: "registry.example/pause:9.9"}))
+	body := bytes.Repeat([]byte("x"), admissionReviewBodyLimit+1)
+	req := httptest.NewRequest(http.MethodPost, "/mutate", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	// When: the request is served.
+	server.ServeHTTP(rec, req)
+
+	// Then: the server returns an admission denial instead of reading an unbounded body.
+	require.Equal(t, http.StatusOK, rec.Code)
+	var review admissionv1.AdmissionReview
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &review))
+	require.NotNil(t, review.Response)
+	require.False(t, review.Response.Allowed)
+	require.Contains(t, review.Response.Result.Message, "request body too large")
+}
+
 func assertRootfsSidecarPatch(t *testing.T, rawPatch []byte, path string) {
 	t.Helper()
 	var patches []struct {

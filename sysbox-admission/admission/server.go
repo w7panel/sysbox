@@ -2,6 +2,7 @@ package admission
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
+
+const admissionReviewBodyLimit = 1 << 20
 
 type Server struct {
 	mutator *Mutator
@@ -37,8 +40,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, admissionReviewBodyLimit))
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			err = fmt.Errorf("request body too large: limit is %d bytes", admissionReviewBodyLimit)
+		}
 		writeAdmissionError(w, "", err)
 		return
 	}
