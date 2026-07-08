@@ -118,8 +118,9 @@ func (m *LifecycleManager) ensureWebhook(ctx context.Context, caBundle []byte) e
 		return fmt.Errorf("get mutating webhook configuration: %w", err)
 	}
 	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		webhook.ResourceVersion = current.ResourceVersion
-		_, err = webhooks.Update(ctx, webhook, metav1.UpdateOptions{})
+		updatedWebhook := current.DeepCopy()
+		updatedWebhook.Webhooks = webhook.Webhooks
+		_, err = webhooks.Update(ctx, updatedWebhook, metav1.UpdateOptions{})
 		if apierrors.IsConflict(err) {
 			conflictErr := err
 			current, err = webhooks.Get(ctx, m.config.WebhookName, metav1.GetOptions{})

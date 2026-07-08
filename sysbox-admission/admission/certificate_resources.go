@@ -163,8 +163,9 @@ func (m *LifecycleManager) applyCASecret(ctx context.Context, caCertPEM, caKeyPE
 	}
 	var updated *corev1.Secret
 	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		secret.ResourceVersion = current.ResourceVersion
-		updated, err = secrets.Update(ctx, secret, metav1.UpdateOptions{})
+		updatedSecret := current.DeepCopy()
+		updatedSecret.Data = secret.Data
+		updated, err = secrets.Update(ctx, updatedSecret, metav1.UpdateOptions{})
 		if apierrors.IsConflict(err) {
 			conflictErr := err
 			current, err = secrets.Get(ctx, m.config.CASecretName, metav1.GetOptions{})
@@ -211,8 +212,10 @@ func (m *LifecycleManager) applyTLSSecret(ctx context.Context, tlsCertPEM, tlsKe
 	}
 	var updated *corev1.Secret
 	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		secret.ResourceVersion = current.ResourceVersion
-		updated, err = secrets.Update(ctx, secret, metav1.UpdateOptions{})
+		updatedSecret := current.DeepCopy()
+		updatedSecret.Type = corev1.SecretTypeTLS
+		updatedSecret.Data = secret.Data
+		updated, err = secrets.Update(ctx, updatedSecret, metav1.UpdateOptions{})
 		if apierrors.IsConflict(err) {
 			conflictErr := err
 			current, err = secrets.Get(ctx, m.config.TLSSecretName, metav1.GetOptions{})

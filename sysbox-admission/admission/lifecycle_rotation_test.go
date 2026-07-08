@@ -71,6 +71,33 @@ func TestLifecycleManager_Ensure_rotatesOnlyTLSSecret_whenLeafInsideRenewalWindo
 	requireReturnedCertificateFromSecret(t, result, tlsSecret)
 }
 
+func TestLifecycleManager_Ensure_preservesTLSSecretMetadata_whenUpdatingTLSSecret(t *testing.T) {
+	// Given: a TLS Secret with installer-owned metadata and a leaf inside the renewal window.
+	ctx := context.Background()
+	bundle := mustGenerateHealthBundle(t, certHealthNow)
+	expiringTLSCertPEM, expiringTLSKeyPEM := mustGenerateHealthLeaf(t, bundle, certHealthNow.Add(-leafValidity+12*time.Hour), "sysbox-admission")
+	tlsSecret := lifecycleTLSSecret(expiringTLSCertPEM, expiringTLSKeyPEM)
+	tlsSecret.Labels = map[string]string{"app.kubernetes.io/managed-by": "helm"}
+	tlsSecret.Annotations = map[string]string{"example.com/keep": "true"}
+	tlsSecret.Finalizers = []string{"example.com/finalizer"}
+	client := fake.NewSimpleClientset(lifecycleCASecret(bundle), tlsSecret)
+	webhook := mustLifecycleWebhook(t, bundle.CACertPEM)
+	_, err := client.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(ctx, webhook, metav1.CreateOptions{})
+	require.NoError(t, err)
+	manager := newTestLifecycleManager(client, lifecycleRotationConfig())
+
+	// When: lifecycle reconciliation rotates only the TLS Secret data.
+	_, err = manager.Ensure(ctx)
+
+	// Then: Secret metadata remains intact.
+	require.NoError(t, err)
+	_, updatedTLSSecret, _ := lifecycleCertificateState(t, ctx, client)
+	require.NotEqual(t, expiringTLSCertPEM, updatedTLSSecret.Data[corev1.TLSCertKey])
+	require.Equal(t, map[string]string{"app.kubernetes.io/managed-by": "helm"}, updatedTLSSecret.Labels)
+	require.Equal(t, map[string]string{"example.com/keep": "true"}, updatedTLSSecret.Annotations)
+	require.Equal(t, []string{"example.com/finalizer"}, updatedTLSSecret.Finalizers)
+}
+
 func TestLifecycleManager_Ensure_rotatesCAAndTLSSecret_whenCAInsideRenewalWindow(t *testing.T) {
 	// Given: CA and TLS Secrets inside the CA renewal window.
 	ctx := context.Background()
@@ -99,6 +126,32 @@ func TestLifecycleManager_Ensure_rotatesCAAndTLSSecret_whenCAInsideRenewalWindow
 	require.NoError(t, err)
 	require.Equal(t, CertificateHealthy, action)
 	requireReturnedCertificateFromSecret(t, result, tlsSecret)
+}
+
+func TestLifecycleManager_Ensure_preservesCASecretMetadata_whenUpdatingCASecret(t *testing.T) {
+	// Given: a CA Secret with installer-owned metadata and a CA inside the renewal window.
+	ctx := context.Background()
+	expiringBundle := mustGenerateHealthBundle(t, certHealthNow.Add(-caValidity+12*time.Hour))
+	caSecret := lifecycleCASecret(expiringBundle)
+	caSecret.Labels = map[string]string{"app.kubernetes.io/managed-by": "helm"}
+	caSecret.Annotations = map[string]string{"example.com/keep": "true"}
+	caSecret.Finalizers = []string{"example.com/finalizer"}
+	client := fake.NewSimpleClientset(caSecret, lifecycleTLSSecret(expiringBundle.TLSCertPEM, expiringBundle.TLSKeyPEM))
+	webhook := mustLifecycleWebhook(t, expiringBundle.CACertPEM)
+	_, err := client.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(ctx, webhook, metav1.CreateOptions{})
+	require.NoError(t, err)
+	manager := newTestLifecycleManager(client, lifecycleRotationConfig())
+
+	// When: lifecycle reconciliation rotates the CA Secret data.
+	_, err = manager.Ensure(ctx)
+
+	// Then: Secret metadata remains intact.
+	require.NoError(t, err)
+	updatedCASecret, _, _ := lifecycleCertificateState(t, ctx, client)
+	require.NotEqual(t, expiringBundle.CACertPEM, updatedCASecret.Data[CASecretCertKey])
+	require.Equal(t, map[string]string{"app.kubernetes.io/managed-by": "helm"}, updatedCASecret.Labels)
+	require.Equal(t, map[string]string{"example.com/keep": "true"}, updatedCASecret.Annotations)
+	require.Equal(t, []string{"example.com/finalizer"}, updatedCASecret.Finalizers)
 }
 
 func TestLifecycleManager_Ensure_rotatesCAAndTLSSecret_whenCAKeyMismatchesCACertificate(t *testing.T) {
