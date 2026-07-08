@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/tls"
+	"net/http"
 	"os"
 	"testing"
 	"time"
@@ -51,6 +52,66 @@ func TestDynamicTLSConfig_getsCertificateFromReloader(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, updated.Certificate, certificate.Certificate)
 	require.Empty(t, tlsConfig.Certificates)
+}
+
+func TestDynamicTLSConfig_setsMinimumTLSVersion(t *testing.T) {
+	// Given: a dynamic TLS reloader.
+	reloader := admission.NewCertificateReloader(tls.Certificate{Certificate: [][]byte{[]byte("initial")}})
+
+	// When: TLS config is built.
+	tlsConfig := dynamicTLSConfig(reloader)
+
+	// Then: old TLS versions are disabled.
+	require.Equal(t, uint16(tls.VersionTLS12), tlsConfig.MinVersion)
+}
+
+func TestNewAdmissionHTTPServer_setsExplicitTimeouts(t *testing.T) {
+	// Given: an admission handler.
+	handler := http.NewServeMux()
+
+	// When: the HTTP server is built.
+	server := newAdmissionHTTPServer(":9443", handler, nil)
+
+	// Then: all request lifecycle timeouts are explicit.
+	require.NotZero(t, server.ReadHeaderTimeout)
+	require.NotZero(t, server.ReadTimeout)
+	require.NotZero(t, server.WriteTimeout)
+	require.NotZero(t, server.IdleTimeout)
+	require.Equal(t, ":9443", server.Addr)
+	require.Same(t, handler, server.Handler)
+}
+
+func TestValidateServeConfig_rejectsPlainHTTPByDefault(t *testing.T) {
+	// Given: bootstrap is disabled and no TLS files are configured.
+	config := serveConfig{}
+
+	// When: the serve config is validated.
+	err := validateServeConfig(config)
+
+	// Then: plaintext HTTP is rejected by default.
+	require.ErrorIs(t, err, errInsecureHTTPDisabled)
+}
+
+func TestValidateServeConfig_allowsPlainHTTP_whenExplicitlyEnabled(t *testing.T) {
+	// Given: plaintext HTTP is explicitly enabled for development.
+	config := serveConfig{allowInsecureHTTP: true}
+
+	// When: the serve config is validated.
+	err := validateServeConfig(config)
+
+	// Then: validation allows the configuration.
+	require.NoError(t, err)
+}
+
+func TestValidateServeConfig_rejectsPartialTLSFiles(t *testing.T) {
+	// Given: only one TLS file is configured.
+	config := serveConfig{tlsCert: "tls.crt"}
+
+	// When: the serve config is validated.
+	err := validateServeConfig(config)
+
+	// Then: both TLS files are required together.
+	require.ErrorIs(t, err, errIncompleteTLSFiles)
 }
 
 func TestBootstrapTLSWithClient_doesNotEnsureLifecycleBeforeLeaderPath(t *testing.T) {

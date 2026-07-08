@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"flag"
 	"log"
 	"net/http"
@@ -22,10 +23,29 @@ const defaultCertificateRotationInterval = 6 * time.Hour
 const defaultCertificateRenewalWindow = 90 * 24 * time.Hour
 const defaultCertificateSecretRefreshInterval = time.Minute
 
+var (
+	errIncompleteTLSFiles   = errors.New("tls-cert and tls-key must be configured together")
+	errInsecureHTTPDisabled = errors.New("plaintext HTTP requires --allow-insecure-http")
+)
+
+const (
+	readHeaderTimeout = 5 * time.Second
+	readTimeout       = 15 * time.Second
+	writeTimeout      = 15 * time.Second
+	idleTimeout       = 60 * time.Second
+)
+
 type bootstrapTLSRuntime struct {
 	clients  admission.LifecycleClients
 	manager  *admission.LifecycleManager
 	reloader *admission.CertificateReloader
+}
+
+type serveConfig struct {
+	bootstrapWebhook  bool
+	tlsCert           string
+	tlsKey            string
+	allowInsecureHTTP bool
 }
 
 func main() {
@@ -33,6 +53,7 @@ func main() {
 	tlsCert := flag.String("tls-cert", "", "tls certificate path")
 	tlsKey := flag.String("tls-key", "", "tls key path")
 	bootstrapWebhook := flag.Bool("bootstrap-webhook", false, "bootstrap webhook certificates and Kubernetes webhook configuration")
+	allowInsecureHTTP := flag.Bool("allow-insecure-http", false, "allow plaintext HTTP without TLS; development only")
 	namespace := flag.String("namespace", defaultNamespace(), "namespace for webhook-owned runtime resources")
 	serviceName := flag.String("service-name", "sysbox-admission", "Kubernetes Service name for webhook callbacks")
 	servicePort := flag.Int("service-port", 443, "Kubernetes Service port for webhook callbacks")
@@ -52,6 +73,14 @@ func main() {
 	}
 	mutator := admission.NewMutator(admission.Config{SandboxImage: sandboxImage})
 	server := admission.NewServer(mutator)
+	if err := validateServeConfig(serveConfig{
+		bootstrapWebhook:  *bootstrapWebhook,
+		tlsCert:           *tlsCert,
+		tlsKey:            *tlsKey,
+		allowInsecureHTTP: *allowInsecureHTTP,
+	}); err != nil {
+		log.Fatal(err)
+	}
 	log.Printf("starting sysbox admission on %s sandboxImage=%s", *addr, sandboxImage)
 	if *bootstrapWebhook {
 		ctx := context.Background()
@@ -98,17 +127,15 @@ func main() {
 				log.Printf("certificate secret refresh loop failed: %v", err)
 			}
 		}()
-		httpServer := &http.Server{
-			Addr:      *addr,
-			Handler:   server,
-			TLSConfig: dynamicTLSConfig(bootstrapRuntime.reloader),
-		}
+		httpServer := newAdmissionHTTPServer(*addr, server, dynamicTLSConfig(bootstrapRuntime.reloader))
 		log.Fatal(httpServer.ListenAndServeTLS("", ""))
 	}
 	if *tlsCert != "" && *tlsKey != "" {
-		log.Fatal(http.ListenAndServeTLS(*addr, *tlsCert, *tlsKey, server))
+		httpServer := newAdmissionHTTPServer(*addr, server, &tls.Config{MinVersion: tls.VersionTLS12})
+		log.Fatal(httpServer.ListenAndServeTLS(*tlsCert, *tlsKey))
 	}
-	log.Fatal(http.ListenAndServe(*addr, server))
+	httpServer := newAdmissionHTTPServer(*addr, server, nil)
+	log.Fatal(httpServer.ListenAndServe())
 }
 
 func defaultNamespace() string {
@@ -126,7 +153,29 @@ func leaderIdentity(override string) (string, error) {
 }
 
 func dynamicTLSConfig(reloader *admission.CertificateReloader) *tls.Config {
-	return &tls.Config{GetCertificate: reloader.GetCertificate}
+	return &tls.Config{GetCertificate: reloader.GetCertificate, MinVersion: tls.VersionTLS12}
+}
+
+func newAdmissionHTTPServer(addr string, handler http.Handler, tlsConfig *tls.Config) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		TLSConfig:         tlsConfig,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+	}
+}
+
+func validateServeConfig(config serveConfig) error {
+	if (config.tlsCert == "") != (config.tlsKey == "") {
+		return errIncompleteTLSFiles
+	}
+	if config.bootstrapWebhook || config.tlsCert != "" || config.allowInsecureHTTP {
+		return nil
+	}
+	return errInsecureHTTPDisabled
 }
 
 func bootstrapTLS(config admission.LifecycleConfig) (bootstrapTLSRuntime, error) {
