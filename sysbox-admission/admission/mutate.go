@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -34,23 +33,19 @@ func NewMutator(config Config) *Mutator {
 
 func (m *Mutator) Mutate(ctx context.Context, pod *corev1.Pod) (*corev1.Pod, error) {
 	mutated := pod.DeepCopy()
-	_, enabled, err := m.mutatePodTemplate(ctx, &mutated.ObjectMeta, &mutated.Spec)
+	_, enabled, err := m.mutatePod(ctx, mutated)
 	if err != nil || !enabled {
 		return mutated, err
 	}
 	return mutated, nil
 }
 
-func (m *Mutator) mutateAppWorkload(ctx context.Context, metadata *metav1.ObjectMeta, template *corev1.PodTemplateSpec) error {
-	_, _, err := m.mutatePodTemplate(ctx, metadata, &template.Spec)
-	return err
-}
-
-func (m *Mutator) mutatePodTemplate(ctx context.Context, metadata *metav1.ObjectMeta, spec *corev1.PodSpec) ([]RootfsRwLayerEntry, bool, error) {
+func (m *Mutator) mutatePod(ctx context.Context, pod *corev1.Pod) ([]RootfsRwLayerEntry, bool, error) {
+	spec := &pod.Spec
 	if spec.RuntimeClassName == nil || *spec.RuntimeClassName != "sysbox-runc" {
 		return nil, false, nil
 	}
-	entries, enabled, err := parseRootfsAnnotation(metadata.Annotations, spec)
+	entries, enabled, err := parseRootfsAnnotation(pod.Annotations, spec)
 	if err != nil || !enabled {
 		return nil, false, err
 	}

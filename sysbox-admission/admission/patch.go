@@ -29,19 +29,3 @@ func patchForPod(original *corev1.Pod, mutated *corev1.Pod) ([]byte, error) {
 	patches = append(patches, jsonPatch{Op: op, Path: path, Value: mutated.Labels})
 	return json.Marshal(patches)
 }
-
-func patchForAppWorkload(original *corev1.PodTemplateSpec, mutated *corev1.PodTemplateSpec, templatePath string) ([]byte, error) {
-	patches := []jsonPatch{}
-	if !reflect.DeepEqual(original.Spec.Containers, mutated.Spec.Containers) {
-		patches = append(patches, jsonPatch{Op: "replace", Path: templatePath + "/spec/containers", Value: mutated.Spec.Containers})
-	}
-	if !reflect.DeepEqual(original.Annotations, mutated.Annotations) {
-		path := templatePath + "/metadata/annotations"
-		op := "add"
-		if original.Annotations != nil {
-			op = "replace"
-		}
-		patches = append(patches, jsonPatch{Op: op, Path: path, Value: mutated.Annotations})
-	}
-	return json.Marshal(patches)
-}

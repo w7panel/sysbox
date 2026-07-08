@@ -52,23 +52,7 @@ func BuildMutatingWebhookConfiguration(config WebhookConfig) (*admissionregistra
 				},
 				Rules: []admissionregistrationv1.RuleWithOperations{
 					{
-						Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Create, admissionregistrationv1.Update},
-						Rule: admissionregistrationv1.Rule{
-							APIGroups:   []string{"apps"},
-							APIVersions: []string{"v1"},
-							Resources:   []string{"deployments", "statefulsets", "daemonsets"},
-						},
-					},
-					{
-						Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Create, admissionregistrationv1.Update},
-						Rule: admissionregistrationv1.Rule{
-							APIGroups:   []string{"batch"},
-							APIVersions: []string{"v1"},
-							Resources:   []string{"jobs", "cronjobs"},
-						},
-					},
-					{
-						Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Create, admissionregistrationv1.Update},
+						Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Create},
 						Rule: admissionregistrationv1.Rule{
 							APIGroups:   []string{""},
 							APIVersions: []string{"v1"},
