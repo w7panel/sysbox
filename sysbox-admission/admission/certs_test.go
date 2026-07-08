@@ -3,6 +3,7 @@ package admission
 import (
 	"crypto/x509"
 	"encoding/pem"
+	"math/big"
 	"testing"
 	"time"
 
@@ -63,4 +64,35 @@ func TestGenerateCertificateBundle_issuesLeafForServiceDNSNames(t *testing.T) {
 		Roots:   pool,
 	})
 	require.NoError(t, err)
+}
+
+func TestGenerateCertificateBundle_usesRandomPositiveSerialNumbers(t *testing.T) {
+	// Given: a deterministic certificate request for the webhook Service.
+	now := time.Date(2026, 7, 5, 0, 0, 0, 0, time.UTC)
+	config := CertificateConfig{
+		ServiceName: "sysbox-admission",
+		Namespace:   "sysbox-system",
+		Now:         func() time.Time { return now },
+	}
+
+	// When: a bundle is generated.
+	bundle, err := GenerateCertificateBundle(config)
+	require.NoError(t, err)
+
+	// Then: CA and leaf serial numbers are positive and not fixed constants.
+	caCert := parseTestCertificate(t, bundle.CACertPEM)
+	leafCert := parseTestCertificate(t, bundle.TLSCertPEM)
+	require.Positive(t, caCert.SerialNumber.Sign())
+	require.Positive(t, leafCert.SerialNumber.Sign())
+	require.NotEqual(t, big.NewInt(1), caCert.SerialNumber)
+	require.NotEqual(t, big.NewInt(2), leafCert.SerialNumber)
+}
+
+func parseTestCertificate(t *testing.T, certPEM []byte) *x509.Certificate {
+	t.Helper()
+	block, _ := pem.Decode(certPEM)
+	require.NotNil(t, block)
+	cert, err := x509.ParseCertificate(block.Bytes)
+	require.NoError(t, err)
+	return cert
 }

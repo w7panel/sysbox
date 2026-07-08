@@ -14,6 +14,7 @@ import (
 const (
 	caValidity   = 10 * 365 * 24 * time.Hour
 	leafValidity = 365 * 24 * time.Hour
+	serialBits   = 128
 )
 
 type CertificateConfig struct {
@@ -62,8 +63,12 @@ func GenerateCertificateBundle(config CertificateConfig) (CertificateBundle, err
 	if err != nil {
 		return CertificateBundle{}, fmt.Errorf("generate ca key: %w", err)
 	}
+	caSerial, err := randomSerialNumber()
+	if err != nil {
+		return CertificateBundle{}, fmt.Errorf("generate ca serial number: %w", err)
+	}
 	caTemplate := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
+		SerialNumber:          caSerial,
 		Subject:               pkix.Name{CommonName: "sysbox-admission-webhook-ca"},
 		NotBefore:             issuedAt.Add(-time.Minute),
 		NotAfter:              issuedAt.Add(caValidity),
@@ -125,9 +130,13 @@ func GenerateTLSCertificate(config TLSCertificateConfig) ([]byte, []byte, error)
 	if err != nil {
 		return nil, nil, fmt.Errorf("generate leaf key: %w", err)
 	}
+	leafSerial, err := randomSerialNumber()
+	if err != nil {
+		return nil, nil, fmt.Errorf("generate leaf serial number: %w", err)
+	}
 	dnsNames := ServiceDNSNames(config.ServiceName, config.Namespace)
 	leafTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(2),
+		SerialNumber: leafSerial,
 		Subject:      pkix.Name{CommonName: dnsNames[0]},
 		DNSNames:     dnsNames,
 		NotBefore:    issuedAt.Add(-time.Minute),
@@ -141,4 +150,17 @@ func GenerateTLSCertificate(config TLSCertificateConfig) ([]byte, []byte, error)
 	}
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDER}),
 		pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(leafKey)}), nil
+}
+
+func randomSerialNumber() (*big.Int, error) {
+	limit := new(big.Int).Lsh(big.NewInt(1), serialBits)
+	for {
+		serial, err := rand.Int(rand.Reader, limit)
+		if err != nil {
+			return nil, err
+		}
+		if serial.Sign() > 0 {
+			return serial, nil
+		}
+	}
 }
