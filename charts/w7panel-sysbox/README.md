@@ -75,7 +75,7 @@ Deployment, Service, and admission-only RBAC.
 | `admission.podAnnotations` | `{}` | Extra annotations for admission pods. |
 
 For non-k3s clusters, set `admission.containerdConfigPath` to the host
-containerd config directory:
+containerd config directory containing `config.toml`:
 
 ```bash
 helm upgrade --install w7panel-sysbox ./charts/w7panel-sysbox \
