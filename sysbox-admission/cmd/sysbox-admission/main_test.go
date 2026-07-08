@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"net/http"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -144,4 +145,23 @@ func TestBootstrapTLSWithClient_doesNotEnsureLifecycleBeforeLeaderPath(t *testin
 	require.NotNil(t, runtime.manager)
 	require.NotNil(t, runtime.reloader)
 	require.Empty(t, client.Actions())
+}
+
+func TestSandboxImageFromConfig_usesConfiguredContainerdConfigDir(t *testing.T) {
+	// Given
+	configDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(`
+version = 3
+
+[plugins]
+  [plugins."io.containerd.cri.v1.images"]
+    sandbox_image = "registry.example/k3s-pause:9.9"
+`), 0600))
+
+	// When
+	image, err := sandboxImageFromConfig(configDir)
+
+	// Then
+	require.NoError(t, err)
+	require.Equal(t, "registry.example/k3s-pause:9.9", image)
 }

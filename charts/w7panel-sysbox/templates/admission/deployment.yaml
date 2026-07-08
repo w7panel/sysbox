@@ -52,6 +52,7 @@ spec:
             - -ca-secret-name={{ include "w7panel-sysbox.admissionCASecretName" . }}
             - -tls-secret-name={{ include "w7panel-sysbox.admissionTLSSecretName" . }}
             - -lease-name={{ include "w7panel-sysbox.admissionLeaseName" . }}
+            - -containerd-config-dir=/host/containerd
           env:
             - name: POD_NAMESPACE
               valueFrom:
@@ -72,26 +73,12 @@ spec:
               port: https
               scheme: HTTPS
           volumeMounts:
-            - name: k3s-containerd-config
-              mountPath: /var/lib/rancher/k3s/agent/etc/containerd
-              readOnly: true
-            - name: etc-containerd-config
-              mountPath: /etc/containerd
-              readOnly: true
-            - name: usr-local-containerd-config
-              mountPath: /usr/local/etc/containerd
+            - name: containerd-config
+              mountPath: /host/containerd
               readOnly: true
       volumes:
-        - name: k3s-containerd-config
+        - name: containerd-config
           hostPath:
-            path: /var/lib/rancher/k3s/agent/etc/containerd
-            type: DirectoryOrCreate
-        - name: etc-containerd-config
-          hostPath:
-            path: /etc/containerd
-            type: DirectoryOrCreate
-        - name: usr-local-containerd-config
-          hostPath:
-            path: /usr/local/etc/containerd
-            type: DirectoryOrCreate
+            path: {{ .Values.admission.containerdConfigPath | quote }}
+            type: Directory
 {{- end }}

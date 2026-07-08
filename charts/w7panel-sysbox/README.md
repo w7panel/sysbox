@@ -68,10 +68,20 @@ Deployment, Service, and admission-only RBAC.
 
 | Value | Default | Description |
 | --- | --- | --- |
-| `admission.enabled` | `true` | Render the admission backend Deployment, Service, and admission-only RBAC. |
+| `admission.enabled` | `false` | Render the admission backend Deployment, Service, and admission-only RBAC. |
 | `admission.replicas` | `1` | Admission backend replica count. |
+| `admission.containerdConfigPath` | `/var/lib/rancher/k3s/agent/etc/containerd` | Host containerd config directory mounted read-only into the admission backend for sandbox image detection. |
 | `admission.podLabels` | `{}` | Extra labels for admission pods. |
 | `admission.podAnnotations` | `{}` | Extra annotations for admission pods. |
+
+For non-k3s clusters, set `admission.containerdConfigPath` to the host
+containerd config directory:
+
+```bash
+helm upgrade --install w7panel-sysbox ./charts/w7panel-sysbox \
+  --set admission.enabled=true \
+  --set admission.containerdConfigPath=/etc/containerd
+```
 
 ### Snapshotter
 
@@ -81,4 +91,4 @@ image. Set it to `false` to install Sysbox without the host-side
 
 | Value | Default | Description |
 | --- | --- | --- |
-| `snapshotter.enabled` | `true` | Install and configure the host-side sysbox-snapshotter service. |
+| `snapshotter.enabled` | `false` | Install and configure the host-side sysbox-snapshotter service. |

@@ -11,6 +11,7 @@ installer:
 admission:
   enabled: false
   replicas: 1
+  containerdConfigPath: /var/lib/rancher/k3s/agent/etc/containerd
   podLabels: {}
   podAnnotations: {}
 

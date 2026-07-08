@@ -54,6 +54,7 @@ func main() {
 	tlsKey := flag.String("tls-key", "", "tls key path")
 	bootstrapWebhook := flag.Bool("bootstrap-webhook", false, "bootstrap webhook certificates and Kubernetes webhook configuration")
 	allowInsecureHTTP := flag.Bool("allow-insecure-http", false, "allow plaintext HTTP without TLS; development only")
+	containerdConfigDir := flag.String("containerd-config-dir", "", "containerd config directory used to detect sandbox image")
 	namespace := flag.String("namespace", defaultNamespace(), "namespace for webhook-owned runtime resources")
 	serviceName := flag.String("service-name", "sysbox-admission", "Kubernetes Service name for webhook callbacks")
 	servicePort := flag.Int("service-port", 443, "Kubernetes Service port for webhook callbacks")
@@ -67,7 +68,7 @@ func main() {
 	secretRefreshInterval := flag.Duration("certificate-secret-refresh-interval", defaultCertificateSecretRefreshInterval, "serving TLS Secret refresh interval for all replicas")
 	flag.Parse()
 
-	sandboxImage, err := containerdUtils.GetSandboxImage()
+	sandboxImage, err := sandboxImageFromConfig(*containerdConfigDir)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -143,6 +144,13 @@ func defaultNamespace() string {
 		return namespace
 	}
 	return "sysbox-system"
+}
+
+func sandboxImageFromConfig(containerdConfigDir string) (string, error) {
+	if containerdConfigDir == "" {
+		return containerdUtils.GetSandboxImage()
+	}
+	return containerdUtils.GetSandboxImageFromDir(containerdConfigDir)
 }
 
 func leaderIdentity(override string) (string, error) {
