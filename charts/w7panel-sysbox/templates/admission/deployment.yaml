@@ -1,3 +1,4 @@
+{{- if .Values.admission.enabled }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -93,3 +94,4 @@ spec:
           hostPath:
             path: /usr/local/etc/containerd
             type: DirectoryOrCreate
+{{- end }}

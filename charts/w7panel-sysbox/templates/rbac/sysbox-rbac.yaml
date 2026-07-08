@@ -20,9 +20,12 @@ rules:
 - apiGroups: [""]
   resources: ["pods"]
   verbs: ["list", "delete"]
+{{- if .Values.admission.enabled }}
 - apiGroups: ["admissionregistration.k8s.io"]
   resources: ["mutatingwebhookconfigurations"]
   verbs: ["get", "create", "update"]
+{{- end }}
+{{- if .Values.admission.enabled }}
 ---
 kind: Role
 apiVersion: rbac.authorization.k8s.io/v1
@@ -54,6 +57,7 @@ subjects:
 - kind: ServiceAccount
   name: {{ include "w7panel-sysbox.serviceAccountName" . }}
   namespace: {{ include "w7panel-sysbox.namespace" . }}
+{{- end }}
 ---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1

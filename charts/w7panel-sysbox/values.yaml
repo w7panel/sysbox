@@ -12,6 +12,10 @@ installer:
   podAnnotations: {}
 
 admission:
+  enabled: true
   replicas: 1
   podLabels: {}
   podAnnotations: {}
+
+snapshotter:
+  enabled: true
