@@ -1,7 +1,7 @@
 nodeSelector: {}
 
 image:
-  repository: ghcr.io/w7panel/sysbox-deploy-k3s
+  repository: ghcr.registry.cdn.w7.cc/w7panel/sysbox-deploy-k3s
   tag: ""
 
 installer:
