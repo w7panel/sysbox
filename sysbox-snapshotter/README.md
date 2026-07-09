@@ -53,29 +53,23 @@ When remap delegation is enabled, the output must include `Capabilities: remap-i
 
 ## Rootfs Intent
 
-Rootfs rw-layer intent is stored on the injected sidecar container, not in per-Pod files. `sysbox-admission` always replaces any existing `sysbox-rootfs` container with a canonical sidecar and writes the complete intent to the `ROOTFS_RW_LAYER_SPEC` environment variable:
+Rootfs rw-layer intent comes from the Kubernetes Pod annotation forwarded by containerd into each container OCI spec. `sysbox-admission` validates the annotation and always replaces any existing `sysbox-rootfs` container with a canonical sidecar, but it does not write rootfs intent into sidecar environment variables.
 
 ```json
 {
-  "version": 1,
-  "entries": [
-    {
-      "containerName": "c1",
-      "volumeName": "rootfs",
-      "path": "containers/c1",
-      "pvcClaimName": "sysbox-rootfs-pvc"
-    }
-  ]
+  "name": "c1",
+  "volumeName": "rootfs",
+  "path": "containers/c1"
 }
 ```
 
-At runtime, `sysbox-snapshotter` uses containerd labels to find the current Pod's sidecar OCI spec. It reads `ROOTFS_RW_LAYER_SPEC` for container intent and reads the sidecar OCI mounts to resolve `volumeName` to the exact node-side PVC source path.
+At runtime, `sysbox-snapshotter` reads the current container OCI annotation `sysbox/rootfs-rw-layer` to find the matching container entry. It still uses containerd labels to find the current Pod's sidecar OCI spec, but only to read the sidecar OCI mounts and resolve `volumeName` to the exact node-side PVC source path.
 
-`path` must be relative and must not contain `..`. The snapshotter never infers a host path from `volumeName` alone; it must match the corresponding sidecar mount at `/var/lib/sysbox/rootfs-rw-volume/<volumeName>`. If no sidecar intent is available for a container, native overlay mounts are returned unchanged. Once a sidecar intent entry exists for that container, malformed intent or a missing requested mount fails closed for that rootfs rw-layer request.
+`path` must be relative and must not contain `..`. The snapshotter never infers a host path from `volumeName` alone; it must match the corresponding sidecar mount at `/var/lib/sysbox/rootfs-rw-volume/<volumeName>`. If no annotation entry is available for a container, native overlay mounts are returned unchanged. Once an annotation entry exists for that container, malformed intent, unavailable sidecar metadata, or a missing requested mount fails closed for that rootfs rw-layer request.
 
 `LocalPreparer` remains local to `sysbox-snapshotter`; rootfs preparation is not performed by sysbox-admission, a database, or a containerd fork.
 
-When an intent entry exists, the snapshotter prepares this layout under the resolved PVC mount path plus `path`:
+When an annotation entry exists, the snapshotter prepares this layout under the resolved PVC mount path plus `path`:
 
 ```text
 upper/
@@ -88,8 +82,8 @@ The identity of a reusable rootfs rw-layer is the configured PVC-backed path, no
 the container image. Recreating a Pod with the same `volumeName` and `path` may
 reuse the existing `upper/` and `work/` over a different image. This is an
 intentional persistence semantic: users are responsible for choosing stable paths
-whose lifecycle matches the desired rootfs state. The current Kubernetes sidecar
-intent path does not use image chain identity to reject cross-image reuse.
+whose lifecycle matches the desired rootfs state. The current Kubernetes
+annotation path does not use image chain identity to reject cross-image reuse.
 
 ## Snapshot Labels
 
@@ -102,7 +96,7 @@ io.nestybox.sysbox.rootfs-rw-layer.pod-uid
 io.nestybox.sysbox.rootfs-rw-layer.container-name
 ```
 
-Those labels are not a replacement for resolving the node-side PVC mount path unless that future integration also provides a trusted path. If no sidecar intent exists, native overlay mounts are returned unchanged.
+Those labels are not a replacement for resolving the node-side PVC mount path unless that future integration also provides a trusted path. If no rootfs rw-layer annotation entry exists, native overlay mounts are returned unchanged.
 
 ## Build And Test
 
