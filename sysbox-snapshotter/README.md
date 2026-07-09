@@ -53,15 +53,33 @@ When remap delegation is enabled, the output must include `Capabilities: remap-i
 
 ## Rootfs Intent
 
-Rootfs rw-layer intent comes from the Kubernetes Pod annotation forwarded by containerd into each container OCI spec. `sysbox-admission` validates the annotation and always replaces any existing `sysbox-rootfs` container with a canonical sidecar, but it does not write rootfs intent into sidecar environment variables.
+Rootfs rw-layer intent comes from the Kubernetes Pod annotation forwarded by containerd into each container OCI spec. Put `sysbox/rootfs-rw-layer` under the workload Pod template's `metadata.annotations`; `sysbox-admission` validates the annotation and always replaces any existing `sysbox-rootfs` container with a canonical sidecar, but it does not write rootfs intent into sidecar environment variables.
 
-```json
-{
-  "name": "c1",
-  "volumeName": "rootfs",
-  "path": "containers/c1"
-}
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    sysbox/rootfs-rw-layer: |
+      [
+        {
+          "name": "c1",
+          "volumeName": "rootfs",
+          "path": "containers/c1"
+        }
+      ]
+spec:
+  runtimeClassName: sysbox-runc
+  containers:
+    - name: c1
+      image: alpine:3.23.5
+  volumes:
+    - name: rootfs
+      persistentVolumeClaim:
+        claimName: sysbox-rootfs-pvc
 ```
+
+For controllers such as Deployment or StatefulSet, put the same annotation under `spec.template.metadata.annotations`. In each annotation entry, `name` must match the target app container name, `volumeName` must match a PVC-backed `spec.volumes[].name`, and `path` is the persistent rootfs rw-layer directory inside that PVC.
 
 At runtime, `sysbox-snapshotter` reads the current container OCI annotation `sysbox/rootfs-rw-layer` to find the matching container entry. It still uses containerd labels to find the current Pod's sidecar OCI spec, but only to read the sidecar OCI mounts and resolve `volumeName` to the exact node-side PVC source path.
 
