@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nestybox/sysbox-admission/admission"
 	"github.com/stretchr/testify/require"
+	"github.com/w7panel/sysbox/sysbox-admission/admission"
 	"k8s.io/client-go/kubernetes/fake"
 )
 

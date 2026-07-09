@@ -2,40 +2,18 @@ package rootfs
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
-	"time"
+	"strings"
 )
 
 type LocalPreparer struct{}
 
-type layerMetadata struct {
-	Version        int         `json:"version"`
-	State          string      `json:"state"`
-	SnapshotKey    string      `json:"snapshotKey"`
-	PodUID         string      `json:"podUID"`
-	ContainerName  string      `json:"containerName"`
-	VolumeName     string      `json:"volumeName"`
-	Path           string      `json:"path"`
-	PVCClaimName   string      `json:"pvcClaimName"`
-	UIDMappings    []IDMapping `json:"uidMappings"`
-	GIDMappings    []IDMapping `json:"gidMappings"`
-	CreatedAt      time.Time   `json:"createdAt"`
-	LastAttachedAt time.Time   `json:"lastAttachedAt"`
-}
+func NewLocalPreparer() *LocalPreparer { return &LocalPreparer{} }
 
-func NewLocalPreparer() *LocalPreparer {
-	return &LocalPreparer{}
-}
-
-func (p *LocalPreparer) PrepareRootfsRwLayer(
-	ctx context.Context,
-	request PrepareRootfsRequest,
-) (PreparedRootfs, error) {
+func (p *LocalPreparer) PrepareRootfsRwLayer(ctx context.Context, request PrepareRootfsRequest) (PreparedRootfs, error) {
 	if err := ctx.Err(); err != nil {
 		return PreparedRootfs{}, err
 	}
@@ -46,175 +24,63 @@ func (p *LocalPreparer) PrepareRootfsRwLayer(
 	if err != nil {
 		return PreparedRootfs{}, err
 	}
-	if err := rejectSymlink(layerRoot); err != nil {
+	if err := rejectSymlink(request.PVCMountPath, layerRoot); err != nil {
 		return PreparedRootfs{}, err
 	}
-	metaPath := filepath.Join(layerRoot, "meta.json")
-	if _, err := os.Stat(metaPath); errors.Is(err, os.ErrNotExist) {
-		if err := p.initializeLayer(layerRoot, metaPath, request); err != nil {
-			return PreparedRootfs{}, err
+	upper := filepath.Join(layerRoot, "upper")
+	work := filepath.Join(layerRoot, "work")
+	for _, path := range []string{upper, work} {
+		if info, err := os.Lstat(path); err == nil && (info.Mode()&os.ModeSymlink != 0 || !info.IsDir()) {
+			return PreparedRootfs{}, ErrUnmanagedRootfsLayer
 		}
-	} else if err != nil {
-		return PreparedRootfs{}, fmt.Errorf("stat rootfs rw-layer metadata: %w", err)
-	} else if err := p.ensureManagedLayer(layerRoot, metaPath, request); err != nil {
-		return PreparedRootfs{}, err
 	}
-	if err := p.attachLayer(metaPath, request); err != nil {
-		return PreparedRootfs{}, err
+	if err := os.MkdirAll(upper, 0o755); err != nil {
+		return PreparedRootfs{}, fmt.Errorf("create rootfs upperdir: %w", err)
 	}
-
-	return PreparedRootfs{
-		UpperDir: filepath.Join(layerRoot, "upper"),
-		WorkDir:  filepath.Join(layerRoot, "work"),
-	}, nil
-}
-
-func (p *LocalPreparer) initializeLayer(layerRoot string, metaPath string, request PrepareRootfsRequest) error {
-	entries, err := os.ReadDir(layerRoot)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("read rootfs rw-layer directory: %w", err)
+	if err := os.MkdirAll(work, 0o711); err != nil {
+		return PreparedRootfs{}, fmt.Errorf("create rootfs workdir: %w", err)
 	}
-	if len(entries) > 0 {
-		return ErrUnmanagedRootfsLayer
-	}
-	if err := os.MkdirAll(layerRoot, 0o755); err != nil {
-		return fmt.Errorf("create rootfs rw-layer root: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Join(layerRoot, "upper"), 0o755); err != nil {
-		return fmt.Errorf("create rootfs upperdir: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Join(layerRoot, "work"), 0o711); err != nil {
-		return fmt.Errorf("create rootfs workdir: %w", err)
-	}
-	if err := p.ensureContainerRootOwnership(layerRoot, request); err != nil {
-		return err
-	}
-	metadata := layerMetadata{
-		Version:       1,
-		State:         "available",
-		SnapshotKey:   request.SnapshotKey,
-		PodUID:        request.PodUID,
-		ContainerName: request.ContainerName,
-		VolumeName:    request.VolumeName,
-		Path:          request.Path,
-		PVCClaimName:  request.PVCClaimName,
-		UIDMappings:   request.UIDMappings,
-		GIDMappings:   request.GIDMappings,
-		CreatedAt:     time.Now().UTC(),
-	}
-	data, err := json.MarshalIndent(metadata, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode rootfs rw-layer metadata: %w", err)
-	}
-	if err := os.WriteFile(metaPath, data, 0o600); err != nil {
-		return fmt.Errorf("write rootfs rw-layer metadata: %w", err)
-	}
-	return nil
-}
-
-func (p *LocalPreparer) attachLayer(metaPath string, request PrepareRootfsRequest) error {
-	data, err := os.ReadFile(metaPath)
-	if err != nil {
-		return fmt.Errorf("read rootfs rw-layer metadata: %w", err)
-	}
-	var metadata layerMetadata
-	if err := json.Unmarshal(data, &metadata); err != nil {
-		return fmt.Errorf("decode rootfs rw-layer metadata: %w", err)
-	}
-	metadata.State = "attached"
-	metadata.SnapshotKey = request.SnapshotKey
-	metadata.PodUID = request.PodUID
-	metadata.ContainerName = request.ContainerName
-	metadata.UIDMappings = request.UIDMappings
-	metadata.GIDMappings = request.GIDMappings
-	metadata.LastAttachedAt = time.Now().UTC()
-	data, err = json.MarshalIndent(metadata, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode rootfs rw-layer metadata: %w", err)
-	}
-	if err := os.WriteFile(metaPath, data, 0o600); err != nil {
-		return fmt.Errorf("write rootfs rw-layer metadata: %w", err)
-	}
-	return nil
-}
-
-func (p *LocalPreparer) ensureManagedLayer(layerRoot string, metaPath string, request PrepareRootfsRequest) error {
-	for _, name := range []string{"upper", "work"} {
-		info, err := os.Stat(filepath.Join(layerRoot, name))
+	for _, path := range []string{upper, work} {
+		info, err := os.Lstat(path)
 		if err != nil {
-			return fmt.Errorf("stat rootfs %s dir: %w", name, err)
+			return PreparedRootfs{}, fmt.Errorf("stat rootfs rw-layer path: %w", err)
 		}
-		if !info.IsDir() {
-			return ErrUnmanagedRootfsLayer
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return PreparedRootfs{}, ErrUnmanagedRootfsLayer
 		}
 	}
-	data, err := os.ReadFile(metaPath)
+	return PreparedRootfs{UpperDir: upper, WorkDir: work}, nil
+}
+
+func rejectSymlink(root, path string) error {
+	if err := rejectSymlinkPath(root); err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(root, path)
 	if err != nil {
-		return fmt.Errorf("read rootfs rw-layer metadata: %w", err)
+		return fmt.Errorf("resolve rootfs rw-layer path: %w", err)
 	}
-	var metadata layerMetadata
-	if err := json.Unmarshal(data, &metadata); err != nil {
-		return fmt.Errorf("decode rootfs rw-layer metadata: %w", err)
-	}
-	if !metadata.compatible() {
-		return ErrIncompatibleRootfsLayer
-	}
-	if metadata.mappingsMatch(request) {
-		return nil
-	}
-	if err := p.ensureContainerRootOwnership(layerRoot, request); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (p *LocalPreparer) ensureContainerRootOwnership(layerRoot string, request PrepareRootfsRequest) error {
-	uid, ok := RootHostIdentity(request.UIDMappings)
-	if !ok {
-		uid = 0
-	}
-	gid, ok := RootHostIdentity(request.GIDMappings)
-	if !ok {
-		gid = 0
-	}
-	if err := filepath.Walk(layerRoot, func(path string, info os.FileInfo, err error) error {
+	current := root
+	for _, elem := range strings.Split(rel, string(filepath.Separator)) {
+		if elem == "" || elem == "." {
+			continue
+		}
+		current = filepath.Join(current, elem)
+		info, err := os.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
 		if err != nil {
-			return err
+			return fmt.Errorf("stat rootfs rw-layer path: %w", err)
 		}
-		if chownErr := os.Chown(path, int(uid), int(gid)); chownErr != nil {
-			return fmt.Errorf("chown %s: %w", path, chownErr)
+		if info.Mode()&os.ModeSymlink != 0 {
+			return ErrUnsafeLayerPath
 		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	if err := os.Chmod(layerRoot, 0o755); err != nil {
-		return fmt.Errorf("chmod %s: %w", layerRoot, err)
-	}
-	if err := os.Chmod(filepath.Join(layerRoot, "upper"), 0o755); err != nil {
-		return fmt.Errorf("chmod upper: %w", err)
-	}
-	if err := os.Chmod(filepath.Join(layerRoot, "work"), 0o711); err != nil {
-		return fmt.Errorf("chmod work: %w", err)
 	}
 	return nil
 }
 
-func (m layerMetadata) compatible() bool {
-	if m.Version != 1 {
-		return false
-	}
-	if m.State != "available" && m.State != "attached" {
-		return false
-	}
-	return true
-}
-
-func (m layerMetadata) mappingsMatch(request PrepareRootfsRequest) bool {
-	return slices.Equal(m.UIDMappings, request.UIDMappings) && slices.Equal(m.GIDMappings, request.GIDMappings)
-}
-
-func rejectSymlink(path string) error {
+func rejectSymlinkPath(path string) error {
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil

@@ -1,151 +1,112 @@
+/*
+   Copyright The containerd Authors.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 package main
 
 import (
-	"context"
-	"errors"
 	"flag"
 	"fmt"
-	"log/slog"
+	"net"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"slices"
-	"syscall"
 
-	"github.com/nestybox/sysbox-libs/containerdUtils"
-	"github.com/nestybox/sysbox-snapshotter/daemon"
-	"github.com/nestybox/sysbox-snapshotter/rootfs"
-	overlay "github.com/nestybox/sysbox-snapshotter/snapshotter"
-	"github.com/nestybox/sysbox-snapshotter/snapshotter/overlayutils"
+	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
+	"github.com/containerd/containerd/v2/contrib/snapshotservice"
+	"github.com/containerd/log"
+	sddaemon "github.com/coreos/go-systemd/v22/daemon"
+	sysboxsnapshotter "github.com/w7panel/sysbox/sysbox-snapshotter"
+	"github.com/w7panel/sysbox/sysbox-snapshotter/cmd/sysbox-snapshotter/version"
+	"github.com/w7panel/sysbox/sysbox-snapshotter/rootfs"
+	"google.golang.org/grpc"
 )
 
-var (
-	edition  = "Community Edition (CE)"
-	version  = "unknown"
-	commitId = "unknown"
-	builtAt  = "unknown"
-	builtBy  = "unknown"
-)
-
-const (
-	sysboxSnapshotterStateDir = "io.containerd.snapshotter.v1.sysbox"
-	proxyPluginID             = "sysbox"
-)
-
-var ErrIDMappedMountsUnsupported = errors.New("idmapped overlay mounts are not supported")
-
-type snapshotterConfig struct {
-	Capabilities           []string
-	ContainerdSocket       string
-	SupportsIDMappedMounts func() (bool, error)
-}
-
-type snapshotterFlags struct {
-	Address     string
-	Root        string
-	ShowVersion bool
-}
-
-type runtimeResolvers struct {
-	Capabilities func(string) ([]string, error)
-	DataRoot     func() (string, error)
-	GRPCAddress  func() (string, error)
-}
-
+// main is from https://github.com/containerd/containerd/blob/b9fad5e310fafb453def5f1e7094f4c36a9806d2/PLUGINS.md
 func main() {
-	if err := run(); err != nil {
-		slog.Error("sysbox-snapshotter failed", slog.Any("err", err))
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		fmt.Printf("sysbox-snapshotter %s %s\n", version.Version, version.Revision)
+		return
+	}
+
+	log.L.Infof("sysbox-snapshotter Version=%q Revision=%q", version.Version, version.Revision)
+	// Provide a unix address to listen to, this will be the `address`
+	// in the `proxy_plugin` configuration.
+	// The root will be used to store the snapshots.
+	address, root, containerdSocket, ok := parseArgs(os.Args)
+	if !ok {
+		fmt.Printf("invalid args: usage: %s --socket <unix socket> --root <root> --containerd-socket <socket>\n", os.Args[0])
+		os.Exit(1)
+	}
+	if err := serve(address, root, containerdSocket); err != nil {
+		fmt.Printf("error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
-	flags, config, err := loadRuntimeConfig(os.Args[1:], runtimeResolvers{
-		Capabilities: containerdUtils.GetProxyPluginCapabilities,
-		DataRoot:     containerdUtils.GetDataRoot,
-		GRPCAddress:  containerdUtils.GetGRPCAddress,
-	})
-	if err != nil {
-		return err
+func parseArgs(args []string) (address, root, containerdSocket string, ok bool) {
+	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	flags.StringVar(&address, "socket", "", "snapshotter unix socket")
+	flags.StringVar(&root, "root", "", "snapshotter root")
+	flags.StringVar(&containerdSocket, "containerd-socket", "", "containerd socket")
+	if err := flags.Parse(args[1:]); err != nil {
+		return "", "", "", false
 	}
-
-	if flags.ShowVersion {
-		fmt.Printf("sysbox-snapshotter %s %s %s %s %s\n", edition, version, commitId, builtAt, builtBy)
-		return nil
-	}
-
-	config.SupportsIDMappedMounts = overlayutils.SupportsIDMappedMounts
-	opts, err := buildSnapshotterOptions(config)
-	if err != nil {
-		return err
-	}
-
-	wrapped, err := overlay.NewSnapshotter(flags.Root, opts...)
-	if err != nil {
-		return err
-	}
-	defer wrapped.Close()
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-	slog.Info("starting sysbox snapshotter", slog.String("address", flags.Address), slog.String("root", flags.Root))
-	return daemon.NewServer(daemon.Config{Address: flags.Address, Snapshotter: wrapped}).Serve(ctx)
+	return address, root, containerdSocket, address != "" && root != "" && containerdSocket != ""
 }
 
-func parseSnapshotterFlagsWithDataRoot(args []string, dataRootResolver func() (string, error)) (snapshotterFlags, error) {
-	dataRoot, err := dataRootResolver()
-	if err != nil {
-		return snapshotterFlags{}, fmt.Errorf("read containerd data root: %w", err)
+func serve(address, root, containerdSocket string) error {
+	// Prepare address directory
+	if err := os.MkdirAll(filepath.Dir(address), 0700); err != nil {
+		return err
 	}
-	flags := snapshotterFlags{}
-	flagSet := flag.NewFlagSet("sysbox-snapshotter", flag.ContinueOnError)
-	flagSet.StringVar(&flags.Address, "address", "/run/sysbox-snapshotter.sock", "unix socket address for containerd proxy plugin")
-	flagSet.StringVar(&flags.Root, "root", filepath.Join(dataRoot, sysboxSnapshotterStateDir), "sysbox snapshotter root directory")
-	flagSet.BoolVar(&flags.ShowVersion, "version", false, "print version and exit")
-	return flags, flagSet.Parse(args)
-}
-
-func loadRuntimeConfig(args []string, resolvers runtimeResolvers) (snapshotterFlags, snapshotterConfig, error) {
-	flags, err := parseSnapshotterFlagsWithDataRoot(args, resolvers.DataRoot)
-	if err != nil {
-		return snapshotterFlags{}, snapshotterConfig{}, err
+	// Remove the socket if exist to avoid EADDRINUSE
+	if err := os.RemoveAll(address); err != nil {
+		return err
 	}
-	capabilities, err := resolvers.Capabilities(proxyPluginID)
-	if err != nil {
-		return snapshotterFlags{}, snapshotterConfig{}, fmt.Errorf("read containerd proxy plugin capabilities: %w", err)
+	// Instantiate the snapshotter
+	if err := sysboxsnapshotter.Supported(root); err != nil {
+		return err
 	}
-	grpcAddress, err := resolvers.GRPCAddress()
-	if err != nil {
-		return snapshotterFlags{}, snapshotterConfig{}, fmt.Errorf("read containerd grpc address: %w", err)
-	}
-	return flags, snapshotterConfig{
-		Capabilities:     capabilities,
-		ContainerdSocket: grpcAddress,
-	}, nil
-}
-
-func buildSnapshotterOptions(config snapshotterConfig) ([]overlay.Opt, error) {
-	opts := []overlay.Opt{overlay.AsynchronousRemove}
-	sidecarStore := rootfs.NewContainerdSidecarSpecStore(config.ContainerdSocket)
-	opts = append(opts, overlay.WithRootfsHooks(overlay.RootfsHooks{
-		IdentityResolver: rootfs.NewContainerdIdentityResolver(config.ContainerdSocket),
+	sidecarStore := rootfs.NewContainerdSidecarSpecStore(containerdSocket)
+	sn, err := sysboxsnapshotter.NewSnapshotter(root, sysboxsnapshotter.WithRootfsHooks(sysboxsnapshotter.RootfsHooks{
+		IdentityResolver: rootfs.NewContainerdIdentityResolver(containerdSocket),
 		MetadataResolver: rootfs.NewSidecarMetadataResolver(sidecarStore),
 		PVCResolver:      rootfs.NewPVCMountPathResolver(sidecarStore),
 		Preparer:         rootfs.NewLocalPreparer(),
 	}))
-	if hasCapability(config.Capabilities, "remap-ids") {
-		supported, err := config.SupportsIDMappedMounts()
-		if err != nil {
-			return nil, fmt.Errorf("check idmapped overlay mount support: %w", err)
-		}
-		if !supported {
-			return nil, ErrIDMappedMountsUnsupported
-		}
-		return append(opts, overlay.WithRemapIDs), nil
+	if err != nil {
+		return err
 	}
-	return opts, nil
-}
 
-func hasCapability(capabilities []string, capability string) bool {
-	return slices.Contains(capabilities, capability)
+	// Convert the snapshotter to a gRPC service,
+	// example in github.com/containerd/containerd/contrib/snapshotservice
+	rpc := grpc.NewServer()
+	service := snapshotservice.FromSnapshotter(sn)
+
+	// Register the service with the gRPC server
+	snapshotsapi.RegisterSnapshotsServer(rpc, service)
+
+	// Listen and serve
+	l, err := net.Listen("unix", address)
+	if err != nil {
+		return err
+	}
+	if os.Getenv("NOTIFY_SOCKET") != "" {
+		sddaemon.SdNotify(false, sddaemon.SdNotifyReady)
+		defer sddaemon.SdNotify(false, sddaemon.SdNotifyStopping)
+	}
+	return rpc.Serve(l)
 }

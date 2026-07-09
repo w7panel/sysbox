@@ -5,40 +5,37 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
-
-	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 )
 
-type SidecarMetadataResolver struct {
-	store SidecarSpecStore
-}
+type SidecarMetadataResolver struct{ store SidecarSpecStore }
 
 func NewSidecarMetadataResolver(store SidecarSpecStore) *SidecarMetadataResolver {
 	return &SidecarMetadataResolver{store: store}
 }
 
-func (r *SidecarMetadataResolver) ResolveRootfsRwLayer(
-	ctx context.Context,
-	request RootfsRwLayerRequest,
-) (RootfsRwLayerSpec, error) {
+func (r *SidecarMetadataResolver) ResolveRootfsRwLayer(ctx context.Context, request RootfsRwLayerRequest) (RootfsRwLayerSpec, error) {
 	if request.ContainerName == "" {
 		return RootfsRwLayerSpec{}, fmt.Errorf("missing container name in rootfs rw-layer request: %w", ErrContainerIdentityIncomplete)
+	}
+	if request.RootfsRwLayerAnnotation == "" {
+		return RootfsRwLayerSpec{}, ErrRootfsRwLayerNotConfigured
 	}
 	sidecarSpec, err := r.store.LoadSidecarSpec(ctx, request)
 	if err != nil {
 		if errors.Is(err, ErrSidecarSpecUnavailable) {
-			return RootfsRwLayerSpec{}, ErrRootfsRwLayerNotConfigured
+			return RootfsRwLayerSpec{}, err
 		}
 		return RootfsRwLayerSpec{}, err
 	}
-	raw, found := rootfsIntentEnv(sidecarSpec)
-	if !found {
-		return RootfsRwLayerSpec{}, ErrRootfsRwLayerNotConfigured
-	}
-	intent, err := parseSidecarIntent(raw)
+	intent, err := parsePodAnnotationIntent(request.RootfsRwLayerAnnotation)
 	if err != nil {
 		return RootfsRwLayerSpec{}, err
+	}
+	if request.ContainerName == SidecarContainerName {
+		if len(intent.Entries) == 0 {
+			return RootfsRwLayerSpec{}, ErrRootfsRwLayerNotConfigured
+		}
+		return RootfsRwLayerSpec{Sidecar: true, sidecarSpec: sidecarSpec}, nil
 	}
 	for _, entry := range intent.Entries {
 		if entry.ContainerName != request.ContainerName {
@@ -47,38 +44,23 @@ func (r *SidecarMetadataResolver) ResolveRootfsRwLayer(
 		if _, err := safeLayerPath(entry.Path); err != nil {
 			return RootfsRwLayerSpec{}, err
 		}
-		return RootfsRwLayerSpec{
-			Namespace:    request.Namespace,
-			PodName:      request.PodName,
-			VolumeName:   entry.VolumeName,
-			Path:         entry.Path,
-			PVCClaimName: entry.PVCClaimName,
-			sidecarSpec:  sidecarSpec,
-		}, nil
+		return RootfsRwLayerSpec{VolumeName: entry.VolumeName, Path: entry.Path, sidecarSpec: sidecarSpec}, nil
 	}
 	return RootfsRwLayerSpec{}, ErrRootfsRwLayerNotConfigured
 }
 
-func rootfsIntentEnv(spec *runtimespec.Spec) (string, bool) {
-	if spec == nil || spec.Process == nil {
-		return "", false
+func parsePodAnnotationIntent(raw string) (Intent, error) {
+	var entries []struct {
+		Name       string `json:"name"`
+		VolumeName string `json:"volumeName"`
+		Path       string `json:"path"`
 	}
-	prefix := SpecEnv + "="
-	for _, env := range spec.Process.Env {
-		if value, ok := strings.CutPrefix(env, prefix); ok {
-			return value, true
-		}
+	if err := json.Unmarshal([]byte(raw), &entries); err != nil {
+		return Intent{}, fmt.Errorf("decode rootfs rw-layer annotation: %w", err)
 	}
-	return "", false
-}
-
-func parseSidecarIntent(raw string) (Intent, error) {
-	var intent Intent
-	if err := json.Unmarshal([]byte(raw), &intent); err != nil {
-		return Intent{}, fmt.Errorf("decode sidecar rootfs rw-layer intent: %w", err)
-	}
-	if intent.Version != 1 {
-		return Intent{}, fmt.Errorf("unsupported sidecar rootfs rw-layer intent version %d", intent.Version)
+	intent := Intent{Entries: make([]IntentEntry, 0, len(entries))}
+	for _, entry := range entries {
+		intent.Entries = append(intent.Entries, IntentEntry{ContainerName: entry.Name, VolumeName: entry.VolumeName, Path: entry.Path})
 	}
 	return intent, nil
 }

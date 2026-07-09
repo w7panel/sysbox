@@ -5,18 +5,24 @@ import (
 	"crypto/tls"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"time"
 
-	"github.com/nestybox/sysbox-admission/admission"
 	containerdUtils "github.com/nestybox/sysbox-libs/containerdUtils"
+	"github.com/w7panel/sysbox/sysbox-admission/admission"
 	admissionregistrationv1client "k8s.io/client-go/kubernetes/typed/admissionregistration/v1"
 	coordinationv1client "k8s.io/client-go/kubernetes/typed/coordination/v1"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/leaderelection"
+)
+
+var (
+	version  = "unknown"
+	revision = "unknown"
 )
 
 const defaultCertificateRotationInterval = 6 * time.Hour
@@ -49,6 +55,7 @@ type serveConfig struct {
 }
 
 func main() {
+	showVersion := flag.Bool("version", false, "print version and exit")
 	addr := flag.String("addr", ":9443", "https listen address")
 	tlsCert := flag.String("tls-cert", "", "tls certificate path")
 	tlsKey := flag.String("tls-key", "", "tls key path")
@@ -67,6 +74,10 @@ func main() {
 	renewalWindow := flag.Duration("certificate-renewal-window", defaultCertificateRenewalWindow, "certificate renewal window before expiration")
 	secretRefreshInterval := flag.Duration("certificate-secret-refresh-interval", defaultCertificateSecretRefreshInterval, "serving TLS Secret refresh interval for all replicas")
 	flag.Parse()
+	if *showVersion {
+		fmt.Printf("sysbox-admission %s %s\n", version, revision)
+		return
+	}
 
 	sandboxImage, err := sandboxImageFromConfig(*containerdConfigDir)
 	if err != nil {

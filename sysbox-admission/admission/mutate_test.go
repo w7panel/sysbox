@@ -3,7 +3,6 @@ package admission_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -12,13 +11,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/nestybox/sysbox-admission/admission"
 	"github.com/stretchr/testify/require"
+	"github.com/w7panel/sysbox/sysbox-admission/admission"
 )
 
 const testSandboxImage = "registry.example/pause:9.9"
 
-func TestMutator_injectsSidecarIntent_whenAnnotationIsValid(t *testing.T) {
+func TestMutator_injectsSidecar_whenAnnotationIsValid(t *testing.T) {
 	mutator := newTestMutator()
 	pod := validRootfsPod()
 
@@ -26,7 +25,7 @@ func TestMutator_injectsSidecarIntent_whenAnnotationIsValid(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Len(t, mutated.Spec.Containers, 3)
-	sidecar := mutated.Spec.Containers[0]
+	sidecar := mutated.Spec.Containers[2]
 	require.Equal(t, admission.SidecarContainerName, sidecar.Name)
 	require.Equal(t, testSandboxImage, sidecar.Image)
 	require.Empty(t, sidecar.Command)
@@ -34,19 +33,14 @@ func TestMutator_injectsSidecarIntent_whenAnnotationIsValid(t *testing.T) {
 	require.Equal(t, "rootfs", sidecar.VolumeMounts[0].Name)
 	require.Equal(t, filepath.Join(admission.SidecarMountPath, "rootfs"), sidecar.VolumeMounts[0].MountPath)
 	require.Empty(t, sidecar.VolumeMounts[0].SubPath)
-	require.Len(t, sidecar.Env, 1)
-	require.Equal(t, admission.SpecEnv, sidecar.Env[0].Name)
-	assertSidecarIntent(t, sidecar.Env[0].Value, []map[string]any{
-		{"containerName": "c1", "volumeName": "rootfs", "path": "containers/c1", "pvcClaimName": "sysbox-rootfs-pvc"},
-		{"containerName": "c2", "volumeName": "rootfs", "path": "containers/c2", "pvcClaimName": "sysbox-rootfs-pvc"},
-	})
-	require.Equal(t, "c1", mutated.Spec.Containers[1].Name)
+	require.Empty(t, sidecar.Env)
+	require.Equal(t, "c1", mutated.Spec.Containers[0].Name)
+	require.Len(t, mutated.Spec.Containers[0].VolumeMounts, 0)
+	require.Equal(t, "c2", mutated.Spec.Containers[1].Name)
 	require.Len(t, mutated.Spec.Containers[1].VolumeMounts, 0)
-	require.Equal(t, "c2", mutated.Spec.Containers[2].Name)
-	require.Len(t, mutated.Spec.Containers[2].VolumeMounts, 0)
 }
 
-func TestMutator_injectsSidecarIntent_whenPodNameIsEmpty(t *testing.T) {
+func TestMutator_injectsSidecar_whenPodNameIsEmpty(t *testing.T) {
 	// Given
 	mutator := newTestMutator()
 	pod := validRootfsPod()
@@ -58,8 +52,8 @@ func TestMutator_injectsSidecarIntent_whenPodNameIsEmpty(t *testing.T) {
 
 	// Then
 	require.NoError(t, err)
-	require.Equal(t, admission.SidecarContainerName, mutated.Spec.Containers[0].Name)
-	require.Len(t, mutated.Spec.Containers[0].Env, 1)
+	require.Equal(t, admission.SidecarContainerName, mutated.Spec.Containers[2].Name)
+	require.Empty(t, mutated.Spec.Containers[2].Env)
 }
 
 func TestServer_rejectsWorkloadResource_whenAnnotationIsValid(t *testing.T) {
@@ -151,15 +145,4 @@ func validRootfsPod() *corev1.Pod {
 			}},
 		},
 	}
-}
-
-func assertSidecarIntent(t *testing.T, raw string, expected []map[string]any) {
-	t.Helper()
-	var decoded struct {
-		Version int              `json:"version"`
-		Entries []map[string]any `json:"entries"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(raw), &decoded))
-	require.Equal(t, 1, decoded.Version)
-	require.Equal(t, expected, decoded.Entries)
 }

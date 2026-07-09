@@ -21,19 +21,13 @@ type SidecarSpecStore interface {
 	LoadSidecarSpec(ctx context.Context, request RootfsRwLayerRequest) (*runtimespec.Spec, error)
 }
 
-type PVCMountPathResolverFromSidecar struct {
-	store SidecarSpecStore
-}
+type PVCMountPathResolverFromSidecar struct{ store SidecarSpecStore }
 
 func NewPVCMountPathResolver(store SidecarSpecStore) *PVCMountPathResolverFromSidecar {
 	return &PVCMountPathResolverFromSidecar{store: store}
 }
 
-func (r *PVCMountPathResolverFromSidecar) ResolvePVCMountPath(
-	ctx context.Context,
-	request RootfsRwLayerRequest,
-	spec RootfsRwLayerSpec,
-) (string, error) {
+func (r *PVCMountPathResolverFromSidecar) ResolvePVCMountPath(ctx context.Context, request RootfsRwLayerRequest, spec RootfsRwLayerSpec) (string, error) {
 	if spec.VolumeName == "" {
 		return "", fmt.Errorf("volume name is required to resolve sidecar pvc mount path: %w", ErrSidecarSpecMalformed)
 	}

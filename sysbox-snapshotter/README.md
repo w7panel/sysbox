@@ -1,6 +1,6 @@
 # sysbox-snapshotter
 
-`sysbox-snapshotter` is a containerd proxy snapshotter that maintains its own snapshot metadata under a containerd-compatible root directory and focuses on rewriting only the writable `upperdir` and `workdir` for containers that opt into Sysbox rootfs rw-layer persistence.
+`sysbox-snapshotter` is a containerd proxy snapshotter based on `fuse-overlayfs`. It maintains its own snapshot metadata under a containerd-compatible root directory and rewrites only the writable `upperdir` and `workdir` for containers that opt into Sysbox rootfs rw-layer persistence.
 
 The snapshotter root follows the native containerd plugin layout convention under the configured containerd data root:
 
@@ -8,44 +8,40 @@ The snapshotter root follows the native containerd plugin layout convention unde
 <containerd-root>/io.containerd.snapshotter.v1.sysbox
 ```
 
-The current stable code path keeps the PVC-backed `upperdir/workdir` implementation and leaves `lowerdir` under the native containerd overlay snapshotter and idmapped mount logic. Lower alignment remains an implementation task inside the sysbox snapshotter itself rather than an external runtime-directory dependency.
+The current code path keeps the PVC-backed `upperdir/workdir` implementation and leaves `lowerdir` under sysbox-snapshotter's own snapshot root. UID/GID remap labels from containerd are passed through to `fuse-overlayfs` as `uidmapping=` and `gidmapping=` mount options.
 
 ## Run
 
 ```bash
 sysbox-snapshotter \
-  --address /run/sysbox-snapshotter.sock
+  --socket /run/sysbox-snapshotter.sock \
+  --root /var/lib/containerd/io.containerd.snapshotter.v1.sysbox \
+  --containerd-socket /run/containerd/containerd.sock
 ```
 
-`sysbox-snapshotter` derives the default snapshotter root and containerd socket from the active containerd config. Use `--root` only to override the derived snapshotter root.
+All runtime paths are explicit. `--socket` must match the containerd proxy plugin address, `--root` stores sysbox-snapshotter metadata and snapshots, and `--containerd-socket` is used to read Kubernetes container labels and sidecar OCI specs from containerd.
 
-Containerd proxy plugin config:
-
-```toml
-version = 3
-
-[proxy_plugins]
-  [proxy_plugins."sysbox"]
-    type = "snapshot"
-    address = "/run/sysbox-snapshotter.sock"
-```
-
-This project is intended to apply only to the `sysbox-runc` runtime path. The global CRI image snapshotter remains the host default (for example `overlayfs`).
-
-## Idmapped Mount Contract
-
-`sysbox-snapshotter` derives idmapped mount behavior from the configured containerd proxy plugin capabilities. If the `sysbox` proxy plugin does not advertise `remap-ids`, the daemon does not enable `overlay.WithRemapIDs` and never returns `uidmap=` / `gidmap=` mount options. In that state, if containerd receives user namespace remap labels, it may use its fallback `*-remap` parent snapshot path.
-
-Idmapped overlay mounts are enabled by adding `remap-ids` to the proxy plugin capabilities:
+This project is intended to apply only to the `sysbox-runc` runtime path. The global CRI image snapshotter remains the host default (for example `overlayfs`). Configure containerd so only the `sysbox-runc` runtime uses this snapshotter, and so CRI forwards the rootfs rw-layer pod annotation:
 
 ```toml
 [proxy_plugins."sysbox"]
   type = "snapshot"
   address = "/run/sysbox-snapshotter.sock"
   capabilities = ["remap-ids"]
+
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.sysbox-runc]
+  runtime_type = "io.containerd.runc.v2"
+  snapshotter = "sysbox"
+  pod_annotations = ["sysbox/rootfs-rw-layer"]
 ```
 
-When `remap-ids` is configured, the daemon checks kernel support before serving the proxy socket and fails closed if idmapped overlay mounts are unavailable. Containerd reads proxy snapshotter capabilities from its static config; the external snapshotter daemon cannot publish them dynamically through the snapshot gRPC service. Do not run a configuration where the daemon returns `uidmap=` / `gidmap=` mount options but containerd does not list `remap-ids` for the `sysbox` snapshotter, because containerd will create fallback `*-remap` snapshots and the rootfs will mix two remap strategies.
+## Remap Contract
+
+`sysbox-snapshotter` consumes containerd's snapshot remap labels when containerd passes them to `Prepare`. For active fuse-overlayfs mounts, labels named `containerd.io/snapshot/uidmapping` and `containerd.io/snapshot/gidmapping` are converted to `uidmapping=` and `gidmapping=` options.
+
+For `hostUsers: false` pods, containerd only delegates remap handling to the proxy snapshotter when the proxy plugin advertises `remap-ids`.
+
+Containerd reads proxy snapshotter capabilities from its static config; the external snapshotter daemon cannot publish them dynamically through the snapshot gRPC service. Keep containerd config, sysbox-snapshotter state, and runtime validation in sync when changing this capability. Existing committed snapshots created under a different remap mode may need to be removed and unpacked again before reuse.
 
 Verify the runtime contract after changing containerd config and restarting containerd/k3s:
 
@@ -53,7 +49,7 @@ Verify the runtime contract after changing containerd config and restarting cont
 ctr plugins ls -d id==sysbox
 ```
 
-When idmapped mode is enabled, the output must include `Capabilities: remap-ids`. For a fresh `runtimeClassName: sysbox-runc`, `hostUsers: false` pod, `ctr -n k8s.io snapshots --snapshotter sysbox mounts <container-id>` should show `uidmap=` and `gidmap=` options, and `ctr -n k8s.io snapshots --snapshotter sysbox ls` should not show a new `*-remap` committed parent for that pod. When `remap-ids` is omitted, the active mount should not contain `uidmap=` / `gidmap=`, and containerd may create a fallback `*-remap` parent.
+When remap delegation is enabled, the output must include `Capabilities: remap-ids`. For a fresh `runtimeClassName: sysbox-runc`, `hostUsers: false` pod, `ctr -n k8s.io snapshots --snapshotter sysbox mounts <container-id>` should show `uidmapping=` and `gidmapping=` options, and `ctr -n k8s.io snapshots --snapshotter sysbox ls` should not show a new `*-remap` committed parent for that pod. When `remap-ids` is omitted, the active mount should not contain `uidmapping=` / `gidmapping=`, and containerd may create a fallback `*-remap` parent.
 
 ## Rootfs Intent
 
@@ -84,10 +80,9 @@ When an intent entry exists, the snapshotter prepares this layout under the reso
 ```text
 upper/
 work/
-meta.json
 ```
 
-If `meta.json` is missing and the target directory is non-empty, startup fails closed to avoid reusing foreign data.
+Existing `upper/` and `work/` paths must be directories and must not be symlinks. Symlink path components are rejected before creating or reusing the layer.
 
 The identity of a reusable rootfs rw-layer is the configured PVC-backed path, not
 the container image. Recreating a Pod with the same `volumeName` and `path` may
@@ -115,6 +110,8 @@ Those labels are not a replacement for resolving the node-side PVC mount path un
 make sysbox-snapshotter
 make test
 ```
+
+The module currently targets Go 1.24.3.
 
 From the repository root:
 

@@ -7,7 +7,6 @@ import (
 	"path"
 
 	containerdclient "github.com/containerd/containerd/v2/client"
-	"github.com/containerd/containerd/v2/core/snapshots"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/errdefs"
 )
@@ -17,9 +16,7 @@ var (
 	ErrContainerIdentityIncomplete  = errors.New("containerd CRI container identity is incomplete")
 )
 
-type ContainerdIdentityResolver struct {
-	socketPath string
-}
+type ContainerdIdentityResolver struct{ socketPath string }
 
 func NewContainerdIdentityResolver(socketPath string) *ContainerdIdentityResolver {
 	return &ContainerdIdentityResolver{socketPath: socketPath}
@@ -33,8 +30,7 @@ func (r *ContainerdIdentityResolver) ResolveIdentity(ctx context.Context, snapsh
 	defer client.Close()
 	ctx = namespaces.WithNamespace(ctx, "k8s.io")
 	lookupKeys := []string{snapshotKey}
-	baseKey := path.Base(snapshotKey)
-	if baseKey != snapshotKey {
+	if baseKey := path.Base(snapshotKey); baseKey != snapshotKey {
 		lookupKeys = append(lookupKeys, baseKey)
 	}
 	var container containerdclient.Container
@@ -55,9 +51,16 @@ func (r *ContainerdIdentityResolver) ResolveIdentity(ctx context.Context, snapsh
 	if err != nil {
 		return RootfsRwLayerRequest{}, fmt.Errorf("read container labels for identity lookup: %w", err)
 	}
+	spec, err := container.Spec(ctx)
+	if err != nil {
+		return RootfsRwLayerRequest{}, fmt.Errorf("read container spec for identity lookup: %w", err)
+	}
 	request, err := rootfsRwLayerRequestFromLabels(snapshotKey, labels)
 	if err != nil {
 		return RootfsRwLayerRequest{}, err
+	}
+	if spec != nil && spec.Annotations != nil {
+		request.RootfsRwLayerAnnotation = spec.Annotations[AnnotationRootfsRwLayer]
 	}
 	return request, nil
 }
@@ -71,13 +74,5 @@ func rootfsRwLayerRequestFromLabels(snapshotKey string, labels map[string]string
 	if containerName == "" {
 		return RootfsRwLayerRequest{}, fmt.Errorf("missing io.kubernetes.container.name label: %w", ErrContainerIdentityUnavailable)
 	}
-	return RootfsRwLayerRequest{
-		SnapshotKey:   snapshotKey,
-		Namespace:     labels["io.kubernetes.pod.namespace"],
-		PodName:       labels["io.kubernetes.pod.name"],
-		PodUID:        podUID,
-		ContainerName: containerName,
-		UIDMappings:   ParseIDMap(labels[snapshots.LabelSnapshotUIDMapping]),
-		GIDMappings:   ParseIDMap(labels[snapshots.LabelSnapshotGIDMapping]),
-	}, nil
+	return RootfsRwLayerRequest{SnapshotKey: snapshotKey, PodUID: podUID, ContainerName: containerName}, nil
 }

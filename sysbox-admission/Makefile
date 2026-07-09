@@ -6,6 +6,10 @@ BUILDROOT := build
 BUILDDIR = $(BUILDROOT)/$(TARGET_ARCH)
 TARGET := sysbox-admission
 
+COMMIT_NO := $(shell git rev-parse HEAD 2> /dev/null || true)
+COMMIT ?= $(if $(shell git status --porcelain --untracked-files=no),$(COMMIT_NO)-dirty,$(COMMIT_NO))
+VERSION ?= $(shell cat ../VERSION 2>/dev/null || echo unknown)
+
 ifeq ($(TARGET_ARCH),)
 	UNAME_M := $(shell uname -m)
 	ifeq ($(UNAME_M),x86_64)
@@ -21,7 +25,9 @@ sysbox-admission: $(BUILDDIR)/$(TARGET)
 
 $(BUILDDIR)/$(TARGET):
 	mkdir -p $(BUILDDIR)
-	CGO_ENABLED=$(CGO_ENABLED) $(GO) build -buildvcs=false -trimpath -ldflags "-s -w" -o $(BUILDDIR)/$(TARGET) ./cmd/sysbox-admission
+	CGO_ENABLED=$(CGO_ENABLED) $(GO) build -buildvcs=false -trimpath \
+		-ldflags "-s -w -X main.version=$(VERSION) -X main.revision=$(COMMIT)" \
+		-o $(BUILDDIR)/$(TARGET) ./cmd/sysbox-admission
 
 test:
 	$(GO) test -buildvcs=false -timeout 3m -v ./...

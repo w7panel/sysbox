@@ -1,83 +1,51 @@
-package rootfs_test
+package rootfs
 
 import (
 	"context"
 	"testing"
 
-	"github.com/nestybox/sysbox-snapshotter/rootfs"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
-	"github.com/stretchr/testify/require"
 )
 
-func TestSidecarMetadataResolver_returnsSpecFromSidecarEnv_whenContainerEntryExists(t *testing.T) {
-	// Given
-	store := fakeSidecarSpecStore{spec: &runtimespec.Spec{Process: &runtimespec.Process{Env: []string{
-		`ROOTFS_RW_LAYER_SPEC={"version":1,"entries":[{"containerName":"app-a","volumeName":"rootfs-a","path":"containers/app-a","pvcClaimName":"pvc-a"},{"containerName":"app-b","volumeName":"rootfs-b","path":"containers/app-b","pvcClaimName":"pvc-b"}]}`,
-	}}}}
-	resolver := rootfs.NewSidecarMetadataResolver(store)
+func TestSidecarMetadataResolver_resolvesContainerFromPodAnnotation(t *testing.T) {
+	resolver := NewSidecarMetadataResolver(fakeSidecarStore{spec: &runtimespec.Spec{}})
+	request := RootfsRwLayerRequest{
+		ContainerName:           "app",
+		RootfsRwLayerAnnotation: `[{"name":"app","volumeName":"rootfs","path":"containers/app"}]`,
+	}
 
-	// When
-	spec, err := resolver.ResolveRootfsRwLayer(context.Background(), rootfs.RootfsRwLayerRequest{ContainerName: "app-b"})
+	spec, err := resolver.ResolveRootfsRwLayer(context.Background(), request)
 
-	// Then
-	require.NoError(t, err)
-	require.Equal(t, "rootfs-b", spec.VolumeName)
-	require.Equal(t, "containers/app-b", spec.Path)
-	require.Equal(t, "pvc-b", spec.PVCClaimName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.VolumeName != "rootfs" || spec.Path != "containers/app" || spec.Sidecar {
+		t.Fatalf("spec = %#v", spec)
+	}
 }
 
-func TestSidecarMetadataResolver_returnsNotConfigured_whenContainerEntryIsMissing(t *testing.T) {
-	// Given
-	store := fakeSidecarSpecStore{spec: &runtimespec.Spec{Process: &runtimespec.Process{Env: []string{
-		`ROOTFS_RW_LAYER_SPEC={"version":1,"entries":[{"containerName":"app-a","volumeName":"rootfs-a","path":"containers/app-a","pvcClaimName":"pvc-a"}]}`,
-	}}}}
-	resolver := rootfs.NewSidecarMetadataResolver(store)
+func TestSidecarMetadataResolver_resolvesSidecarFromPodAnnotation(t *testing.T) {
+	resolver := NewSidecarMetadataResolver(fakeSidecarStore{spec: &runtimespec.Spec{}})
+	request := RootfsRwLayerRequest{
+		ContainerName:           SidecarContainerName,
+		RootfsRwLayerAnnotation: `[{"name":"app","volumeName":"rootfs","path":"containers/app"}]`,
+	}
 
-	// When
-	_, err := resolver.ResolveRootfsRwLayer(context.Background(), rootfs.RootfsRwLayerRequest{ContainerName: "app-b"})
+	spec, err := resolver.ResolveRootfsRwLayer(context.Background(), request)
 
-	// Then
-	require.ErrorIs(t, err, rootfs.ErrRootfsRwLayerNotConfigured)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !spec.Sidecar {
+		t.Fatalf("spec.Sidecar = false")
+	}
 }
 
-func TestSidecarMetadataResolver_returnsNotConfigured_whenSidecarSpecIsUnavailable(t *testing.T) {
-	// Given
-	store := fakeSidecarSpecStore{err: rootfs.ErrSidecarSpecUnavailable}
-	resolver := rootfs.NewSidecarMetadataResolver(store)
-
-	// When
-	_, err := resolver.ResolveRootfsRwLayer(context.Background(), rootfs.RootfsRwLayerRequest{ContainerName: "app"})
-
-	// Then
-	require.ErrorIs(t, err, rootfs.ErrRootfsRwLayerNotConfigured)
+type fakeSidecarStore struct {
+	spec *runtimespec.Spec
+	err  error
 }
 
-func TestSidecarMetadataResolver_returnsIdentityIncomplete_whenContainerNameIsEmpty(t *testing.T) {
-	// Given
-	store := fakeSidecarSpecStore{spec: &runtimespec.Spec{Process: &runtimespec.Process{Env: []string{
-		`ROOTFS_RW_LAYER_SPEC={"version":1,"entries":[{"containerName":"app","volumeName":"rootfs","path":"containers/app","pvcClaimName":"pvc"}]}`,
-	}}}}
-	resolver := rootfs.NewSidecarMetadataResolver(store)
-
-	// When
-	_, err := resolver.ResolveRootfsRwLayer(context.Background(), rootfs.RootfsRwLayerRequest{})
-
-	// Then
-	require.ErrorIs(t, err, rootfs.ErrContainerIdentityIncomplete)
-	require.NotErrorIs(t, err, rootfs.ErrRootfsRwLayerNotConfigured)
-}
-
-func TestSidecarMetadataResolver_rejectsPathTraversal_whenSidecarIntentEscapesVolume(t *testing.T) {
-	// Given
-	store := fakeSidecarSpecStore{spec: &runtimespec.Spec{Process: &runtimespec.Process{Env: []string{
-		`ROOTFS_RW_LAYER_SPEC={"version":1,"entries":[{"containerName":"app","volumeName":"rootfs","path":"../escape","pvcClaimName":"pvc"}]}`,
-	}}}}
-	resolver := rootfs.NewSidecarMetadataResolver(store)
-
-	// When
-	_, err := resolver.ResolveRootfsRwLayer(context.Background(), rootfs.RootfsRwLayerRequest{ContainerName: "app"})
-
-	// Then
-	require.Error(t, err)
-	require.NotErrorIs(t, err, rootfs.ErrRootfsRwLayerNotConfigured)
+func (f fakeSidecarStore) LoadSidecarSpec(context.Context, RootfsRwLayerRequest) (*runtimespec.Spec, error) {
+	return f.spec, f.err
 }

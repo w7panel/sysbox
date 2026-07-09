@@ -3,21 +3,23 @@ package rootfs
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 )
 
 var ErrRootfsRwLayerNotConfigured = errors.New("rootfs rw-layer not configured")
 
+const (
+	AnnotationRootfsRwLayer = "sysbox/rootfs-rw-layer"
+	SidecarMountPath        = "/var/lib/sysbox/rootfs-rw-volume"
+	SidecarContainerName    = "sysbox-rootfs"
+)
+
 type RootfsRwLayerRequest struct {
-	SnapshotKey   string
-	Namespace     string
-	PodName       string
-	PodUID        string
-	ContainerName string
-	UIDMappings   []IDMapping
-	GIDMappings   []IDMapping
+	SnapshotKey             string
+	PodUID                  string
+	ContainerName           string
+	RootfsRwLayerAnnotation string
 }
 
 type IdentityResolver interface {
@@ -37,28 +39,18 @@ type RootfsPreparer interface {
 }
 
 type RootfsRwLayerSpec struct {
-	Namespace    string
-	PodName      string
-	VolumeName   string
-	Path         string
-	PVCClaimName string
-	UIDMappings  []IDMapping
-	GIDMappings  []IDMapping
-	sidecarSpec  *runtimespec.Spec
+	VolumeName  string
+	Path        string
+	Sidecar     bool
+	sidecarSpec *runtimespec.Spec
 }
 
 type PrepareRootfsRequest struct {
 	SnapshotKey   string
-	Namespace     string
-	PodName       string
 	PodUID        string
 	ContainerName string
-	VolumeName    string
 	Path          string
-	PVCClaimName  string
 	PVCMountPath  string
-	UIDMappings   []IDMapping
-	GIDMappings   []IDMapping
 }
 
 type PreparedRootfs struct {
@@ -66,28 +58,13 @@ type PreparedRootfs struct {
 	WorkDir  string
 }
 
-type IDMapping struct {
-	ContainerID uint32 `json:"containerID"`
-	HostID      uint32 `json:"hostID"`
-	Size        uint32 `json:"size"`
+type Intent struct {
+	Entries []IntentEntry `json:"entries"`
 }
 
-func RootHostIdentity(mappings []IDMapping) (uint32, bool) {
-	for _, mapping := range mappings {
-		if mapping.ContainerID == 0 {
-			return mapping.HostID, true
-		}
-	}
-	return 0, false
-}
-
-func ParseIDMap(raw string) []IDMapping {
-	if raw == "" {
-		return nil
-	}
-	var containerID, hostID, size uint64
-	if _, err := fmt.Sscanf(raw, "%d:%d:%d", &containerID, &hostID, &size); err != nil {
-		return nil
-	}
-	return []IDMapping{{ContainerID: uint32(containerID), HostID: uint32(hostID), Size: uint32(size)}}
+type IntentEntry struct {
+	ContainerName string `json:"containerName"`
+	VolumeName    string `json:"volumeName"`
+	Path          string `json:"path"`
+	PVCClaimName  string `json:"pvcClaimName"`
 }

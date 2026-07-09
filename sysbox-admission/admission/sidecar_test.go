@@ -10,8 +10,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/nestybox/sysbox-admission/admission"
 	"github.com/stretchr/testify/require"
+	"github.com/w7panel/sysbox/sysbox-admission/admission"
 )
 
 func TestMutator_replacesExistingSidecarWithCanonicalContainer_whenPodSidecarWasTampered(t *testing.T) {
@@ -41,21 +41,20 @@ func TestMutator_replacesExistingSidecarWithCanonicalContainer_whenPodSidecarWas
 
 	// Then
 	require.NoError(t, err)
-	require.Equal(t, admission.SidecarContainerName, mutated.Spec.Containers[0].Name)
-	require.Equal(t, "c1", mutated.Spec.Containers[1].Name)
-	require.Equal(t, "c2", mutated.Spec.Containers[2].Name)
-	sidecar := mutated.Spec.Containers[0]
+	require.Equal(t, "c1", mutated.Spec.Containers[0].Name)
+	require.Equal(t, "c2", mutated.Spec.Containers[1].Name)
+	require.Equal(t, admission.SidecarContainerName, mutated.Spec.Containers[2].Name)
+	sidecar := mutated.Spec.Containers[2]
 	require.Equal(t, testSandboxImage, sidecar.Image)
 	require.Empty(t, sidecar.Command)
-	require.Len(t, sidecar.Env, 1)
-	require.Equal(t, admission.SpecEnv, sidecar.Env[0].Name)
+	require.Empty(t, sidecar.Env)
 	require.Equal(t, []corev1.VolumeMount{{
 		Name:      "rootfs",
 		MountPath: filepath.Join(admission.SidecarMountPath, "rootfs"),
 	}}, sidecar.VolumeMounts)
 }
 
-func TestMutator_injectsSidecarBeforeRootfsContainers_whenPodHasRootfsRwLayer(t *testing.T) {
+func TestMutator_injectsSidecarAfterRootfsContainers_whenPodHasRootfsRwLayer(t *testing.T) {
 	// Given
 	mutator := newTestMutator()
 	pod := validRootfsPod()
@@ -70,9 +69,9 @@ func TestMutator_injectsSidecarBeforeRootfsContainers_whenPodHasRootfsRwLayer(t 
 
 	// Then
 	require.NoError(t, err)
-	require.Equal(t, admission.SidecarContainerName, mutated.Spec.Containers[0].Name)
-	require.Equal(t, "c1", mutated.Spec.Containers[1].Name)
-	require.Equal(t, "c2", mutated.Spec.Containers[2].Name)
+	require.Equal(t, "c1", mutated.Spec.Containers[0].Name)
+	require.Equal(t, "c2", mutated.Spec.Containers[1].Name)
+	require.Equal(t, admission.SidecarContainerName, mutated.Spec.Containers[2].Name)
 }
 
 func TestServer_rejectsWorkloadResource_whenDeploymentTemplateSidecarWasTampered(t *testing.T) {
@@ -118,7 +117,7 @@ func TestMutator_injectsDistinctSidecarMounts_whenEntriesUseDifferentPVCs(t *tes
 
 	// Then
 	require.NoError(t, err)
-	sidecar := mutated.Spec.Containers[0]
+	sidecar := mutated.Spec.Containers[2]
 	require.Equal(t, []corev1.VolumeMount{
 		{Name: "rootfs-a", MountPath: filepath.Join(admission.SidecarMountPath, "rootfs-a")},
 		{Name: "rootfs-b", MountPath: filepath.Join(admission.SidecarMountPath, "rootfs-b")},
@@ -151,7 +150,7 @@ func TestMutator_replacesSidecarMountsWithRequiredMounts_whenSidecarAlreadyExist
 	// Then
 	require.NoError(t, err)
 	require.Len(t, mutated.Spec.Containers, 3)
-	sidecar := mutated.Spec.Containers[0]
+	sidecar := mutated.Spec.Containers[2]
 	require.Equal(t, []corev1.VolumeMount{
 		{Name: "rootfs", MountPath: filepath.Join(admission.SidecarMountPath, "rootfs")},
 		{Name: "cache", MountPath: filepath.Join(admission.SidecarMountPath, "cache")},
@@ -178,5 +177,5 @@ func TestMutator_replacesConflictingSidecarMountPath_whenSidecarAlreadyExists(t 
 	require.Equal(t, []corev1.VolumeMount{{
 		Name:      "rootfs",
 		MountPath: filepath.Join(admission.SidecarMountPath, "rootfs"),
-	}}, mutated.Spec.Containers[0].VolumeMounts)
+	}}, mutated.Spec.Containers[2].VolumeMounts)
 }

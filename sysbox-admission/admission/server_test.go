@@ -83,14 +83,12 @@ func assertRootfsSidecarPatch(t *testing.T, rawPatch []byte) {
 			continue
 		}
 		require.Len(t, patch.Value, 2)
-		sidecar := patch.Value[0]
+		sidecar := patch.Value[1]
 		require.Equal(t, SidecarContainerName, sidecar.Name)
 		require.Equal(t, "registry.example/pause:9.9", sidecar.Image)
-		require.Len(t, sidecar.Env, 1)
-		require.Equal(t, SpecEnv, sidecar.Env[0].Name)
-		require.JSONEq(t, `{"version":1,"entries":[{"containerName":"app","volumeName":"rootfs","path":"app","pvcClaimName":"rootfs-pvc"}]}`, sidecar.Env[0].Value)
+		require.Empty(t, sidecar.Env)
 		require.Equal(t, []corev1.VolumeMount{{Name: "rootfs", MountPath: "/var/lib/sysbox/rootfs-rw-volume/rootfs"}}, sidecar.VolumeMounts)
-		require.Equal(t, "app", patch.Value[1].Name)
+		require.Equal(t, "app", patch.Value[0].Name)
 		return
 	}
 	require.Failf(t, "patch path missing", "path /spec/containers not found in %s", string(rawPatch))
