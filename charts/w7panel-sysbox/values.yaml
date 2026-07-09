@@ -2,7 +2,7 @@ nodeSelector: {}
 
 image:
   repository: ghcr.io/w7panel/sysbox-deploy-k3s
-  tag: latest
+  tag: ""
 
 installer:
   podLabels: {}

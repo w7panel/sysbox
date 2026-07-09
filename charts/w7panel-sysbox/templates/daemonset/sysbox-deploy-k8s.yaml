@@ -29,7 +29,7 @@ spec:
       {{- end }}
       containers:
       - name: {{ include "w7panel-sysbox.name" . }}
-        image: {{ printf "%s:%s" .Values.image.repository .Values.image.tag | quote }}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
         imagePullPolicy: Always
         command: [ "bash", "-c", "/opt/sysbox/scripts/sysbox-deploy-k8s.sh ce install --snapshotter-enabled={{ .Values.snapshotter.enabled }}" ]
         env:
