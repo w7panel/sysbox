@@ -170,11 +170,13 @@ extract_bins() {
     info "Extract Sysbox binaries from ${deb}"
     "${DPKG}" -x "${deb}" "${tmpdir}"
     mkdir -p "${K8S_DIR}/bin/sysbox-ce/generic"
-    install -m 0755 \
-        "${tmpdir}/usr/bin/sysbox-runc" \
-        "${tmpdir}/usr/bin/sysbox-fs" \
-        "${tmpdir}/usr/bin/sysbox-mgr" \
-        "${K8S_DIR}/bin/sysbox-ce/generic/"
+	install -m 0755 \
+	    "${tmpdir}/usr/bin/sysbox-runc" \
+	    "${tmpdir}/usr/bin/sysbox-fs" \
+	    "${tmpdir}/usr/bin/sysbox-mgr" \
+	    "${tmpdir}/usr/bin/sysbox-snapshotter" \
+	    "${tmpdir}/usr/bin/sysbox-admission" \
+	    "${K8S_DIR}/bin/sysbox-ce/generic/"
     rm -rf "${tmpdir}"
 }
 
@@ -208,9 +210,11 @@ verify_image() {
     info "Verify image tools and Sysbox versions"
     "${DOCKER}" run --rm "${IMAGE}" kubectl version --client=true
     "${DOCKER}" run --rm "${IMAGE}" crictl --version
-    "${DOCKER}" run --rm "${IMAGE}" /opt/sysbox/bin/generic/sysbox-runc --version
-    "${DOCKER}" run --rm "${IMAGE}" /opt/sysbox/bin/generic/sysbox-fs --version
-    "${DOCKER}" run --rm "${IMAGE}" /opt/sysbox/bin/generic/sysbox-mgr --version
+	"${DOCKER}" run --rm "${IMAGE}" /opt/sysbox/bin/generic/sysbox-runc --version
+	"${DOCKER}" run --rm "${IMAGE}" /opt/sysbox/bin/generic/sysbox-fs --version
+	"${DOCKER}" run --rm "${IMAGE}" /opt/sysbox/bin/generic/sysbox-mgr --version
+	"${DOCKER}" run --rm "${IMAGE}" /opt/sysbox/bin/generic/sysbox-snapshotter --version
+	"${DOCKER}" run --rm "${IMAGE}" /opt/sysbox/bin/generic/sysbox-admission --version
 }
 
 push_image() {

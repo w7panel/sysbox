@@ -214,12 +214,12 @@ sysbox-static: test-img
 	$(DOCKER_SYSBOX_BLD) /bin/bash -c "export HOST_UID=$(HOST_UID) && \
 		export HOST_GID=$(HOST_GID) && buildContainerInit sysbox-static-local"
 
-sysbox-local: sysbox-ipc sysbox-runc sysbox-fs sysbox-mgr
+sysbox-local: sysbox-ipc sysbox-runc sysbox-fs sysbox-mgr sysbox-snapshotter sysbox-admission
 	@echo $(HOSTNAME)-$(TARGET_ARCH) > .buildinfo
 
 sysbox-debug-local: sysbox-runc-debug sysbox-fs-debug sysbox-mgr-debug
 
-sysbox-static-local: sysbox-runc-static sysbox-fs-static sysbox-mgr-static
+sysbox-static-local: sysbox-runc-static sysbox-fs-static sysbox-mgr-static sysbox-snapshotter sysbox-admission
 
 sysbox-runc: sysbox-ipc
 	@cd $(SYSRUNC_DIR) && make
@@ -259,9 +259,11 @@ sysbox-mgr-static: sysbox-ipc
 
 sysbox-snapshotter:
 	@cd $(SYSSNAPSHOTTER_DIR) && make sysbox-snapshotter
+	@cd $(SYSSNAPSHOTTER_DIR) && chown -R $(HOST_UID):$(HOST_GID) build
 
 sysbox-admission:
 	@cd $(SYSADMISSION_DIR) && make sysbox-admission
+	@cd $(SYSADMISSION_DIR) && chown -R $(HOST_UID):$(HOST_GID) build
 
 sysbox-ipc:
 	@cd $(SYSIPC_DIR) && make sysbox-ipc
@@ -277,6 +279,8 @@ install: ## Install all sysbox binaries (requires root privileges)
 	install -D -m0755 sysbox-fs/build/$(TARGET_ARCH)/sysbox-fs $(INSTALL_DIR)/sysbox-fs
 	install -D -m0755 sysbox-mgr/build/$(TARGET_ARCH)/sysbox-mgr $(INSTALL_DIR)/sysbox-mgr
 	install -D -m0755 sysbox-runc/build/$(TARGET_ARCH)/sysbox-runc $(INSTALL_DIR)/sysbox-runc
+	install -D -m0755 sysbox-snapshotter/build/$(TARGET_ARCH)/sysbox-snapshotter $(INSTALL_DIR)/sysbox-snapshotter
+	install -D -m0755 sysbox-admission/build/$(TARGET_ARCH)/sysbox-admission $(INSTALL_DIR)/sysbox-admission
 	install -D -m0755 scr/sysbox $(INSTALL_DIR)/sysbox
 
 uninstall: ## Uninstall all sysbox binaries (requires root privileges)
@@ -284,6 +288,8 @@ uninstall: ## Uninstall all sysbox binaries (requires root privileges)
 	rm -f $(INSTALL_DIR)/sysbox-fs
 	rm -f $(INSTALL_DIR)/sysbox-mgr
 	rm -f $(INSTALL_DIR)/sysbox-runc
+	rm -f $(INSTALL_DIR)/sysbox-snapshotter
+	rm -f $(INSTALL_DIR)/sysbox-admission
 
 #
 # Test targets
