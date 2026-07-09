@@ -1,6 +1,6 @@
 # sysbox-snapshotter
 
-`sysbox-snapshotter` is a containerd proxy snapshotter based on `fuse-overlayfs`. It maintains its own snapshot metadata under a containerd-compatible root directory and rewrites only the writable `upperdir` and `workdir` for containers that opt into Sysbox rootfs rw-layer persistence.
+`sysbox-snapshotter` is a containerd proxy snapshotter based on `fuse-overlayfs`. It maintains its own snapshot metadata under a containerd-compatible root directory and rewrites only the writable `upperdir` and `workdir` for containers that opt in to Sysbox rootfs rw-layer persistence.
 
 The snapshotter root follows the native containerd plugin layout convention under the configured containerd data root:
 
@@ -21,7 +21,9 @@ sysbox-snapshotter \
 
 All runtime paths are explicit. `--socket` must match the containerd proxy plugin address, `--root` stores sysbox-snapshotter metadata and snapshots, and `--containerd-socket` is used to read Kubernetes container labels and sidecar OCI specs from containerd.
 
-This project is intended to apply only to the `sysbox-runc` runtime path. The global CRI image snapshotter remains the host default (for example `overlayfs`). Configure containerd so only the `sysbox-runc` runtime uses this snapshotter, and so CRI forwards the rootfs rw-layer pod annotation:
+This project is intended to apply only to the `sysbox-runc` runtime path. The global CRI image snapshotter remains the host default, for example `overlayfs`.
+
+Configure containerd so only the `sysbox-runc` runtime uses this snapshotter. Also configure CRI to forward `sysbox/rootfs-rw-layer` from Pod annotations into each container OCI spec; the snapshotter uses that OCI annotation to decide whether a container has a persistent rootfs rw-layer.
 
 ```toml
 [proxy_plugins."sysbox"]
@@ -51,9 +53,11 @@ ctr plugins ls -d id==sysbox
 
 When remap delegation is enabled, the output must include `Capabilities: remap-ids`. For a fresh `runtimeClassName: sysbox-runc`, `hostUsers: false` pod, `ctr -n k8s.io snapshots --snapshotter sysbox mounts <container-id>` should show `uidmapping=` and `gidmapping=` options, and `ctr -n k8s.io snapshots --snapshotter sysbox ls` should not show a new `*-remap` committed parent for that pod. When `remap-ids` is omitted, the active mount should not contain `uidmapping=` / `gidmapping=`, and containerd may create a fallback `*-remap` parent.
 
-## Rootfs Intent
+## Rootfs Rw-Layer Annotation
 
-Rootfs rw-layer intent comes from the Kubernetes Pod annotation forwarded by containerd into each container OCI spec. Put `sysbox/rootfs-rw-layer` under the workload Pod template's `metadata.annotations`; `sysbox-admission` validates the annotation and always replaces any existing `sysbox-rootfs` container with a canonical sidecar, but it does not write rootfs intent into sidecar environment variables.
+Put `sysbox/rootfs-rw-layer` under the workload Pod's `metadata.annotations`. For controllers such as Deployment or StatefulSet, put it under `spec.template.metadata.annotations`.
+
+`sysbox-admission` validates this annotation and injects a canonical `sysbox-rootfs` sidecar. The sidecar does not carry rootfs configuration in environment variables; it only mounts the requested PVC volumes so `sysbox-snapshotter` can resolve each `volumeName` to the trusted node-side PVC mount path.
 
 ```yaml
 apiVersion: v1
@@ -79,13 +83,19 @@ spec:
         claimName: sysbox-rootfs-pvc
 ```
 
-For controllers such as Deployment or StatefulSet, put the same annotation under `spec.template.metadata.annotations`. In each annotation entry, `name` must match the target app container name, `volumeName` must match a PVC-backed `spec.volumes[].name`, and `path` is the persistent rootfs rw-layer directory inside that PVC.
+Each annotation entry has this meaning:
 
-At runtime, `sysbox-snapshotter` reads the current container OCI annotation `sysbox/rootfs-rw-layer` to find the matching container entry. It still uses containerd labels to find the current Pod's sidecar OCI spec, but only to read the sidecar OCI mounts and resolve `volumeName` to the exact node-side PVC source path.
+| Field | Meaning |
+| --- | --- |
+| `name` | Target app container name. |
+| `volumeName` | Name of a PVC-backed `spec.volumes[]` entry. |
+| `path` | Persistent rootfs rw-layer directory inside that PVC. |
 
-`path` must be relative and must not contain `..`. The snapshotter never infers a host path from `volumeName` alone; it must match the corresponding sidecar mount at `/var/lib/sysbox/rootfs-rw-volume/<volumeName>`. If no annotation entry is available for a container, native overlay mounts are returned unchanged. Once an annotation entry exists for that container, malformed intent, unavailable sidecar metadata, or a missing requested mount fails closed for that rootfs rw-layer request.
+At runtime, `sysbox-snapshotter` reads the current container OCI annotation `sysbox/rootfs-rw-layer` to find the matching container entry. It uses containerd labels to find the current Pod's `sysbox-rootfs` sidecar OCI spec, but only to read sidecar OCI mounts and resolve `volumeName` to the exact node-side PVC source path.
 
-`LocalPreparer` remains local to `sysbox-snapshotter`; rootfs preparation is not performed by sysbox-admission, a database, or a containerd fork.
+`path` must be relative and must not contain `..`. The snapshotter never infers a host path from `volumeName` alone; it must match the corresponding sidecar mount at `/var/lib/sysbox/rootfs-rw-volume/<volumeName>`. If no annotation entry is available for a container, native overlay mounts are returned unchanged. Once an annotation entry exists for that container, malformed annotation data, unavailable sidecar metadata, or a missing requested mount fails closed for that rootfs rw-layer request.
+
+Rootfs preparation is local to `sysbox-snapshotter`; it is not performed by sysbox-admission, a database, or a containerd fork.
 
 When an annotation entry exists, the snapshotter prepares this layout under the resolved PVC mount path plus `path`:
 
@@ -103,18 +113,7 @@ intentional persistence semantic: users are responsible for choosing stable path
 whose lifecycle matches the desired rootfs state. The current Kubernetes
 annotation path does not use image chain identity to reject cross-image reuse.
 
-## Snapshot Labels
-
-The current Kubernetes path does not depend on custom rootfs rw-layer snapshot labels. Stock containerd CRI does not pass pod rootfs persistence intent, PVC names, or pod volume data to app-container snapshot `Prepare` calls.
-
-If a future CRI/containerd integration explicitly sets labels on `Prepare`, keep any Sysbox-specific keys under a snapshot-label namespace such as:
-
-```text
-io.nestybox.sysbox.rootfs-rw-layer.pod-uid
-io.nestybox.sysbox.rootfs-rw-layer.container-name
-```
-
-Those labels are not a replacement for resolving the node-side PVC mount path unless that future integration also provides a trusted path. If no rootfs rw-layer annotation entry exists, native overlay mounts are returned unchanged.
+The current Kubernetes path does not depend on custom rootfs rw-layer snapshot labels. Stock containerd CRI does not pass Pod rootfs persistence data, PVC names, or Pod volume data to app-container snapshot `Prepare` calls. If no rootfs rw-layer annotation entry exists for a container, native overlay mounts are returned unchanged.
 
 ## Build And Test
 
