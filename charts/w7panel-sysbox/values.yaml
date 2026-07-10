@@ -1,15 +1,17 @@
 nodeSelector: {}
 
-image:
-  repository: ghcr.registry.cdn.w7.cc/w7panel/sysbox-deploy-k3s
-  tag: ""
-
 installer:
+  image:
+    repository: ghcr.registry.cdn.w7.cc/w7panel/sysbox-deploy-k3s
+    tag: ""
   podLabels: {}
   podAnnotations: {}
 
 admission:
   enabled: false
+  image:
+    repository: ghcr.registry.cdn.w7.cc/w7panel/sysbox-admission
+    tag: ""
   replicas: 1
   containerdConfigPath: /var/lib/rancher/k3s/agent/etc/containerd
   podLabels: {}

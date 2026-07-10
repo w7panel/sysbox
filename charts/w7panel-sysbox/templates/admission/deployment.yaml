@@ -38,10 +38,10 @@ spec:
       {{- end }}
       containers:
         - name: sysbox-admission
-          image: {{ printf "%s:%s" .Values.image.repository .Values.image.tag | quote }}
+          image: {{ printf "%s:%s" .Values.admission.image.repository (.Values.admission.image.tag | default (printf "v%s" .Chart.AppVersion)) | quote }}
           imagePullPolicy: Always
           command:
-            - "/opt/sysbox/bin/generic/sysbox-admission"
+            - "/usr/local/bin/sysbox-admission"
           args:
             - -addr=:9443
             - -bootstrap-webhook=true

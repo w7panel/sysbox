@@ -1,6 +1,7 @@
 .PHONY: sysbox-admission test gomod-tidy clean distclean
 
 GO := go
+GOOS ?= linux
 CGO_ENABLED ?= 0
 BUILDROOT := build
 BUILDDIR = $(BUILDROOT)/$(TARGET_ARCH)
@@ -19,13 +20,15 @@ ifeq ($(TARGET_ARCH),)
 	endif
 endif
 
+GOARCH ?= $(TARGET_ARCH)
+
 .DEFAULT: sysbox-admission
 
 sysbox-admission: $(BUILDDIR)/$(TARGET)
 
 $(BUILDDIR)/$(TARGET):
 	mkdir -p $(BUILDDIR)
-	CGO_ENABLED=$(CGO_ENABLED) $(GO) build -buildvcs=false -trimpath \
+	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=$(CGO_ENABLED) $(GO) build -buildvcs=false -trimpath \
 		-ldflags "-s -w -X main.version=$(VERSION) -X main.revision=$(COMMIT)" \
 		-o $(BUILDDIR)/$(TARGET) ./cmd/sysbox-admission
 

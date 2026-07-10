@@ -35,22 +35,25 @@ To use a custom label, set `nodeSelector` to the desired key/value map.
 | --- | --- | --- |
 | `nodeSelector` | `{}` | Shared node selector for the installer DaemonSet, admission Deployment, and RuntimeClass scheduling. |
 
-### Image
+### Images
 
-The installer and admission backend use the same image configuration:
+The installer and admission backend are released as separate images. When the
+tag is empty, the chart defaults it to `v{{ .Chart.AppVersion }}`.
 
 | Value | Default | Description |
 | --- | --- | --- |
-| `image.repository` | `ghcr.io/w7panel/sysbox-deploy-k3s` | Installer and admission image repository. |
-| `image.tag` | `latest` | Installer and admission image tag. |
+| `installer.image.repository` | `ghcr.registry.cdn.w7.cc/w7panel/sysbox-deploy-k3s` | Installer image repository. |
+| `installer.image.tag` | `""` | Installer image tag; defaults to `v{{ .Chart.AppVersion }}`. |
+| `admission.image.repository` | `ghcr.registry.cdn.w7.cc/w7panel/sysbox-admission` | Admission backend image repository. |
+| `admission.image.tag` | `""` | Admission backend image tag; defaults to `v{{ .Chart.AppVersion }}`. |
 
-For domestic registry access, set the shared image repository to the CDN mirror:
+For direct GHCR access, set both image repositories:
 
 ```bash
 helm upgrade --install w7panel-sysbox ./charts/w7panel-sysbox \
   -n default \
-  --set image.repository=ghcr.registry.cdn.w7.cc/w7panel/sysbox-deploy-k3s \
-  --set image.tag=latest
+  --set installer.image.repository=ghcr.io/w7panel/sysbox-deploy-k3s \
+  --set admission.image.repository=ghcr.io/w7panel/sysbox-admission
 ```
 
 ### Installer
@@ -62,7 +65,7 @@ helm upgrade --install w7panel-sysbox ./charts/w7panel-sysbox \
 
 ### Admission
 
-The admission backend is rendered by this chart and uses the shared image
+The admission backend is rendered by this chart and uses its own image
 configuration above. Set `admission.enabled=false` to skip the admission
 Deployment, Service, and admission-only RBAC.
 
