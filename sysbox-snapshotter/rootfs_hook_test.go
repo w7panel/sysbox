@@ -4,7 +4,6 @@ package sysboxsnapshotter
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/containerd/containerd/v2/core/mount"
@@ -65,19 +64,22 @@ func TestApplyRootfsHookLeavesSidecarMountsUnchanged(t *testing.T) {
 	}
 }
 
-func TestApplyRootfsHookReturnsErrorWhenConfiguredSidecarSpecIsUnavailable(t *testing.T) {
+func TestApplyRootfsHookLeavesConfiguredSidecarUnchangedWhenItsSpecIsUnavailable(t *testing.T) {
 	hooks := RootfsHooks{
-		IdentityResolver: fakeIdentityResolver{request: rootfs.RootfsRwLayerRequest{SnapshotKey: "snap", ContainerName: "app", RootfsRwLayerAnnotation: `[{"name":"app","volumeName":"rootfs","path":"containers/app"}]`}},
+		IdentityResolver: fakeIdentityResolver{request: rootfs.RootfsRwLayerRequest{SnapshotKey: "snap", ContainerName: rootfs.SidecarContainerName, RootfsRwLayerAnnotation: `[{"name":"app","volumeName":"rootfs","path":"containers/app"}]`}},
 		MetadataResolver: rootfs.NewSidecarMetadataResolver(fakeSidecarSpecStore{err: rootfs.ErrSidecarSpecUnavailable}),
 		PVCResolver:      fakePVCResolver{path: "/pvc"},
 		Preparer:         fakePreparer{prepared: rootfs.PreparedRootfs{UpperDir: "/pvc/upper", WorkDir: "/pvc/work"}},
 	}
 	mounts := []mount.Mount{{Type: "fuse3.fuse-overlayfs", Source: "overlay", Options: []string{"workdir=/snap/work", "upperdir=/snap/fs"}}}
 
-	_, err := applyRootfsHook(context.Background(), hooks, "snap", mounts)
+	rewritten, err := applyRootfsHook(context.Background(), hooks, "snap", mounts)
 
-	if !errors.Is(err, rootfs.ErrSidecarSpecUnavailable) {
-		t.Fatalf("err = %v, want %v", err, rootfs.ErrSidecarSpecUnavailable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rewritten[0].Options; !equalStrings(got, mounts[0].Options) {
+		t.Fatalf("options = %#v, want %#v", got, mounts[0].Options)
 	}
 }
 
@@ -102,8 +104,7 @@ func TestMountsWithRootfsHookRewritesOnlyActiveFuseMount(t *testing.T) {
 		"workdir=/pvc/work",
 		"upperdir=/pvc/upper",
 		"lowerdir=/snapshotter/snapshots/1/fs",
-		"uidmapping=0:100000:65536",
-		"gidmapping=0:100000:65536",
+		"nodev,uidmapping=0:100000:65536,gidmapping=0:100000:65536",
 	}
 	if got := mounts[0].Options; !equalStrings(got, want) {
 		t.Fatalf("options = %#v, want %#v", got, want)

@@ -4,6 +4,7 @@ installer:
   image:
     repository: ghcr.registry.cdn.w7.cc/w7panel/sysbox-deploy-k3s
     tag: ""
+    pullPolicy: Always
   podLabels: {}
   podAnnotations: {}
 
@@ -12,6 +13,7 @@ admission:
   image:
     repository: ghcr.registry.cdn.w7.cc/w7panel/sysbox-admission
     tag: ""
+    pullPolicy: Always
   replicas: 1
   containerdConfigPath: /var/lib/rancher/k3s/agent/etc/containerd
   podLabels: {}

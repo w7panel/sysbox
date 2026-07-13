@@ -484,11 +484,20 @@ func (o *snapshotter) mounts(ctx context.Context, key string, s storage.Snapshot
 	}
 
 	options = append(options, fmt.Sprintf("lowerdir=%s", strings.Join(parentPaths, ":")))
+	var idMappingOptions []string
 	if mapping, ok := info.Labels["containerd.io/snapshot/uidmapping"]; ok {
-		options = append(options, fmt.Sprintf("uidmapping=%s", convertIDMappingOption(mapping)))
+		idMappingOptions = append(idMappingOptions, fmt.Sprintf("uidmapping=%s", convertIDMappingOption(mapping)))
 	}
 	if mapping, ok := info.Labels["containerd.io/snapshot/gidmapping"]; ok {
-		options = append(options, fmt.Sprintf("gidmapping=%s", convertIDMappingOption(mapping)))
+		idMappingOptions = append(idMappingOptions, fmt.Sprintf("gidmapping=%s", convertIDMappingOption(mapping)))
+	}
+	if len(idMappingOptions) > 0 {
+		// containerd's RemoveIDMapOption treats any option beginning with
+		// "uidmap" or "gidmap" as one of its kernel idmap options. In
+		// containerd 2.2.3 it also panics when both are present. Keep the
+		// fuse-overlayfs mappings in one valid comma-separated option group,
+		// prefixed by nodev so containerd does not misclassify them.
+		options = append(options, "nodev,"+strings.Join(idMappingOptions, ","))
 	}
 	mounts := []mount.Mount{
 		{

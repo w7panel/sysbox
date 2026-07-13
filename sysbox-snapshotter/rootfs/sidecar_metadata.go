@@ -20,13 +20,6 @@ func (r *SidecarMetadataResolver) ResolveRootfsRwLayer(ctx context.Context, requ
 	if request.RootfsRwLayerAnnotation == "" {
 		return RootfsRwLayerSpec{}, ErrRootfsRwLayerNotConfigured
 	}
-	sidecarSpec, err := r.store.LoadSidecarSpec(ctx, request)
-	if err != nil {
-		if errors.Is(err, ErrSidecarSpecUnavailable) {
-			return RootfsRwLayerSpec{}, err
-		}
-		return RootfsRwLayerSpec{}, err
-	}
 	intent, err := parsePodAnnotationIntent(request.RootfsRwLayerAnnotation)
 	if err != nil {
 		return RootfsRwLayerSpec{}, err
@@ -35,13 +28,23 @@ func (r *SidecarMetadataResolver) ResolveRootfsRwLayer(ctx context.Context, requ
 		if len(intent.Entries) == 0 {
 			return RootfsRwLayerSpec{}, ErrRootfsRwLayerNotConfigured
 		}
-		return RootfsRwLayerSpec{Sidecar: true, sidecarSpec: sidecarSpec}, nil
+		// The sidecar's own snapshot is prepared before its container metadata
+		// is guaranteed to exist in containerd. It never uses the persistent
+		// rootfs layer, so do not introduce a self-referential spec lookup.
+		return RootfsRwLayerSpec{Sidecar: true}, nil
 	}
 	for _, entry := range intent.Entries {
 		if entry.ContainerName != request.ContainerName {
 			continue
 		}
 		if _, err := safeLayerPath(entry.Path); err != nil {
+			return RootfsRwLayerSpec{}, err
+		}
+		sidecarSpec, err := r.store.LoadSidecarSpec(ctx, request)
+		if err != nil {
+			if errors.Is(err, ErrSidecarSpecUnavailable) {
+				return RootfsRwLayerSpec{}, err
+			}
 			return RootfsRwLayerSpec{}, err
 		}
 		return RootfsRwLayerSpec{VolumeName: entry.VolumeName, Path: entry.Path, sidecarSpec: sidecarSpec}, nil

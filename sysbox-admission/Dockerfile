@@ -6,6 +6,7 @@ FROM ${GO_IMAGE} AS builder
 ARG TARGETARCH=amd64
 ARG VERSION=unknown
 ARG REVISION=unknown
+ARG GOPROXY
 
 WORKDIR /src
 
@@ -13,6 +14,7 @@ COPY sysbox-admission/go.mod sysbox-admission/go.sum ./sysbox-admission/
 COPY sysbox-libs/containerdUtils/go.mod ./sysbox-libs/containerdUtils/
 
 WORKDIR /src/sysbox-admission
+ENV GOPROXY=${GOPROXY}
 RUN go mod download
 
 WORKDIR /src

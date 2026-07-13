@@ -25,7 +25,7 @@ func TestSidecarMetadataResolver_resolvesContainerFromPodAnnotation(t *testing.T
 }
 
 func TestSidecarMetadataResolver_resolvesSidecarFromPodAnnotation(t *testing.T) {
-	resolver := NewSidecarMetadataResolver(fakeSidecarStore{spec: &runtimespec.Spec{}})
+	resolver := NewSidecarMetadataResolver(fakeSidecarStore{err: ErrSidecarSpecUnavailable})
 	request := RootfsRwLayerRequest{
 		ContainerName:           SidecarContainerName,
 		RootfsRwLayerAnnotation: `[{"name":"app","volumeName":"rootfs","path":"containers/app"}]`,
