@@ -35,6 +35,7 @@ VERSION ?= $(shell cat ../VERSION 2>/dev/null || git describe --match 'v[0-9]*' 
 LDFLAGS := -s -w -X $(PKG_VERSION).Version=$(VERSION) -X $(PKG_VERSION).Revision=$(COMMIT)
 
 # Set cross-compilation flags if applicable.
+GO_XCOMPILE := CGO_ENABLED=0
 ifneq ($(SYS_ARCH),$(TARGET_ARCH))
 	ifeq ($(TARGET_ARCH),armel)
 		GO_XCOMPILE := CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=6
