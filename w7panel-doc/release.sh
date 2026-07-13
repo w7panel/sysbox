@@ -218,6 +218,7 @@ build_admission_image() {
             -t "${ADMISSION_IMAGE}" \
             --build-arg GO_IMAGE="${ADMISSION_GO_IMAGE}" \
             --build-arg BASE_IMAGE="${ADMISSION_BASE_IMAGE}" \
+            --build-arg GOPROXY="${GOPROXY}" \
             --build-arg VERSION="${SYSBOX_VERSION_FULL}" \
             --build-arg REVISION="${TARGET_COMMITISH:-$("${GIT}" -C "${ROOT_DIR}" rev-parse HEAD)}" \
             -f "${ROOT_DIR}/sysbox-admission/Dockerfile" \
@@ -227,6 +228,7 @@ build_admission_image() {
             -t "${ADMISSION_IMAGE}" \
             --build-arg GO_IMAGE="${ADMISSION_GO_IMAGE}" \
             --build-arg BASE_IMAGE="${ADMISSION_BASE_IMAGE}" \
+            --build-arg GOPROXY="${GOPROXY}" \
             --build-arg VERSION="${SYSBOX_VERSION_FULL}" \
             --build-arg REVISION="${TARGET_COMMITISH:-$("${GIT}" -C "${ROOT_DIR}" rev-parse HEAD)}" \
             -f "${ROOT_DIR}/sysbox-admission/Dockerfile" \
