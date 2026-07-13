@@ -146,7 +146,7 @@ check_host() {
         die "k3s/sysbox 服务未全部 active"
     }
 
-    host_exec command -v fuse-overlayfs >/dev/null
+    host_exec sh -c 'command -v fuse-overlayfs' >/dev/null
     plugin="$(host_exec k3s ctr plugins ls -d id==sysbox)"
     grep -q 'ID:.*sysbox' <<<"${plugin}" || die "containerd 未注册 sysbox snapshotter"
     grep -q 'address.*\/run\/sysbox-snapshotter.sock' <<<"${plugin}" || \
@@ -194,6 +194,7 @@ spec:
     spec:
       runtimeClassName: sysbox-runc
       hostUsers: false
+      enableServiceLinks: false
       terminationGracePeriodSeconds: 0
       containers:
       - name: ${CONTAINER}
