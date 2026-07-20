@@ -41,7 +41,7 @@ sudo ./w7panel-doc/deploy-local-test.sh
 
 1. 确认 `sysbox-pkgr/sources/sysbox` 指向当前 sysbox 源码。
 2. 使用 `sysbox-pkgr/deb` 构建 generic deb。
-3. 从 deb 解出 `sysbox-runc`、`sysbox-fs`、`sysbox-mgr` 到 `sysbox-pkgr/k8s/bin/sysbox-ce/generic/`。
+3. 从 deb 解出 Sysbox runtime 与 admission 二进制到 `sysbox-pkgr/k8s/bin/sysbox-ce/generic/`。
 4. 构建 K3s 部署镜像。
 5. 可选推送镜像到 registry。
 6. 将镜像导入本机 K3s containerd。
@@ -130,7 +130,7 @@ kubectl exec sysbox-release-test -- sh -lc 'mount | grep -E "sysboxfs|proc|cgrou
 默认行为：
 
 1. 使用当前源码构建 generic deb。
-2. 从 deb 解出 `sysbox-runc`、`sysbox-fs`、`sysbox-mgr`。
+2. 从 deb 解出 Sysbox runtime 与 admission 二进制。
 3. 构建并验证 K3s deploy 镜像。
 4. 写入 `dist/` 产物和 `SHA256SUMS`。
 5. 如果设置了 `GITHUB_TOKEN`，自动创建或复用 GitHub Release，并上传 `dist/` 内文件。

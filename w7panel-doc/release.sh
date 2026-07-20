@@ -2,7 +2,7 @@
 #
 # Build a Sysbox release from the local source tree:
 #   1. build the generic sysbox-ce deb
-#   2. build and verify the K3s deploy and admission images
+#   2. build and verify the K3s deploy image
 #   3. write release artifacts under dist/
 #   4. publish a GitHub Release when GITHUB_TOKEN is set
 
@@ -41,9 +41,6 @@ RELEASE_BODY="${RELEASE_BODY:-Sysbox ${RELEASE_TAG} release artifacts.}"
 IMAGE_REPO="${IMAGE_REPO:-ghcr.io/w7panel/sysbox-deploy-k3s}"
 IMAGE_TAG="${IMAGE_TAG:-${RELEASE_TAG}}"
 IMAGE="${IMAGE:-${IMAGE_REPO}:${IMAGE_TAG}}"
-ADMISSION_IMAGE_REPO="${ADMISSION_IMAGE_REPO:-ghcr.io/w7panel/sysbox-admission}"
-ADMISSION_IMAGE_TAG="${ADMISSION_IMAGE_TAG:-${IMAGE_TAG}}"
-ADMISSION_IMAGE="${ADMISSION_IMAGE:-${ADMISSION_IMAGE_REPO}:${ADMISSION_IMAGE_TAG}}"
 PUSH_IMAGE="${PUSH_IMAGE:-false}"
 SAVE_IMAGE_TAR="${SAVE_IMAGE_TAR:-false}"
 VERIFY_IMAGE="${VERIFY_IMAGE:-true}"
@@ -51,8 +48,6 @@ USE_BUILDX="${USE_BUILDX:-false}"
 PACKAGE_CHART="${PACKAGE_CHART:-true}"
 CHART_VERSION="${CHART_VERSION:-${SYSBOX_VERSION_FULL}}"
 K3S_BASE_IMAGE="${K3S_BASE_IMAGE:-ghcr.io/nestybox/centos7/systemd}"
-ADMISSION_GO_IMAGE="${ADMISSION_GO_IMAGE:-golang:1.24.3-bookworm}"
-ADMISSION_BASE_IMAGE="${ADMISSION_BASE_IMAGE:-debian:bookworm-slim}"
 
 # China mirror alternatives:
 # K3S_BASE_IMAGE=docker.cnb.cool/i0358/docker-images-chrom/nestybox-centos7-systemd
@@ -180,6 +175,7 @@ extract_bins() {
 	    "${tmpdir}/usr/bin/sysbox-fs" \
 	    "${tmpdir}/usr/bin/sysbox-mgr" \
 	    "${tmpdir}/usr/bin/sysbox-snapshotter" \
+	    "${tmpdir}/usr/bin/sysbox-admission" \
 	    "${K8S_DIR}/bin/sysbox-ce/generic/"
     rm -rf "${tmpdir}"
 }
@@ -208,34 +204,6 @@ build_installer_image() {
     fi
 }
 
-build_admission_image() {
-    info "Build ${SYS_ARCH} admission image ${ADMISSION_IMAGE}"
-
-    if [[ "${USE_BUILDX}" == "true" ]]; then
-        "${DOCKER}" buildx build \
-            --platform "linux/${SYS_ARCH}" \
-            --load \
-            -t "${ADMISSION_IMAGE}" \
-            --build-arg GO_IMAGE="${ADMISSION_GO_IMAGE}" \
-            --build-arg BASE_IMAGE="${ADMISSION_BASE_IMAGE}" \
-            --build-arg GOPROXY="${GOPROXY}" \
-            --build-arg VERSION="${SYSBOX_VERSION_FULL}" \
-            --build-arg REVISION="${TARGET_COMMITISH:-$("${GIT}" -C "${ROOT_DIR}" rev-parse HEAD)}" \
-            -f "${ROOT_DIR}/sysbox-admission/Dockerfile" \
-            "${ROOT_DIR}"
-    else
-        "${DOCKER}" build \
-            -t "${ADMISSION_IMAGE}" \
-            --build-arg GO_IMAGE="${ADMISSION_GO_IMAGE}" \
-            --build-arg BASE_IMAGE="${ADMISSION_BASE_IMAGE}" \
-            --build-arg GOPROXY="${GOPROXY}" \
-            --build-arg VERSION="${SYSBOX_VERSION_FULL}" \
-            --build-arg REVISION="${TARGET_COMMITISH:-$("${GIT}" -C "${ROOT_DIR}" rev-parse HEAD)}" \
-            -f "${ROOT_DIR}/sysbox-admission/Dockerfile" \
-            "${ROOT_DIR}"
-    fi
-}
-
 verify_images() {
     [[ "${VERIFY_IMAGE}" == "true" ]] || return 0
 
@@ -246,7 +214,7 @@ verify_images() {
 	"${DOCKER}" run --rm "${IMAGE}" /opt/sysbox/bin/generic/sysbox-fs --version
 	"${DOCKER}" run --rm "${IMAGE}" /opt/sysbox/bin/generic/sysbox-mgr --version
 	"${DOCKER}" run --rm "${IMAGE}" /opt/sysbox/bin/generic/sysbox-snapshotter --version
-	"${DOCKER}" run --rm "${ADMISSION_IMAGE}" --version
+	"${DOCKER}" run --rm "${IMAGE}" /usr/local/bin/sysbox-admission --version
 }
 
 push_images() {
@@ -254,8 +222,6 @@ push_images() {
 
     info "Push deploy image ${IMAGE}"
     "${DOCKER}" push "${IMAGE}"
-    info "Push admission image ${ADMISSION_IMAGE}"
-    "${DOCKER}" push "${ADMISSION_IMAGE}"
 }
 
 write_image_artifacts() {
@@ -269,15 +235,11 @@ write_image_artifacts() {
         echo "installer_image=${IMAGE}"
         "${DOCKER}" image inspect "${IMAGE}" --format 'installer_image_id={{.Id}}'
         "${DOCKER}" image inspect "${IMAGE}" --format 'installer_repo_digests={{json .RepoDigests}}'
-        echo "admission_image=${ADMISSION_IMAGE}"
-        "${DOCKER}" image inspect "${ADMISSION_IMAGE}" --format 'admission_image_id={{.Id}}'
-        "${DOCKER}" image inspect "${ADMISSION_IMAGE}" --format 'admission_repo_digests={{json .RepoDigests}}'
     } > "${DIST_DIR}/image-metadata.txt"
 
     if [[ "${SAVE_IMAGE_TAR}" == "true" ]]; then
         info "Save image tar"
         "${DOCKER}" save -o "${DIST_DIR}/sysbox-deploy-k3s-${RELEASE_TAG}.tar" "${IMAGE}"
-        "${DOCKER}" save -o "${DIST_DIR}/sysbox-admission-${RELEASE_TAG}.tar" "${ADMISSION_IMAGE}"
     fi
 }
 
@@ -458,7 +420,6 @@ main() {
     collect_deb_artifacts "${deb}"
     extract_bins "${deb}"
     build_installer_image
-    build_admission_image
     verify_images
     push_images
     write_image_artifacts
@@ -469,7 +430,6 @@ main() {
     info "Release complete: ${RELEASE_TAG}"
     info "Artifacts: ${DIST_DIR}"
     info "Installer image: ${IMAGE}"
-    info "Admission image: ${ADMISSION_IMAGE}"
 }
 
 main "$@"

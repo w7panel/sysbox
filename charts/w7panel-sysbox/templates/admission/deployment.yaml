@@ -38,8 +38,8 @@ spec:
       {{- end }}
       containers:
         - name: sysbox-admission
-          image: {{ printf "%s:%s" .Values.admission.image.repository (.Values.admission.image.tag | default (printf "v%s" .Chart.AppVersion)) | quote }}
-          imagePullPolicy: {{ .Values.admission.image.pullPolicy }}
+          image: {{ printf "%s:%s" (.Values.admission.image.repository | default .Values.installer.image.repository) (.Values.admission.image.tag | default .Values.installer.image.tag | default (printf "v%s" .Chart.AppVersion)) | quote }}
+          imagePullPolicy: {{ .Values.admission.image.pullPolicy | default .Values.installer.image.pullPolicy }}
           command:
             - "/usr/local/bin/sysbox-admission"
           args:

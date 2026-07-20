@@ -62,6 +62,7 @@ extract_bins() {
         "${tmpdir}/usr/bin/sysbox-runc" \
         "${tmpdir}/usr/bin/sysbox-fs" \
         "${tmpdir}/usr/bin/sysbox-mgr" \
+        "${tmpdir}/usr/bin/sysbox-admission" \
         "${K8S_DIR}/bin/sysbox-ce/generic/"
     rm -rf "${tmpdir}"
 }
@@ -83,6 +84,7 @@ verify_image() {
     "${DOCKER}" run --rm "${IMAGE}" /opt/sysbox/bin/generic/sysbox-runc --version
     "${DOCKER}" run --rm "${IMAGE}" /opt/sysbox/bin/generic/sysbox-fs --version
     "${DOCKER}" run --rm "${IMAGE}" /opt/sysbox/bin/generic/sysbox-mgr --version
+    "${DOCKER}" run --rm "${IMAGE}" /usr/local/bin/sysbox-admission --version
 }
 
 push_image() {

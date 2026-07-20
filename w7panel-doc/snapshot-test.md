@@ -59,6 +59,9 @@ docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:rootfs-20260713075329-5
 docker.cnb.cool/i0358/zpk/sysbox-admission:local-20260713065909
 ```
 
+这是合并镜像前的历史验收记录；当前 release 默认由
+`sysbox-deploy-k3s` 同时提供 installer 和 admission。
+
 installer 镜像 `-5` 包含以下兼容修复：
 
 - 自动安装宿主 `fuse-overlayfs`。

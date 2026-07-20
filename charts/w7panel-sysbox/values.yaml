@@ -11,9 +11,9 @@ installer:
 admission:
   enabled: false
   image:
-    repository: ghcr.registry.cdn.w7.cc/w7panel/sysbox-admission
+    repository: ""
     tag: ""
-    pullPolicy: Always
+    pullPolicy: ""
   replicas: 1
   containerdConfigPath: /var/lib/rancher/k3s/agent/etc/containerd
   podLabels: {}
