@@ -53,7 +53,7 @@ sysbox/persistent-special-mounts: "true"
 
 ### 上线迁移约束
 
-线上旧 CKM 来自 `dev-v1-k3k-deployment`，其 PVC 直接挂载在 `/var/lib/rancher/k3s`。模板升级必须先停止旧 Pod，再把 PVC 顶层的 K3s 数据拆分到 `rootfs/upper/var/lib/rancher/k3s` 与 `rootfs/special/k3s-agent`，创建其余空 special 目录并生成与 runc 一致的 v2 `meta.json`，校验完成后才能删除旧布局并启动新模板。开发阶段生成的旧三目录 metadata 不做原地兼容。
+线上旧 CKM 来自 `dev-v1-k3k-deployment`，其 PVC 直接挂载在 `/var/lib/rancher/k3s`。模板升级必须先停止旧 Pod，再把 PVC 顶层的 K3s 数据拆分到 `rootfs/upper/var/lib/rancher/k3s` 与 `rootfs/special/k3s-agent`，创建其余空 special 目录并生成与 runc 一致的 v3 `meta.json`，校验完成后才能删除旧布局并启动新模板。开发阶段生成的旧 metadata 不做原地兼容。
 
 ### 218 集成验证结果
 
