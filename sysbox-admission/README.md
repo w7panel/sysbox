@@ -79,7 +79,7 @@ Each app container configured by `sysbox/rootfs-rw-layer` also receives its sele
 /var/lib/sysbox/rootfs-special-volume/<volumeName>
 ```
 
-This is an internal hand-off mount, not an application data path. `sysbox-runc` validates that its node-side source belongs to the current Pod UID, resolves the configured rw-layer directory, initializes `<path>/special`, removes the hand-off mount from the final OCI spec, and replaces it with explicit mounts for Docker, K3s agent, and containerd overlay data. A user mount under the reserved base path is rejected by admission.
+This is an internal hand-off mount, not an application data path. `sysbox-runc` validates that its node-side source belongs to the current Pod UID, resolves the configured rw-layer directory, initializes `<path>/special`, removes the hand-off mount from the final OCI spec, and replaces it with explicit mounts for all Sysbox special directories. A user mount under the reserved base path is rejected by admission.
 
 The resulting PVC layout is:
 
@@ -90,7 +90,11 @@ The resulting PVC layout is:
 └── special/
     ├── meta.json
     ├── docker/
+    ├── kubelet/
+    ├── k0s/
     ├── k3s-agent/
+    ├── rke2/
+    ├── buildkit/
     └── containerd-overlay/
 ```
 

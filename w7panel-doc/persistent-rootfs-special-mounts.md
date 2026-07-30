@@ -17,7 +17,11 @@ sysbox/rootfs-rw-layer: '[{"name":"system","volumeName":"rootfs","path":"rootfs"
 └── special/
     ├── meta.json
     ├── docker/
+    ├── kubelet/
+    ├── k0s/
     ├── k3s-agent/
+    ├── rke2/
+    ├── buildkit/
     └── containerd-overlay/
 ```
 
@@ -27,28 +31,28 @@ sysbox/rootfs-rw-layer: '[{"name":"system","volumeName":"rootfs","path":"rootfs"
 2. 校验隐藏 mount 的 source 确实属于当前 Pod 的 kubelet volume 目录。
 3. 首次用 `rsync -aHAX --numeric-ids --one-file-system` 把镜像预置内容复制到 staging 目录。
 4. 写入 `meta.json` 后原子 rename 为 `special/`；已有未标记目录、映射变化或初始化失败均阻止启动。
-5. 从最终 OCI spec 删除隐藏 PVC mount，追加三个 `rbind,rprivate` 显式 mount。
-6. 复用现有 `sysbox-mgr PrepMounts()` 完成 UID shifting，不再为这三个目录申请 `/var/lib/sysbox/<kind>/<container-id>` 节点本地 volume。
+5. 从最终 OCI spec 删除隐藏 PVC mount，为全部七个特殊目录追加 `rbind,rprivate` 显式 mount。
+6. 复用现有 `sysbox-mgr PrepMounts()` 完成 UID shifting，不再为这些目录申请 `/var/lib/sysbox/<kind>/<container-id>` 节点本地 volume。
 
-没有 rootfs annotation 或 rootfs entry 不匹配当前容器时，仍使用原来的节点本地 special volume。配置了 rootfs entry 的容器始终使用同一 PVC 下的 `special/`。`/var/lib/kubelet`、`/var/lib/k0s`、RKE2 和 BuildKit 仍保持原逻辑。
+没有 rootfs annotation 或 rootfs entry 不匹配当前容器时，仍使用原来的节点本地 special volume。配置了 rootfs entry 的容器中，Docker、Kubelet、k0s、K3s agent、RKE2、BuildKit 和 standalone containerd overlay 全部使用同一 PVC 下的 `special/`。
 
 ### 为什么不直接使用 `upper/var/lib/...`
 
 `upper/` 是外层 `fuse-overlayfs` 的实现目录，不适合作为独立 bind source。直接使用它会绕过 merged-rootfs 语义，并让内层 overlayfs 仍依赖 overlay-on-FUSE。独立 `special/` 同时满足两个目标：数据仍在 rootfs PVC 的备份边界内，内层运行时目录又直接落在 Longhorn 卷的实际文件系统上。
 
-### K3s snapshotter 结论需重新验证
+### K3s snapshotter 结论
 
-历史测试中 K3s 必须使用 `native`，是因为数据目录直接位于外层 FUSE rootfs，内层 kernel overlayfs 返回 `EINVAL`；不是因为“PVC 不能挂载 overlay”。新方案把 `special/k3s-agent` 直接 bind mount 到容器。如果节点侧 Longhorn volume 是 ext4，K3s `overlayfs` 可能恢复可用。
+历史测试中 K3s 必须使用 `native`，是因为数据目录直接位于外层 FUSE rootfs，内层 kernel overlayfs 返回 `EINVAL`；不是因为“PVC 不能挂载 overlay”。新方案把 `special/k3s-agent` 直接 bind mount 到容器；节点侧 Longhorn volume 为 ext4 时，K3s `overlayfs` 已验证可用。
 
-上线验证顺序应为：
+部署验证顺序为：
 
 1. 用 `findmnt -T /var/lib/rancher/k3s/agent` 确认 source 来自 PVC `special/k3s-agent`，FSTYPE 不是外层 `fuse.fuse-overlayfs`。
-2. 先使用 K3s `overlayfs`，创建全新 Pod 并验证镜像解包、容器启动和重建。
-3. 只有 overlayfs 实测失败时才回退 `native`。
+2. 使用 K3s `overlayfs`，创建全新 Pod 并验证镜像解包、容器启动和重建。
+3. 检查 containerd 的 lowerdir、upperdir 和 workdir 均位于 PVC 的 `special/k3s-agent`。
 
 ### 上线迁移约束
 
-线上旧 CKM 来自 `dev-v1-k3k-deployment`，其 PVC 直接挂载在 `/var/lib/rancher/k3s`。模板升级必须先停止旧 Pod，再把 PVC 顶层的 K3s 数据拆分到 `rootfs/upper/var/lib/rancher/k3s` 与 `rootfs/special/k3s-agent`，生成与 runc 一致的 `meta.json`，校验完成后才能删除旧布局并启动新模板。
+线上旧 CKM 来自 `dev-v1-k3k-deployment`，其 PVC 直接挂载在 `/var/lib/rancher/k3s`。模板升级必须先停止旧 Pod，再把 PVC 顶层的 K3s 数据拆分到 `rootfs/upper/var/lib/rancher/k3s` 与 `rootfs/special/k3s-agent`，创建其余空 special 目录并生成与 runc 一致的 v2 `meta.json`，校验完成后才能删除旧布局并启动新模板。开发阶段生成的旧三目录 metadata 不做原地兼容。
 
 ### 218 集成验证结果
 
