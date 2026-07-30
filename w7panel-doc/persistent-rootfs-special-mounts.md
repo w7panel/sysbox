@@ -1,4 +1,78 @@
-# Sysbox 持久 rootfs 取消特殊目录挂载说明
+# Sysbox 持久 rootfs 的 PVC special 目录方案
+
+> 2026-07-30 更新：当前实现已从“取消特殊挂载、让数据直接进入 rootfs upper”调整为“在同一 PVC 内建立独立 `special/`，由 `sysbox-runc` bind mount”。本文后半部分保留的取消挂载测试是历史记录，不再代表当前实现。
+
+## 当前结论
+
+启用以下 rootfs annotation 的业务容器使用如下 PVC 布局：
+
+```yaml
+sysbox/rootfs-rw-layer: '[{"name":"system","volumeName":"rootfs","path":"rootfs"}]'
+```
+
+```text
+<PVC>/<annotation.path>/
+├── upper/
+├── work/
+└── special/
+    ├── meta.json
+    ├── docker/
+    ├── k3s-agent/
+    └── containerd-overlay/
+```
+
+`sysbox-admission` 把目标 PVC 以保留路径注入业务容器的 OCI mount 列表。`sysbox-runc` 在创建容器时完成以下操作：
+
+1. 用容器名、Pod UID 和 `sysbox/rootfs-rw-layer` 匹配当前 entry。
+2. 校验隐藏 mount 的 source 确实属于当前 Pod 的 kubelet volume 目录。
+3. 首次用 `rsync -aHAX --numeric-ids --one-file-system` 把镜像预置内容复制到 staging 目录。
+4. 写入 `meta.json` 后原子 rename 为 `special/`；已有未标记目录、映射变化或初始化失败均阻止启动。
+5. 从最终 OCI spec 删除隐藏 PVC mount，追加三个 `rbind,rprivate` 显式 mount。
+6. 复用现有 `sysbox-mgr PrepMounts()` 完成 UID shifting，不再为这三个目录申请 `/var/lib/sysbox/<kind>/<container-id>` 节点本地 volume。
+
+没有 rootfs annotation 或 rootfs entry 不匹配当前容器时，仍使用原来的节点本地 special volume。配置了 rootfs entry 的容器始终使用同一 PVC 下的 `special/`。`/var/lib/kubelet`、`/var/lib/k0s`、RKE2 和 BuildKit 仍保持原逻辑。
+
+### 为什么不直接使用 `upper/var/lib/...`
+
+`upper/` 是外层 `fuse-overlayfs` 的实现目录，不适合作为独立 bind source。直接使用它会绕过 merged-rootfs 语义，并让内层 overlayfs 仍依赖 overlay-on-FUSE。独立 `special/` 同时满足两个目标：数据仍在 rootfs PVC 的备份边界内，内层运行时目录又直接落在 Longhorn 卷的实际文件系统上。
+
+### K3s snapshotter 结论需重新验证
+
+历史测试中 K3s 必须使用 `native`，是因为数据目录直接位于外层 FUSE rootfs，内层 kernel overlayfs 返回 `EINVAL`；不是因为“PVC 不能挂载 overlay”。新方案把 `special/k3s-agent` 直接 bind mount 到容器。如果节点侧 Longhorn volume 是 ext4，K3s `overlayfs` 可能恢复可用。
+
+上线验证顺序应为：
+
+1. 用 `findmnt -T /var/lib/rancher/k3s/agent` 确认 source 来自 PVC `special/k3s-agent`，FSTYPE 不是外层 `fuse.fuse-overlayfs`。
+2. 先使用 K3s `overlayfs`，创建全新 Pod 并验证镜像解包、容器启动和重建。
+3. 只有 overlayfs 实测失败时才回退 `native`。
+
+### 上线迁移约束
+
+线上旧 CKM 来自 `dev-v1-k3k-deployment`，其 PVC 直接挂载在 `/var/lib/rancher/k3s`。模板升级必须先停止旧 Pod，再把 PVC 顶层的 K3s 数据拆分到 `rootfs/upper/var/lib/rancher/k3s` 与 `rootfs/special/k3s-agent`，生成与 runc 一致的 `meta.json`，校验完成后才能删除旧布局并启动新模板。
+
+### 218 集成验证结果
+
+Deployment `220` 完成了迁移、重建和再次重建验证：
+
+- `/var/lib/docker` source 为 Longhorn PVC 的 `/special-v4-220/special/docker`，FSTYPE 为 ext4，mount 带 `idmapped`。
+- K3s agent 和 standalone containerd overlay 目录也指向同一 PVC 的对应 `special/` 子目录。
+- admission 注入的 `/var/lib/sysbox/rootfs-special-volume/...` 已从最终 mountinfo 删除。
+- Docker `overlay2` 正常拉取并运行 `ccr.ccs.tencentyun.com/afan-public/nginx:latest`。
+- 外层 Pod 再次重建后 Docker marker 与镜像 metadata 均保留。
+
+独立测试 Deployment `k3s-pvc-special-overlay-test` 使用 15 GiB Longhorn PVC 和 K3s `v1.35.6-k3s1`：
+
+- containerd 配置为 `snapshotter = "overlayfs"`。
+- `/var/lib/rancher/k3s/agent` 直接来自 Longhorn PVC `special/k3s-agent`，FSTYPE 为 ext4。
+- 内层 Pod sandbox 和 coredns 容器均成功创建，mountinfo 出现真实 kernel `overlay` mount；coredns 的多层 lowerdir、upperdir、workdir 均位于 `special/k3s-agent/containerd/io.containerd.snapshotter.v1.overlayfs`。
+- 因此之前必须使用 `native` 的限制来自 overlay-on-FUSE；PVC special-on-ext4 下 K3s overlayfs 可用。
+- 初次拉取 pause 镜像曾因外层 ClusterFirst DNS `10.43.0.10` 在嵌套 K3s 环境不可达而失败。改用可达 DNS 并配置 `registries.yaml` mirror 后拉取成功；该问题与 overlay mount 无关。测试期间多次改变外层 Deployment Pod 名造成 K3s node identity 变化，coredns 最终因测试集群 CA 状态不一致保持 `0/1`，但其 overlay rootfs 已成功挂载并启动；生产模板必须设置稳定的 `K3S_NODE_NAME`。
+
+w30at 的历史验证保留为性能与容量参考，不再作为 annotation 灰度模型。
+
+## 历史方案与测试记录（已被当前 PVC special 方案取代）
+
+# Sysbox 持久 rootfs 取消特殊目录挂载说明（历史）
 
 本文说明启用 `sysbox/rootfs-rw-layer` 后，为什么不再为 Docker、K3s 和 containerd overlay 数据目录创建 Sysbox 特殊挂载，以及该调整的收益、代价、兼容性和测试结论。
 

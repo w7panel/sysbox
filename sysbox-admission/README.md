@@ -1,8 +1,8 @@
 # sysbox-admission
 
-`sysbox-admission` is the Kubernetes mutating admission webhook for Sysbox rootfs rw-layer persistence. It validates the `sysbox/rootfs-rw-layer` Pod annotation and injects a canonical `sysbox-rootfs` sidecar so `sysbox-snapshotter` can resolve PVC-backed rootfs upper/work directories safely.
+`sysbox-admission` is the Kubernetes mutating admission webhook for Sysbox rootfs rw-layer persistence. It validates the `sysbox/rootfs-rw-layer` Pod annotation, injects a canonical `sysbox-rootfs` sidecar so `sysbox-snapshotter` can resolve PVC-backed rootfs upper/work directories safely, and gives each configured app container a reserved PVC mount used by `sysbox-runc` for persistent special directories.
 
-The webhook only mutates Pods that meet all of these conditions:
+The webhook handles Pods that meet all of these conditions:
 
 - The request is a Pod `CREATE` admission request.
 - `spec.runtimeClassName` is `sysbox-runc`.
@@ -70,6 +70,31 @@ The sidecar does not carry rootfs rw-layer intent in environment variables. Root
 ```
 
 `sysbox-snapshotter` reads that OCI annotation for container intent and reads the `sysbox-rootfs` sidecar OCI mounts only to resolve each PVC's node-side mount path.
+
+## Persistent Special Directory Mount
+
+Each app container configured by `sysbox/rootfs-rw-layer` also receives its selected PVC at:
+
+```text
+/var/lib/sysbox/rootfs-special-volume/<volumeName>
+```
+
+This is an internal hand-off mount, not an application data path. `sysbox-runc` validates that its node-side source belongs to the current Pod UID, resolves the configured rw-layer directory, initializes `<path>/special`, removes the hand-off mount from the final OCI spec, and replaces it with explicit mounts for Docker, K3s agent, and containerd overlay data. A user mount under the reserved base path is rejected by admission.
+
+The resulting PVC layout is:
+
+```text
+<PVC>/<path>/
+├── upper/
+├── work/
+└── special/
+    ├── meta.json
+    ├── docker/
+    ├── k3s-agent/
+    └── containerd-overlay/
+```
+
+The separate `special/` tree is intentional. These directories are backed directly by the PVC filesystem rather than nested inside the FUSE overlay rootfs, while remaining part of the same PVC backup and restore boundary.
 
 ## Webhook Server
 

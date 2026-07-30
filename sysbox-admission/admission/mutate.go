@@ -4,14 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"path/filepath"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 )
 
-const (
-	AnnotationRootfsRwLayer = "sysbox/rootfs-rw-layer"
-)
+const AnnotationRootfsRwLayer = "sysbox/rootfs-rw-layer"
 
 type Config struct {
 	SandboxImage string
@@ -55,6 +55,9 @@ func (m *Mutator) mutatePod(ctx context.Context, pod *corev1.Pod) ([]RootfsRwLay
 	if err := ensureSidecar(spec, entries, m.sandboxImage); err != nil {
 		return nil, false, err
 	}
+	if err := ensureRootfsSpecialMounts(spec, entries); err != nil {
+		return nil, false, err
+	}
 	return entries, true, nil
 }
 
@@ -64,8 +67,13 @@ func parseRootfsAnnotation(annotations map[string]string, spec *corev1.PodSpec) 
 		return nil, false, nil
 	}
 	var entries []RootfsRwLayerEntry
-	if err := json.Unmarshal([]byte(raw), &entries); err != nil {
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&entries); err != nil {
 		return nil, false, fmt.Errorf("invalid %s annotation: %w", AnnotationRootfsRwLayer, err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return nil, false, fmt.Errorf("invalid %s annotation: trailing JSON data", AnnotationRootfsRwLayer)
 	}
 	if len(entries) == 0 {
 		return nil, false, fmt.Errorf("%s annotation must not be empty", AnnotationRootfsRwLayer)

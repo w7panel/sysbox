@@ -1,7 +1,9 @@
 package admission
 
 import (
+	"fmt"
 	"path/filepath"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 )
@@ -41,4 +43,41 @@ func requiredSidecarMounts(entries []RootfsRwLayerEntry) []corev1.VolumeMount {
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: entry.VolumeName, MountPath: filepath.Join(SidecarMountPath, entry.VolumeName)})
 	}
 	return volumeMounts
+}
+
+func ensureRootfsSpecialMounts(spec *corev1.PodSpec, entries []RootfsRwLayerEntry) error {
+	entryByContainer := make(map[string]RootfsRwLayerEntry, len(entries))
+	for _, entry := range entries {
+		entryByContainer[entry.Name] = entry
+	}
+	for i := range spec.Containers {
+		container := &spec.Containers[i]
+		if container.Name == SidecarContainerName {
+			continue
+		}
+		entry, configured := entryByContainer[container.Name]
+		target := ""
+		if configured {
+			target = filepath.Join(RootfsSpecialMountPath, entry.VolumeName)
+		}
+		found := false
+		for _, mount := range container.VolumeMounts {
+			cleaned := filepath.Clean(mount.MountPath)
+			reserved := cleaned == RootfsSpecialMountPath || strings.HasPrefix(cleaned, RootfsSpecialMountPath+string(filepath.Separator))
+			if !reserved {
+				continue
+			}
+			if !configured || cleaned != target || mount.Name != entry.VolumeName || mount.SubPath != "" {
+				return fmt.Errorf("container %s has conflicting mount at reserved path %s", container.Name, mount.MountPath)
+			}
+			if found {
+				return fmt.Errorf("container %s has duplicate rootfs special mount", container.Name)
+			}
+			found = true
+		}
+		if configured && !found {
+			container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{Name: entry.VolumeName, MountPath: target})
+		}
+	}
+	return nil
 }

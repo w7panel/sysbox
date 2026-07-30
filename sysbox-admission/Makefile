@@ -6,6 +6,7 @@ CGO_ENABLED ?= 0
 BUILDROOT := build
 BUILDDIR = $(BUILDROOT)/$(TARGET_ARCH)
 TARGET := sysbox-admission
+SOURCES := $(shell find . -type f -name '*.go') go.mod go.sum
 
 COMMIT_NO := $(shell git rev-parse HEAD 2> /dev/null || true)
 COMMIT ?= $(if $(shell git status --porcelain --untracked-files=no),$(COMMIT_NO)-dirty,$(COMMIT_NO))
@@ -26,7 +27,7 @@ GOARCH ?= $(TARGET_ARCH)
 
 sysbox-admission: $(BUILDDIR)/$(TARGET)
 
-$(BUILDDIR)/$(TARGET):
+$(BUILDDIR)/$(TARGET): $(SOURCES)
 	mkdir -p $(BUILDDIR)
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=$(CGO_ENABLED) $(GO) build -buildvcs=false -trimpath \
 		-ldflags "-s -w -X main.version=$(VERSION) -X main.revision=$(COMMIT)" \
