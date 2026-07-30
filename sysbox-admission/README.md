@@ -1,6 +1,6 @@
 # sysbox-admission
 
-`sysbox-admission` is the Kubernetes mutating admission webhook for Sysbox rootfs rw-layer persistence. It validates the `sysbox/rootfs-rw-layer` Pod annotation, injects a canonical `sysbox-rootfs` sidecar so `sysbox-snapshotter` can resolve PVC-backed rootfs upper/work directories safely, and gives each configured app container a reserved PVC mount used by `sysbox-runc` for persistent special directories.
+`sysbox-admission` is the Kubernetes mutating admission webhook for Sysbox rootfs rw-layer persistence. It validates the `sysbox/rootfs-rw-layer` Pod annotation and injects a canonical `sysbox-rootfs` sidecar so `sysbox-snapshotter` can resolve PVC-backed rootfs upper/work directories safely. When `sysbox/persistent-special-mounts` is explicitly `"true"`, it also gives each configured app container a reserved PVC mount used by `sysbox-runc` for persistent special directories.
 
 The webhook handles Pods that meet all of these conditions:
 
@@ -27,6 +27,7 @@ metadata:
           "path": "containers/c1"
         }
       ]
+    sysbox/persistent-special-mounts: "true"
 spec:
   runtimeClassName: sysbox-runc
   containers:
@@ -66,20 +67,22 @@ The sidecar does not carry rootfs rw-layer intent in environment variables. Root
 
 ```toml
 [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.sysbox-runc]
-  pod_annotations = ["sysbox/rootfs-rw-layer"]
+  pod_annotations = ["sysbox/rootfs-rw-layer", "sysbox/persistent-special-mounts"]
 ```
 
 `sysbox-snapshotter` reads that OCI annotation for container intent and reads the `sysbox-rootfs` sidecar OCI mounts only to resolve each PVC's node-side mount path.
 
 ## Persistent Special Directory Mount
 
-Each app container configured by `sysbox/rootfs-rw-layer` also receives its selected PVC at:
+When `sysbox/persistent-special-mounts` is exactly `"true"`, each app container configured by `sysbox/rootfs-rw-layer` also receives its selected PVC at:
 
 ```text
 /var/lib/sysbox/rootfs-special-volume/<volumeName>
 ```
 
 This is an internal hand-off mount, not an application data path. `sysbox-runc` validates that its node-side source belongs to the current Pod UID, resolves the configured rw-layer directory, initializes `<path>/special`, removes the hand-off mount from the final OCI spec, and replaces it with explicit mounts for all Sysbox special directories. A user mount under the reserved base path is rejected by admission.
+
+Without the explicit opt-in annotation, admission still injects the sidecar required for persistent rootfs `upper/work`, but it does not inject this hand-off mount. Existing workloads therefore retain Sysbox's legacy node-local special-directory behavior after an upgrade.
 
 The resulting PVC layout is:
 

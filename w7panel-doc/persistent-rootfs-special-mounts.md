@@ -4,10 +4,11 @@
 
 ## 当前结论
 
-启用以下 rootfs annotation 的业务容器使用如下 PVC 布局：
+同时启用以下两个 annotation 的业务容器使用如下 PVC 布局：
 
 ```yaml
 sysbox/rootfs-rw-layer: '[{"name":"system","volumeName":"rootfs","path":"rootfs"}]'
+sysbox/persistent-special-mounts: "true"
 ```
 
 ```text
@@ -27,14 +28,14 @@ sysbox/rootfs-rw-layer: '[{"name":"system","volumeName":"rootfs","path":"rootfs"
 
 `sysbox-admission` 把目标 PVC 以保留路径注入业务容器的 OCI mount 列表。`sysbox-runc` 在创建容器时完成以下操作：
 
-1. 用容器名、Pod UID 和 `sysbox/rootfs-rw-layer` 匹配当前 entry。
+1. 先确认 `sysbox/persistent-special-mounts` 精确为 `"true"`，再用容器名、Pod UID 和 `sysbox/rootfs-rw-layer` 匹配当前 entry。
 2. 校验隐藏 mount 的 source 确实属于当前 Pod 的 kubelet volume 目录。
 3. 首次用 `rsync -aHAX --numeric-ids --one-file-system` 把镜像预置内容复制到 staging 目录。
 4. 写入 `meta.json` 后原子 rename 为 `special/`；已有未标记目录、映射变化或初始化失败均阻止启动。
 5. 从最终 OCI spec 删除隐藏 PVC mount，为全部七个特殊目录追加 `rbind,rprivate` 显式 mount。
 6. 复用现有 `sysbox-mgr PrepMounts()` 完成 UID shifting，不再为这些目录申请 `/var/lib/sysbox/<kind>/<container-id>` 节点本地 volume。
 
-没有 rootfs annotation 或 rootfs entry 不匹配当前容器时，仍使用原来的节点本地 special volume。配置了 rootfs entry 的容器中，Docker、Kubelet、k0s、K3s agent、RKE2、BuildKit 和 standalone containerd overlay 全部使用同一 PVC 下的 `special/`。
+没有显式设置 `sysbox/persistent-special-mounts: "true"`、没有 rootfs annotation，或 rootfs entry 不匹配当前容器时，仍使用原来的节点本地 special volume。这样升级 Sysbox 不会改变旧 CKM 的挂载语义。两个注解都匹配的容器中，Docker、Kubelet、k0s、K3s agent、RKE2、BuildKit 和 standalone containerd overlay 全部使用同一 PVC 下的 `special/`。
 
 ### 为什么不直接使用 `upper/var/lib/...`
 

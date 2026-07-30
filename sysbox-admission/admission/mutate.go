@@ -11,7 +11,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-const AnnotationRootfsRwLayer = "sysbox/rootfs-rw-layer"
+const (
+	AnnotationRootfsRwLayer           = "sysbox/rootfs-rw-layer"
+	AnnotationPersistentSpecialMounts = "sysbox/persistent-special-mounts"
+)
 
 type Config struct {
 	SandboxImage string
@@ -55,8 +58,10 @@ func (m *Mutator) mutatePod(ctx context.Context, pod *corev1.Pod) ([]RootfsRwLay
 	if err := ensureSidecar(spec, entries, m.sandboxImage); err != nil {
 		return nil, false, err
 	}
-	if err := ensureRootfsSpecialMounts(spec, entries); err != nil {
-		return nil, false, err
+	if pod.Annotations[AnnotationPersistentSpecialMounts] == "true" {
+		if err := ensureRootfsSpecialMounts(spec, entries); err != nil {
+			return nil, false, err
+		}
 	}
 	return entries, true, nil
 }

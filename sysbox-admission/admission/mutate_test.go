@@ -46,6 +46,20 @@ func TestMutator_injectsSidecar_whenAnnotationIsValid(t *testing.T) {
 	}}, mutated.Spec.Containers[1].VolumeMounts)
 }
 
+func TestMutator_doesNotInjectSpecialMountsWithoutExplicitOptIn(t *testing.T) {
+	mutator := newTestMutator()
+	pod := validRootfsPod()
+	delete(pod.Annotations, admission.AnnotationPersistentSpecialMounts)
+
+	mutated, err := mutator.Mutate(context.Background(), pod)
+
+	require.NoError(t, err)
+	require.Len(t, mutated.Spec.Containers, 3)
+	require.Equal(t, admission.SidecarContainerName, mutated.Spec.Containers[2].Name)
+	require.Empty(t, mutated.Spec.Containers[0].VolumeMounts)
+	require.Empty(t, mutated.Spec.Containers[1].VolumeMounts)
+}
+
 func TestMutator_injectsSidecar_whenPodNameIsEmpty(t *testing.T) {
 	// Given
 	mutator := newTestMutator()
@@ -140,6 +154,7 @@ func validRootfsPod() *corev1.Pod {
 					{"name":"c1","volumeName":"rootfs","path":"containers/c1"},
 					{"name":"c2","volumeName":"rootfs","path":"containers/c2"}
 				]`,
+				admission.AnnotationPersistentSpecialMounts: "true",
 			},
 		},
 		Spec: corev1.PodSpec{
