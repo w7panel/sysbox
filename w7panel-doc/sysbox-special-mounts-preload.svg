@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1300" viewBox="0 0 1600 1300" role="img" aria-labelledby="title desc">
   <title id="title">Sysbox 特殊挂载目录与 disable-inner-image-preload 关系图</title>
-  <desc id="desc">展示 Kubernetes Deployment 创建 Sysbox Pod 后，sysbox-runc 识别指定目录、sysbox-mgr 创建宿主独立卷并绑定到 Pod，以及默认模式与 disable-inner-image-preload 模式下 SyncIn 和 SyncOut 的区别。</desc>
+  <desc id="desc">展示 Kubernetes Deployment 创建 Sysbox Pod 后，sysbox-runc 识别指定目录、sysbox-mgr 创建宿主独立卷并绑定到 Pod，默认模式与 disable-inner-image-preload 模式下 SyncIn 和 SyncOut 的区别，以及两种同步操作的触发时机、源路径和目标路径。</desc>
 
   <defs>
     <linearGradient id="pageBg" x1="0" y1="0" x2="1" y2="1">
@@ -47,7 +47,7 @@
     </style>
   </defs>
 
-  <rect width="1600" height="1000" fill="url(#pageBg)"/>
+  <rect width="1600" height="1300" fill="url(#pageBg)"/>
 
   <!-- Title -->
   <text class="title" x="60" y="51">Sysbox 指定挂载目录 × Pod × inner image preload</text>
@@ -201,13 +201,55 @@
   <rect x="838" y="869" width="674" height="38" rx="10" fill="#fef2f2" stroke="#fecaca"/>
   <text class="small red" x="1175" y="893" text-anchor="middle" font-weight="700">结果：停止更快；新增数据不回写 rootfs，也不会进入后续 commit 的镜像</text>
 
+  <!-- Sync operation details -->
+  <text class="section" x="60" y="980">③ SyncIn / SyncOut 实际执行什么：在 rootfs 与宿主特殊卷之间运行 rsync</text>
+
+  <g filter="url(#shadow)">
+    <rect x="60" y="1000" width="730" height="205" rx="17" fill="#ffffff"/>
+  </g>
+  <rect x="60" y="1000" width="730" height="45" rx="17" fill="#eff6ff"/>
+  <path d="M60 1028 H790 V1045 H60 Z" fill="#eff6ff"/>
+  <text class="card-title blue" x="88" y="1029">SyncIn · 创建特殊卷时、Pod 启动前</text>
+  <rect x="88" y="1060" width="252" height="57" rx="9" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text class="small" x="214" y="1082" text-anchor="middle">源：镜像 / 容器 rootfs</text>
+  <text class="small mono blue" x="214" y="1104" text-anchor="middle">&lt;rootfs&gt;/&lt;指定目录&gt;/</text>
+  <line x1="340" y1="1088" x2="468" y2="1088" stroke="#2563eb" stroke-width="3" marker-end="url(#arrowBlue)"/>
+  <text class="tiny blue" x="404" y="1077" text-anchor="middle">复制已有内容</text>
+  <rect x="475" y="1060" width="287" height="57" rx="9" fill="#ecfdf5" stroke="#6ee7b7"/>
+  <text class="small" x="618" y="1082" text-anchor="middle">目标：宿主 per-container 特殊卷</text>
+  <text class="small mono green" x="618" y="1104" text-anchor="middle">/var/lib/sysbox/&lt;type&gt;/&lt;id&gt;/</text>
+  <text class="small" x="88" y="1145"><tspan font-weight="700" fill="#1d4ed8">随后：</tspan>特殊卷 rbind 到 Pod 指定目录，Pod 运行期间直接读写该卷。</text>
+  <text class="small" x="88" y="1171"><tspan font-weight="700" fill="#1d4ed8">用途：</tspan>让系统容器镜像中预装的 inner images / runtime data 在启动后可见。</text>
+  <text class="small" x="88" y="1197"><tspan font-weight="700" fill="#1d4ed8">属主：</tspan>需要 user namespace 转换时执行 UID/GID shift-up。</text>
+
+  <g filter="url(#shadow)">
+    <rect x="810" y="1000" width="730" height="205" rx="17" fill="#ffffff"/>
+  </g>
+  <rect x="810" y="1000" width="730" height="45" rx="17" fill="#fff7ed"/>
+  <path d="M810 1028 H1540 V1045 H810 Z" fill="#fff7ed"/>
+  <text class="card-title orange" x="838" y="1029">SyncOut · Pod 停止 / Pause / sysbox-mgr 退出时</text>
+  <rect x="838" y="1060" width="287" height="57" rx="9" fill="#ecfdf5" stroke="#6ee7b7"/>
+  <text class="small" x="981" y="1082" text-anchor="middle">源：宿主 per-container 特殊卷</text>
+  <text class="small mono green" x="981" y="1104" text-anchor="middle">/var/lib/sysbox/&lt;type&gt;/&lt;id&gt;/</text>
+  <line x1="1125" y1="1088" x2="1253" y2="1088" stroke="#ea580c" stroke-width="3" marker-end="url(#arrowOrange)"/>
+  <text class="tiny orange" x="1189" y="1077" text-anchor="middle">反向回写</text>
+  <rect x="1260" y="1060" width="252" height="57" rx="9" fill="#fff7ed" stroke="#fdba74"/>
+  <text class="small" x="1386" y="1082" text-anchor="middle">目标：容器 rootfs</text>
+  <text class="small mono orange" x="1386" y="1104" text-anchor="middle">overlay → upperdir/&lt;目录&gt;/</text>
+  <text class="small" x="838" y="1145"><tspan font-weight="700" fill="#c2410c">触发：</tspan>正常停止且非 autoRemove、Pause，以及 manager 关闭清理阶段。</text>
+  <text class="small" x="838" y="1171"><tspan font-weight="700" fill="#c2410c">用途：</tspan>把运行期变化写回 rootfs，供后续 commit / build 制作预装镜像。</text>
+  <text class="small" x="838" y="1197"><tspan font-weight="700" fill="#c2410c">属主：</tspan>需要 user namespace 转换时执行 UID/GID shift-down。</text>
+
+  <rect x="60" y="1222" width="1480" height="35" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text class="small mono" x="800" y="1245" text-anchor="middle">两者均使用：rsync -rauqlH --no-devices --delete　·　保持权限/硬链接　·　不复制设备文件　·　删除目标中源已不存在的条目</text>
+
   <!-- Footer legend -->
-  <line x1="60" y1="965" x2="1540" y2="965" stroke="#cbd5e1"/>
-  <line x1="80" y1="984" x2="124" y2="984" stroke="#2563eb" stroke-width="3" marker-end="url(#arrowBlue)"/>
-  <text class="tiny" x="136" y="988">启动复制（SyncIn）</text>
-  <line x1="315" y1="984" x2="359" y2="984" stroke="#ea580c" stroke-width="3" marker-end="url(#arrowOrange)"/>
-  <text class="tiny" x="371" y="988">停止回写（SyncOut）</text>
-  <line x1="568" y1="984" x2="612" y2="984" stroke="#059669" stroke-width="4" marker-end="url(#arrowGreen)"/>
-  <text class="tiny" x="624" y="988">bind mount / 运行时读写</text>
-  <text class="tiny" x="1540" y="988" text-anchor="end">当前行为：特殊挂载与 preload 开关相互独立</text>
+  <line x1="60" y1="1270" x2="1540" y2="1270" stroke="#cbd5e1"/>
+  <line x1="80" y1="1288" x2="124" y2="1288" stroke="#2563eb" stroke-width="3" marker-end="url(#arrowBlue)"/>
+  <text class="tiny" x="136" y="1292">启动复制（SyncIn）</text>
+  <line x1="315" y1="1288" x2="359" y2="1288" stroke="#ea580c" stroke-width="3" marker-end="url(#arrowOrange)"/>
+  <text class="tiny" x="371" y="1292">停止回写（SyncOut）</text>
+  <line x1="568" y1="1288" x2="612" y2="1288" stroke="#059669" stroke-width="4" marker-end="url(#arrowGreen)"/>
+  <text class="tiny" x="624" y="1292">bind mount / 运行时读写</text>
+  <text class="tiny" x="1540" y="1292" text-anchor="end">当前行为：特殊挂载与 preload 开关相互独立</text>
 </svg>
