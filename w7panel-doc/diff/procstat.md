@@ -18,8 +18,8 @@
 | host pid namespace | `initpid == 1` 时直接返回宿主 `/proc/stat` | 没有同样的显式判断，依赖 CPU limit 和 cgroup 逻辑 | host pid namespace 场景语义不完全一致 |
 | CPU 数量来源 | `cpuset` 加 `cpu.cfs_quota` / `cpu.cfs_period`，通过 `max_cpu_count()` / `exact_cpu_count()` 计算 | `effectiveCPUCount(req)` | 目标一致，都是限制可见 CPU 行数；计算路径不同 |
 | CPU 行输出 | 重写 `cpu` 和 `cpuN` 行 | 重写 `cpu` 和 `cpuN` 行 | 核心行为一致 |
-| 非 CPU 行 | 基本保留宿主 `/proc/stat` 后续行 | 保留宿主非 CPU 行，但特殊重写 `btime` | `intr`、`ctxt`、`processes`、`procs_running` 等基本仍是宿主值 |
-| `btime` | 保留宿主 `btime` | 如果有容器对象，改成容器创建时间 | 明显差异；Sysbox 更像容器视图，LXCFS 更像宿主 passthrough |
+| 非 CPU 行 | 基本保留宿主 `/proc/stat` 后续行 | 原样保留宿主非 CPU 行 | `intr`、`ctxt`、`processes`、`procs_running`、`btime` 等均是宿主值 |
+| `btime` | 保留宿主 `btime` | 保留宿主 `btime` | 保持与 `/proc/uptime` 及进程 starttime 的 boot-time 语义一致，避免 UserNS 下 kubelet 启动失败 |
 | CPU 使用来源 | 优先 `cpuacct.usage_all`，失败 fallback 到 `cpuacct.usage_percpu` 或宿主 `/proc/stat` | cgroup v2 用 `cpu.stat`，cgroup v1 用 `cpuacct.stat` / `cpuacct.usage` / `cpuacct.usage_percpu` | 统计源不同；v2 上 Sysbox 更直接使用 unified cgroup 的 `cpu.stat` |
 | idle 计算 | `idle + (host all_used - cgroup used)`，把容器外 CPU 时间折算成 idle | 使用容器 CPU usage delta 和 `elapsed * visible_cpu_count` 计算 idle | LXCFS 更贴近宿主 `/proc/stat` 差值模型；Sysbox 更贴近容器容量模型 |
 | 历史状态 | `proc_stat_history`，按 cgroup 保存历史 usage/view | `procStatStates`，按 cgroup/container/pid key 保存历史 raw/view | 两边都维护历史，避免 `/proc/stat` 回退或跳变 |
@@ -31,7 +31,7 @@
 | `nice/iowait/irq/softirq/steal/guest` | cpuview 路径基本输出 0，只保留 user/system/idle | 增量只更新 user/system/idle，其他列通常为 0 | 基本一致 |
 | cpuset 过滤 | 只输出 cpuset 内 CPU，并重新编号 | 输出 `effectiveCPUCount` 个 `cpu0..cpuN` | 都会隐藏不可见 CPU，但 CPU 映射方式不同 |
 | cpuacct 失败 | fallback 到宿主，或按 cpuset 过滤宿主 CPU 行 | cgroup CPU usage 缺失时仍可生成基于 uptime/capacity 的视图 | Sysbox 更可能继续输出虚拟 CPU 行；LXCFS 更可能回退宿主 |
-| 总体风格 | 在宿主 `/proc/stat` 基础上替换 CPU 行，其余 passthrough | 生成虚拟 CPU 行，再追加宿主非 CPU 行，并重写 `btime` | 差异集中在 `btime` 和 CPU 时间模型 |
+| 总体风格 | 在宿主 `/proc/stat` 基础上替换 CPU 行，其余 passthrough | 生成虚拟 CPU 行，再追加宿主非 CPU 行 | 差异集中在 CPU 时间模型 |
 
 ## LXCFS 实现说明
 
@@ -65,7 +65,7 @@ Sysbox 的 `/proc/stat` 入口在 `readProcStat()`。
 4. 解析宿主 CPU 行字段数量和 host CPU 当前值。
 5. 通过 `procStatCPUView()` 生成虚拟 `cpu` 和 `cpuN` 行。
 6. 追加宿主非 CPU 行。
-7. 如果遇到 `btime` 且存在容器对象，改写为容器创建时间。
+7. 原样追加 `btime` 在内的宿主非 CPU 行。
 
 Sysbox 会按 cgroup/container/pid key 维护 `/proc/stat` 历史状态。增量来自 cgroup CPU 统计，idle 来自 `elapsed * visible_cpu_count - used_delta`。
 
@@ -75,11 +75,11 @@ Sysbox 当前的模型更接近容器容量模型：在一个采样周期内，�
 
 ### 1. `btime`
 
-LXCFS 保留宿主 `btime`。Sysbox 会把 `btime` 改成容器创建时间。
+LXCFS 和 Sysbox 都保留宿主 `btime`。
 
-这会导致容器内读取 `/proc/stat` 时，Sysbox 更符合“容器启动时间”的直觉，但不与 LXCFS 对齐。
+这使 `/proc/stat` 的 boot time 与 `/proc/uptime`、`/proc/[pid]/stat` 的 starttime 保持同一宿主启动时间语义；该一致性是 UserNS 下 kubelet 的 oom watcher 所必需的。
 
-如果要求严格对齐 LXCFS，需要取消 Sysbox 对 `btime` 的重写。
+不要将 `btime` 改为容器创建时间，否则 kubelet 可能无法计算 boot time 并退出。
 
 ### 2. CPU idle 时间
 
@@ -126,7 +126,6 @@ Sysbox 会解析宿主 `/proc/stat` 的 CPU 字段数量，并按相同数量输
 
 仍存在差异的部分：
 
-- Sysbox 重写 `btime`，LXCFS 不重写。
 - Sysbox idle 计算基于容器容量，LXCFS idle 计算基于宿主 CPU 时间差。
 - 小数 CPU quota 的修正策略不同。
 - CPU 字段列数策略不同。
@@ -136,10 +135,9 @@ Sysbox 会解析宿主 `/proc/stat` 的 CPU 字段数量，并按相同数量输
 
 如果目标是尽量和 LXCFS 行为一致，建议按优先级处理：
 
-1. 取消 Sysbox 对 `btime` 的容器创建时间重写，保持宿主 `btime`。
-2. 将 idle 计算改成 LXCFS 风格：基于宿主 CPU 行的 busy 时间和 cgroup used 时间推导 idle。
-3. 补齐小数 CPU quota 的 idle 修正逻辑，对齐 LXCFS `exact_cpu_count()` 行为。
-4. 评估是否将 cpuview 输出固定为 10 列，或者保留 Sysbox 当前的宿主字段数量兼容策略。
+1. 将 idle 计算改成 LXCFS 风格：基于宿主 CPU 行的 busy 时间和 cgroup used 时间推导 idle。
+2. 补齐小数 CPU quota 的 idle 修正逻辑，对齐 LXCFS `exact_cpu_count()` 行为。
+3. 评估是否将 cpuview 输出固定为 10 列，或者保留 Sysbox 当前的宿主字段数量兼容策略。
 5. 明确 cgroup 定位是否继续优先使用请求 pid。这个行为对 Kubernetes pod 内多进程读取更准确，但和 LXCFS init pid 模型不同。
 
 ## 当前结论

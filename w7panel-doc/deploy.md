@@ -2,6 +2,8 @@
 
 本文记录 `w7panel` 分支生成 Sysbox release、构建 K3s 部署镜像、并在 K3s/containerd 环境验证 `sysbox-runc` 的流程。
 
+交互终端可直接运行 `./w7panel-doc/build.sh` 或 `./w7panel-doc/deploy.sh`，按菜单选择模式并补充必需参数。非交互环境必须显式使用 `build.sh local|debug|release` 或 `deploy.sh debug|manifests|local-test`。
+
 ## 产物
 
 - Sysbox release tag: `v0.7.0-1`
@@ -34,8 +36,10 @@
 在当前仓库根目录执行：
 
 ```bash
-sudo ./w7panel-doc/deploy-local-test.sh
+sudo ./w7panel-doc/deploy.sh local-test
 ```
+
+`local-test` 会比较 `KUBECONFIG` 与本机 `/etc/rancher/k3s/k3s.yaml` 的集群 UID，并根据节点上报的 hostname 锁定当前主机；集群或节点不匹配时直接退出，避免把镜像导入本机后误部署到其他节点。hostname 无法自动匹配时可设置 `LOCAL_NODE_NAME`，本机 kubeconfig 路径可通过 `LOCAL_KUBECONFIG` 覆盖。
 
 默认行为：
 
@@ -43,22 +47,20 @@ sudo ./w7panel-doc/deploy-local-test.sh
 2. 使用 `sysbox-pkgr/deb` 构建 generic deb。
 3. 从 deb 解出 Sysbox runtime 与 admission 二进制到 `sysbox-pkgr/k8s/bin/sysbox-ce/generic/`。
 4. 构建 K3s 部署镜像。
-5. 可选推送镜像到 registry。
-6. 将镜像导入本机 K3s containerd。
-7. 应用 RBAC、RuntimeClass、DaemonSet。
-8. 给目标节点打 `sysbox-install=yes` 标签。
-9. 等待 `sysbox-runtime=running`。
-10. 创建 `sysbox-release-test` Pod 并验证 PID 1 是 systemd、容器内存在 sysboxfs 挂载。
+5. 将镜像导入本机 K3s containerd。
+6. 应用 RBAC、RuntimeClass、DaemonSet。
+7. 给目标节点打 `sysbox-install=yes` 标签。
+8. 等待 `sysbox-runtime=running`。
+9. 创建 `sysbox-release-test` Pod 并验证 systemd 与资源视图。
 
 常用变量：
 
 ```bash
 SYSBOX_VERSION=0.7.0-1
 IMAGE_REPO=docker.cnb.cool/i0358/docker-images-chrom/sysbox-deploy-k3s
-PUSH_IMAGE=true
 NODE_NAME=server1
 TEST_POD=sysbox-release-test
-./w7panel-doc/deploy-local-test.sh
+./w7panel-doc/deploy.sh local-test
 ```
 
 ## 正式环境部署
@@ -68,7 +70,7 @@ TEST_POD=sysbox-release-test
 ```bash
 sudo IMAGE=docker.cnb.cool/i0358/docker-images-chrom/sysbox-deploy-k3s:v0.7.0-1 \
   NODE_SELECTOR_VALUE=yes \
-  ./w7panel-doc/deploy.sh
+  ./w7panel-doc/deploy.sh manifests
 ```
 
 默认行为：
@@ -87,7 +89,7 @@ IMAGE=docker.cnb.cool/i0358/docker-images-chrom/sysbox-deploy-k3s:v0.7.0-1
 NODE_NAME=server1
 RUN_TEST=true
 TEST_POD=sysbox-release-test
-./w7panel-doc/deploy.sh
+./w7panel-doc/deploy.sh manifests
 ```
 
 如果集群无法直接拉私有 registry，可先在每个节点导入镜像：
@@ -99,17 +101,19 @@ k3s ctr images import /tmp/sysbox-deploy-k3s.tar
 
 ## 当前本地源码构建并部署到指定节点
 
-`build-and-deploy-k8s.sh` 在当前主机直接编译五个 Sysbox 二进制，并通过轻量 `Dockerfile.sysbox-debug-deploy` 打包为 ZPK debug 镜像。它不执行 `sysbox-pkgr/deb generic`、不构建 `sysbox-pkgr/deb/ubuntu-jammy/Dockerfile`，也不使用 `Dockerfile.sysbox-k3s`。镜像由 `kubectl debug node/TARGET_NODE` 拉取，再将二进制原子复制到宿主机 `/usr/bin`。
+`build.sh debug` 在当前主机直接编译五个 Sysbox 二进制，并通过轻量 `Dockerfile.sysbox-debug-deploy` 打包、校验和推送 ZPK debug 镜像。`deploy.sh debug` 再通过 `kubectl debug node/TARGET_NODE` 拉取指定镜像，将二进制原子替换到宿主机 `/usr/bin`。
 
 ```bash
-KUBECONFIG=/root/.kube/218.config \
+IMAGE_TAG=<tag> ./w7panel-doc/build.sh debug
+
+KUBECONFIG=/home/.kubeconfig \
 TARGET_NODE=server1 \
-./w7panel-doc/build-and-deploy-k8s.sh
+./w7panel-doc/deploy.sh debug
 ```
 
-默认镜像为 `docker.cnb.cool/i0358/zpk/sysbox-debug-deploy:<git-sha>`。如果源码或任一子模块存在未提交内容，tag 会附加 `-dirty-<内容哈希>`，避免把本地修改伪装成已提交版本。可通过 `IMAGE_TAG` 明确指定 tag。
+构建成功后会输出 `export IMAGE=...` 等变量，并写入忽略版本控制的 `dist/debug-image.env`。`deploy.sh debug` 未显式设置 `IMAGE` 时会自动读取该文件；也可以先执行 `source dist/debug-image.env`。默认镜像为 `docker.cnb.cool/i0358/zpk/sysbox-debug-deploy:<git-sha>`。如果源码或任一子模块存在未提交内容，tag 会附加 `-dirty-<内容哈希>`，避免把本地修改伪装成已提交版本。可通过 `IMAGE_TAG` 明确指定 tag。
 
-脚本分七个阶段显示进度。它会逐一比较 `sysbox-runc`、`sysbox-mgr`、`sysbox-fs`、`sysbox-snapshotter`、`sysbox-admission` 的本地构建文件、debug 镜像内文件和目标节点 `/usr/bin` 文件的 SHA256；任一不一致都会失败。需要额外创建系统容器 smoke Pod 时设置 `RUN_SMOKE_TEST=true`。
+构建阶段比较五个本地产物与镜像内文件的 SHA256；部署阶段比较镜像与目标节点 `/usr/bin` 文件的 SHA256，任一不一致都会失败。需要额外创建系统容器 smoke Pod 时，在部署时设置 `RUN_SMOKE_TEST=true`。
 
 ## 验证命令
 
@@ -135,10 +139,10 @@ kubectl exec sysbox-release-test -- sh -lc 'mount | grep -E "sysboxfs|proc|cgrou
 
 ## GitHub Release
 
-本地完整 release 脚本：
+本地完整 release 构建入口：
 
 ```bash
-./w7panel-doc/release.sh
+./w7panel-doc/build.sh release
 ```
 
 默认行为：
@@ -160,7 +164,7 @@ CNB_USERNAME=...
 CNB_PASSWORD=...
 GITHUB_TOKEN=...
 GITHUB_REPOSITORY=w7panel/sysbox
-./w7panel-doc/release.sh
+./w7panel-doc/build.sh release
 ```
 
 可选变量：
@@ -180,7 +184,7 @@ USE_BUILDX=false
 ```bash
 SYS_ARCH=arm64
 ALLOW_CROSS_ARCH=true
-./w7panel-doc/release.sh
+./w7panel-doc/build.sh release
 ```
 
 顶层 `sysbox/.github/workflows/release-v0.7.yml` 支持：

@@ -3,9 +3,9 @@
 # Enable or disable LXCFS /proc/loadavg virtualization.
 #
 # Usage:
-#   ./w7panel-doc/lxcfs-virtual.sh on
-#   ./w7panel-doc/lxcfs-virtual.sh off
-#   ./w7panel-doc/lxcfs-virtual.sh status
+#   ./w7panel-doc/tests/lxcfs-virtual.sh on
+#   ./w7panel-doc/tests/lxcfs-virtual.sh off
+#   ./w7panel-doc/tests/lxcfs-virtual.sh status
 
 set -eu
 

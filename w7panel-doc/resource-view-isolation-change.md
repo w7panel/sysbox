@@ -6,7 +6,7 @@
 
 - 主仓库 `sysbox`
   - 新增本文档。
-  - 新增编译与 Docker 验证脚本：`docs/build-and-test-resource-view.sh`。
+  - 提供本机 Docker 验证脚本：`w7panel-doc/tests/test-local-docker.sh`。
   - 主仓库本身没有改业务代码，但会记录 `sysbox-fs`、`sysbox-runc` 子模块指针变化。
 - 子模块 `sysbox-fs`
   - 分支：`w7panel`
@@ -138,7 +138,7 @@
 编译脚本：
 
 ```bash
-docs/build-and-test-resource-view.sh
+./w7panel-doc/tests/test-local-docker.sh
 ```
 
 脚本做的事情：

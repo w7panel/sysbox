@@ -9,26 +9,26 @@
 #   /proc/loadavg
 #
 # 用法:
-#   ./test-pod.sh           # 创建 pod → 安装工具 → 验证 → 清理
-#   ./test-pod.sh --verify  # 仅验证（pod 须已运行）
-#   ./test-pod.sh --enable-swap  # 配置 K3s kubelet LimitedSwap 并重启 K3s
-#   ./test-pod.sh --exec    # 进入容器
-#   ./test-pod.sh --clean   # 删除 pod
+#   ./test-pod.sh all       # 创建 pod → 安装工具 → 验证 → 清理（默认）
+#   ./test-pod.sh create    # 仅创建 pod
+#   ./test-pod.sh verify    # 仅验证（pod 须已运行）
+#   ./test-pod.sh exec      # 进入容器
+#   ./test-pod.sh clean     # 删除 pod
 #
 # 环境变量:
 #   POD_NAME  容器名称 (默认: test-sysbox)
 #   IMAGE     测试镜像 (默认: docker.cnb.cool/...)
-#   K3S_CONFIG K3s 配置文件 (默认: /etc/rancher/k3s/config.yaml)
-#   K3S_KUBELET_CONFIG_DIR kubelet drop-in 配置目录
+#   KUBECONFIG kubeconfig 文件 (默认: /home/.kubeconfig)
 #
 
 #set -euo pipefail  # failures are tracked via PASS/FAIL counters
 
 POD_NAME="${POD_NAME:-test-sysbox}"
 IMAGE="${IMAGE:-docker.cnb.cool/i0358/docker-images-chrom/nestybox-ubuntu-bionic-systemd-docker}"
-KUBECTL="${KUBECTL:-k3s kubectl}"
-K3S_CONFIG="${K3S_CONFIG:-/etc/rancher/k3s/config.yaml}"
-K3S_KUBELET_CONFIG_DIR="${K3S_KUBELET_CONFIG_DIR:-/var/lib/rancher/k3s/agent/etc/kubelet.conf.d}"
+NODE_NAME="${NODE_NAME:-}"
+KUBECONFIG="${KUBECONFIG:-/home/.kubeconfig}"
+KUBECTL_BIN="${KUBECTL_BIN:-kubectl}"
+K=("${KUBECTL_BIN}" --kubeconfig "${KUBECONFIG}")
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 PASS=0; FAIL=0
@@ -40,7 +40,7 @@ error() { echo -e "${RED}[ERROR]${NC} $*"; }
 check() {
     local desc="$1" file="$2" expected="$3"
     local out
-    out="$(${KUBECTL} exec ${POD_NAME} -- sh -c "cat ${file} 2>/dev/null || true" 2>/dev/null | tr -d '\r')"
+    out="$("${K[@]}" exec "${POD_NAME}" -- sh -c "cat ${file} 2>/dev/null || true" 2>/dev/null | tr -d '\r')"
     if echo "$out" | grep -q "${expected}"; then
         echo "  ✅ ${desc} (${file})"
         PASS=$((PASS+1))
@@ -53,7 +53,7 @@ check() {
 check_exact() {
     local desc="$1" file="$2"
     local out
-    out="$(${KUBECTL} exec ${POD_NAME} -- sh -c "cat ${file} 2>/dev/null || true" 2>/dev/null | tr -d '\r')"
+    out="$("${K[@]}" exec "${POD_NAME}" -- sh -c "cat ${file} 2>/dev/null || true" 2>/dev/null | tr -d '\r')"
     if [ -n "$out" ]; then
         echo "  ✅ ${desc} (${file})"
         PASS=$((PASS+1))
@@ -63,75 +63,10 @@ check_exact() {
     fi
 }
 
-# ─── 配置 K3s kubelet swap ────────────────────────────────────────
-enable_k3s_swap() {
-    local sudo_cmd="" service="k3s"
-    set -e
-
-    if [ "$(id -u)" -ne 0 ]; then
-        sudo_cmd="sudo"
-    fi
-
-    if systemctl is-active --quiet k3s-agent 2>/dev/null; then
-        service="k3s-agent"
-    fi
-
-    info "配置 K3s kubelet swap: ${K3S_CONFIG}"
-    ${sudo_cmd} mkdir -p "$(dirname "${K3S_CONFIG}")"
-    ${sudo_cmd} touch "${K3S_CONFIG}"
-    ${sudo_cmd} cp "${K3S_CONFIG}" "${K3S_CONFIG}.bak.$(date +%Y%m%d%H%M%S)"
-
-    tmp="$(mktemp)"
-    awk '
-        /^[[:space:]]*-[[:space:]]*"?fail-swap-on=/ {next}
-        /^[[:space:]]*-[[:space:]]*"?memory-swap-behavior=/ {next}
-        {print}
-    ' "${K3S_CONFIG}" > "${tmp}"
-
-    if grep -q '^[[:space:]]*kubelet-arg:' "${tmp}"; then
-        awk '
-            {print}
-            !done && /^[[:space:]]*kubelet-arg:/ {
-                print "  - \"fail-swap-on=false\""
-                done=1
-            }
-        ' "${tmp}" > "${tmp}.new"
-    else
-        cp "${tmp}" "${tmp}.new"
-        {
-            echo "kubelet-arg:"
-            echo "  - \"fail-swap-on=false\""
-        } >> "${tmp}.new"
-    fi
-
-    ${sudo_cmd} install -m 0644 "${tmp}.new" "${K3S_CONFIG}"
-    rm -f "${tmp}" "${tmp}.new"
-
-    info "写入 kubelet LimitedSwap drop-in: ${K3S_KUBELET_CONFIG_DIR}/99-swap.conf"
-    ${sudo_cmd} mkdir -p "${K3S_KUBELET_CONFIG_DIR}"
-    tmp="$(mktemp)"
-    cat > "${tmp}" <<'EOF'
-apiVersion: kubelet.config.k8s.io/v1beta1
-kind: KubeletConfiguration
-failSwapOn: false
-memorySwap:
-  swapBehavior: LimitedSwap
-EOF
-    ${sudo_cmd} install -m 0644 "${tmp}" "${K3S_KUBELET_CONFIG_DIR}/99-swap.conf"
-    rm -f "${tmp}"
-
-    info "重启 ${service}..."
-    ${sudo_cmd} systemctl restart "${service}"
-    info "当前 kubelet swap 参数:"
-    grep -A3 -n 'kubelet-arg:' "${K3S_CONFIG}" || true
-    ${sudo_cmd} sed -n '1,20p' "${K3S_KUBELET_CONFIG_DIR}/99-swap.conf"
-    set +e
-}
-
 # ─── 创建 pod ─────────────────────────────────────────────────────
 create_pod() {
     info "创建测试 pod: ${POD_NAME}..."
-    cat <<EOF | ${KUBECTL} apply -f -
+    cat <<EOF | "${K[@]}" apply -f -
 apiVersion: v1
 kind: Pod
 metadata:
@@ -139,6 +74,7 @@ metadata:
 spec:
   runtimeClassName: sysbox-runc
   hostUsers: false
+${NODE_NAME:+  nodeName: ${NODE_NAME}}
   containers:
   - name: ubuntu
     image: ${IMAGE}
@@ -150,19 +86,21 @@ spec:
         memory: "256Mi"
   restartPolicy: Always
 EOF
+    [ "${PIPESTATUS[1]}" -eq 0 ] || return 1
     info "等待 pod 就绪..."
-    ${KUBECTL} wait --for=condition=Ready pod/${POD_NAME} --timeout=120s
+    "${K[@]}" wait --for=condition=Ready "pod/${POD_NAME}" --timeout=120s || return 1
     info "Pod 状态:"
-    ${KUBECTL} get pod ${POD_NAME} -o wide
+    "${K[@]}" get pod "${POD_NAME}" -o wide || return 1
 }
 
 # ─── 安装工具 ──────────────────────────────────────────────────────
 install_tools() {
     info "安装测试工具 (procps, util-linux)..."
-    ${KUBECTL} exec ${POD_NAME} -- sh -c '
-        apt-get update -qq 2>/dev/null | tail -1
-        apt-get install -y -qq procps util-linux 2>/dev/null | tail -1
-    '
+    "${K[@]}" exec "${POD_NAME}" -- sh -c '
+        set -e
+        apt-get update -qq >/dev/null
+        apt-get install -y -qq procps util-linux >/dev/null
+    ' || return 1
     info "工具安装完成"
 }
 
@@ -219,7 +157,7 @@ verify_cpu_topology() {
     info "========== CPU 拓扑一致性验证 =========="
 
     local out
-    out="$(${KUBECTL} exec ${POD_NAME} -- sh -c '
+    out="$("${K[@]}" exec "${POD_NAME}" -- sh -c '
 fail=0
 
 bad() {
@@ -283,7 +221,7 @@ verify_slabinfo() {
     info "========== slabinfo 视图验证 =========="
 
     local out
-    out="$(${KUBECTL} exec ${POD_NAME} -- sh -c '
+    out="$("${K[@]}" exec "${POD_NAME}" -- sh -c '
 fail=0
 
 bad() {
@@ -328,7 +266,7 @@ verify_pressure() {
     info "========== PSI pressure 视图验证 =========="
 
     local out
-    out="$(${KUBECTL} exec ${POD_NAME} -- sh -c '
+    out="$("${K[@]}" exec "${POD_NAME}" -- sh -c '
 fail=0
 
 bad() {
@@ -403,7 +341,7 @@ verify_loadavg() {
     info "========== loadavg 视图验证 =========="
 
     local out
-    out="$(${KUBECTL} exec ${POD_NAME} -- sh -c '
+    out="$("${K[@]}" exec "${POD_NAME}" -- sh -c '
 fail=0
 
 bad() {
@@ -516,7 +454,7 @@ verify_swap() {
     info "========== swap 视图验证 =========="
 
     local out
-    out="$(${KUBECTL} exec ${POD_NAME} -- sh -c '
+    out="$("${K[@]}" exec "${POD_NAME}" -- sh -c '
 fail=0
 
 bad() {
@@ -635,9 +573,9 @@ verify_swapon() {
     info "========== pod 内 swapon 验证 =========="
 
     local host_before host_after out
-    host_before="$(cat /proc/swaps 2>/dev/null | tr -d '\r')"
+    host_before="$(tr -d '\r' < /proc/swaps 2>/dev/null)"
 
-    out="$(${KUBECTL} exec ${POD_NAME} -- sh -c '
+    out="$("${K[@]}" exec "${POD_NAME}" -- sh -c '
 set -u
 
 fail=0
@@ -730,7 +668,7 @@ cleanup
 exit "$fail"
 ' 2>/dev/null | tr -d '\r')"
 
-    host_after="$(cat /proc/swaps 2>/dev/null | tr -d '\r')"
+    host_after="$(tr -d '\r' < /proc/swaps 2>/dev/null)"
 
     echo "$out"
     if echo "$out" | grep -q '^FAIL '; then
@@ -744,6 +682,85 @@ exit "$fail"
     fi
 }
 
+# ─── 严格验证资源视图格式与可打印性 ────────────────────────────────
+verify_strict_resource_view() {
+    echo ""
+    info "========== 资源视图严格验证 =========="
+
+    local out
+    out="$("${K[@]}" exec "${POD_NAME}" -- sh -c '
+set -u
+fail=0
+
+ok() { echo "PASS $1"; }
+bad() { echo "FAIL $1: $2"; fail=1; }
+
+count_range() {
+    awk -v range="$1" "BEGIN {
+        n = split(range, parts, \",\")
+        for (i = 1; i <= n; i++) {
+            if (parts[i] ~ /^[0-9]+-[0-9]+$/) {
+                split(parts[i], bounds, \"-\")
+                total += bounds[2] - bounds[1] + 1
+            } else if (parts[i] ~ /^[0-9]+$/) {
+                total++
+            }
+        }
+        print total + 0
+    }"
+}
+
+paths="/proc/cpuinfo /proc/diskstats /proc/meminfo /proc/stat /proc/swaps /proc/uptime /proc/slabinfo /proc/pressure/io /proc/pressure/cpu /proc/pressure/memory /sys/devices/system/cpu/online /sys/devices/system/cpu/present /proc/loadavg"
+for path in $paths; do
+    [ -r "$path" ] && ok "$path readable" || bad "$path readable" "not readable"
+    badhex="$(dd if="$path" bs=4096 count=1 2>/dev/null | od -An -v -tx1 | awk '\''{
+        for (i = 1; i <= NF; i++) {
+            if ($i != "09" && $i != "0a" && ($i < "20" || $i > "7e")) {
+                print $i
+                exit
+            }
+        }
+    }'\'')"
+    [ -z "$badhex" ] && ok "$path printable" || bad "$path printable" "bad byte $badhex"
+done
+
+online="$(tr -d "[:space:]" < /sys/devices/system/cpu/online)"
+present="$(tr -d "[:space:]" < /sys/devices/system/cpu/present)"
+visible="$(count_range "$online")"
+echo "$online" | grep -Eq "^[0-9]+(-[0-9]+)?(,[0-9]+(-[0-9]+)?)*$" && ok "cpu online format" || bad "cpu online format" "$online"
+echo "$present" | grep -Eq "^[0-9]+(-[0-9]+)?(,[0-9]+(-[0-9]+)?)*$" && ok "cpu present format" || bad "cpu present format" "$present"
+[ "$online" = "$present" ] && ok "cpu online/present aligned" || bad "cpu online/present aligned" "$online != $present"
+
+cpuinfo_count="$(grep -c "^processor" /proc/cpuinfo || true)"
+stat_count="$(grep -Ec "^cpu[0-9]+ " /proc/stat || true)"
+[ "$cpuinfo_count" -eq "$visible" ] && ok "cpuinfo count matches online" || bad "cpuinfo count matches online" "$cpuinfo_count != $visible"
+[ "$stat_count" -eq "$visible" ] && ok "stat count matches online" || bad "stat count matches online" "$stat_count != $visible"
+awk -F: '\''BEGIN {next_id=0} /^processor/ {gsub(/[[:space:]]/, "", $2); if ($2 != next_id++) exit 1}'\'' /proc/cpuinfo && ok "cpuinfo ids sequential" || bad "cpuinfo ids sequential" "unexpected processor id"
+awk '\''/^btime [0-9]+$/ {found=1} END {exit found ? 0 : 1}'\'' /proc/stat && ok "stat btime" || bad "stat btime" "missing"
+
+grep -Eq "^[0-9]+\\.[0-9]{2} [0-9]+\\.[0-9]{2}$" /proc/uptime && ok "uptime format" || bad "uptime format" "$(cat /proc/uptime)"
+grep -Eq "^[0-9]+\\.[0-9]{2} [0-9]+\\.[0-9]{2} [0-9]+\\.[0-9]{2} [0-9]+/[0-9]+ [0-9]+$" /proc/loadavg && ok "loadavg format" || bad "loadavg format" "$(cat /proc/loadavg)"
+
+for key in MemTotal MemFree MemAvailable Cached Active Inactive AnonPages Slab KernelStack PageTables SwapTotal SwapFree; do
+    grep -q "^$key:" /proc/meminfo && ok "meminfo $key" || bad "meminfo $key" "missing"
+done
+
+head -1 /proc/slabinfo | grep -Eq "^slabinfo - version: 2\\.1" && ok "slabinfo header" || bad "slabinfo header" "$(head -1 /proc/slabinfo)"
+for path in /proc/pressure/io /proc/pressure/cpu /proc/pressure/memory; do
+    grep -q "^some avg10=" "$path" && ok "$path format" || bad "$path format" "$(cat "$path")"
+done
+
+exit "$fail"
+' 2>/dev/null | tr -d '\r')"
+
+    echo "$out"
+    if echo "$out" | grep -q '^FAIL '; then
+        FAIL=$((FAIL+1))
+    else
+        PASS=$((PASS+1))
+    fi
+}
+
 # ─── 验证内存隔离 ──────────────────────────────────────────────────
 verify_memory() {
     echo ""
@@ -751,13 +768,13 @@ verify_memory() {
     echo ""
 
     info "1. kubectl top pod:"
-    ${KUBECTL} top pod ${POD_NAME} 2>/dev/null || warn "    (metrics server 可能未安装)"
+    "${K[@]}" top pod "${POD_NAME}" 2>/dev/null || warn "    (metrics server 可能未安装)"
 
     echo ""
     info "2. 容器内 free -m:"
-    ${KUBECTL} exec ${POD_NAME} -- free -m
+    "${K[@]}" exec "${POD_NAME}" -- free -m
 
-    TOTAL=$(${KUBECTL} exec ${POD_NAME} -- free -m | awk 'NR==2{print $2}' | tr -d '\r')
+    TOTAL=$("${K[@]}" exec "${POD_NAME}" -- free -m | awk 'NR==2{print $2}' | tr -d '\r')
     if [ "${TOTAL}" = "512" ]; then
         info "   ✅ 内存限制正确: ${TOTAL}MB"
         PASS=$((PASS+1))
@@ -768,7 +785,7 @@ verify_memory() {
 
     echo ""
     info "3. cgroup 实际内存使用:"
-    USAGE=$(${KUBECTL} exec ${POD_NAME} -- cat /sys/fs/cgroup/memory.current 2>/dev/null | tr -d '\r' || echo "")
+    USAGE=$("${K[@]}" exec "${POD_NAME}" -- cat /sys/fs/cgroup/memory.current 2>/dev/null | tr -d '\r' || echo "")
     if [ -n "$USAGE" ]; then
         echo "    memory.current = ${USAGE} bytes ($((USAGE/1024/1024)) MiB)"
     else
@@ -782,7 +799,7 @@ verify_systemd() {
     info "========== systemd 容器验证 =========="
     echo ""
 
-    PID1=$(${KUBECTL} exec ${POD_NAME} -- cat /proc/1/comm 2>/dev/null | tr -d '\r')
+    PID1=$("${K[@]}" exec "${POD_NAME}" -- cat /proc/1/comm 2>/dev/null | tr -d '\r')
     if [ "${PID1}" = "systemd" ]; then
         info "  ✅ PID 1 = systemd"
         PASS=$((PASS+1))
@@ -791,25 +808,38 @@ verify_systemd() {
     fi
 
     info "systemd 运行状态:"
-    ${KUBECTL} exec ${POD_NAME} -- systemctl is-system-running --wait 2>/dev/null || \
+    "${K[@]}" exec "${POD_NAME}" -- systemctl is-system-running --wait 2>/dev/null || \
         warn "    (仍在启动中)"
 }
 
 # ─── 进入容器 ─────────────────────────────────────────────────────
 exec_pod() {
     info "进入容器 ${POD_NAME}..."
-    ${KUBECTL} exec -it ${POD_NAME} -- /bin/bash 2>/dev/null || \
-    ${KUBECTL} exec -it ${POD_NAME} -- /bin/sh
+    "${K[@]}" exec -it "${POD_NAME}" -- /bin/bash 2>/dev/null || \
+    "${K[@]}" exec -it "${POD_NAME}" -- /bin/sh
 }
 
 # ─── 清理 ──────────────────────────────────────────────────────────
 clean_pod() {
     info "删除 pod: ${POD_NAME}..."
-    ${KUBECTL} delete pod ${POD_NAME} --now 2>/dev/null && \
-        info "已删除 ✅" || warn "pod 不存在"
+    if "${K[@]}" delete pod "${POD_NAME}" --now 2>/dev/null; then
+        info "已删除 ✅"
+    else
+        warn "pod 不存在"
+    fi
 }
 
 # ─── 主流程 ─────────────────────────────────────────────────────────
+run_verifications() {
+    verify_proc_sys || true
+    verify_strict_resource_view
+    verify_memory
+    verify_systemd
+    echo ""
+    info "总计: ${PASS} 通过, ${FAIL} 失败"
+    [ "$FAIL" -eq 0 ]
+}
+
 main() {
     echo ""
     echo "=========================================="
@@ -817,35 +847,29 @@ main() {
     echo "  Image: ${IMAGE}"
     echo "=========================================="
 
-    case "${1:-}" in
-        --enable-swap) enable_k3s_swap ;;
-        --exec|-e) exec_pod ;;
-        --clean|-c) clean_pod ;;
-        --verify|-v)
-            verify_proc_sys
-            verify_memory
-            verify_systemd
-            echo ""
-            info "总计: ${PASS} 通过, ${FAIL} 失败"
-            [ "$FAIL" -gt 0 ] && exit 1
-            info "全部通过 🎉"
+    case "${1:-all}" in
+        create)
+            create_pod
+            ;;
+        exec) exec_pod ;;
+        clean) clean_pod ;;
+        verify)
+            run_verifications
+            ;;
+        all)
+            clean_pod 2>/dev/null || true
+            trap 'clean_pod >/dev/null 2>&1 || true' EXIT
+            create_pod || return 1
+            install_tools || return 1
+            status=0
+            run_verifications || status=$?
+            clean_pod
+            trap - EXIT
+            return "$status"
             ;;
         *)
-            clean_pod 2>/dev/null || true
-            create_pod
-            install_tools
-            verify_proc_sys
-            verify_memory
-            verify_systemd
-            echo ""
-            info "总计: ${PASS} 通过, ${FAIL} 失败"
-            if [ "$FAIL" -gt 0 ]; then
-                error "有测试未通过，请检查日志"
-                exit 1
-            fi
-            info "全部测试通过 🎉"
-            info "进入容器:  $0 --exec"
-            info "清理 pod:   $0 --clean"
+            error "用法: $0 [create|verify|exec|clean|all]"
+            return 2
             ;;
     esac
 }

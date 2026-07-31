@@ -72,7 +72,7 @@ KUBECONFIG=/root/.kube/218.config \
 NAMESPACE=k3k-console-164315 \
 DEPLOYMENT=k3k-ckm-z79us-server \
 CONTAINER=k3k-ckm-z79us-server \
-bash w7panel-doc/persistent-special-mount-test.sh
+bash w7panel-doc/tests/persistent-special-mount-test.sh
 ```
 
 默认 `TEST_WAIT_MODE=exec`：每次重建后只等待目标业务容器进入 Running 且 `kubectl exec` 可用，不等待内层 K3s/coredns 使外层 Pod 达到 `2/2 Ready`。脚本仍重建两次并验证两轮 marker，同时把七个目录的 mount、ext4、idmapped、属主及 marker 操作合并到每个 Pod 一次 exec。218 上 `ckm-z79us` 两次重建实测约 14 秒完成。需要同时诊断 CKM Ready 时可设置 `TEST_WAIT_MODE=ready`，恢复原来的慢速等待。
@@ -80,21 +80,24 @@ bash w7panel-doc/persistent-special-mount-test.sh
 本地编译到目标集群测试拆为两个步骤：
 
 ```bash
-# 1. 本地增量编译三个组件、构建并 push debug 镜像
-DEBUG_IMAGE=docker.cnb.cool/i0358/zpk/sysbox-debug-deploy:<tag> \
-bash w7panel-doc/build-sysbox.sh --debug-build
+# 1. 本地编译五个组件、构建并 push debug 镜像
+IMAGE_TAG=<tag> ./w7panel-doc/build.sh debug
 
-# 2. 218 直接拉取镜像、原子安装并快速重建 CKM 两次
-KUBECONFIG=/root/.kube/218.config \
+# 2. 目标节点拉取镜像并原子安装
+KUBECONFIG=/home/.kubeconfig \
 TARGET_NODE=server1 \
-DEBUG_IMAGE=docker.cnb.cool/i0358/zpk/sysbox-debug-deploy:<tag> \
-TEST_NAMESPACE=k3k-console-164315 \
-TEST_DEPLOYMENT=k3k-ckm-z79us-server \
-TEST_CONTAINER=k3k-ckm-z79us-server \
-bash w7panel-doc/build-sysbox.sh --debug-test
+IMAGE=docker.cnb.cool/i0358/zpk/sysbox-debug-deploy:<tag> \
+./w7panel-doc/deploy.sh debug
+
+# 3. 快速重建 CKM 两次并验证 PVC special 目录
+KUBECONFIG=/home/.kubeconfig \
+NAMESPACE=k3k-console-164315 \
+DEPLOYMENT=k3k-ckm-z79us-server \
+CONTAINER=k3k-ckm-z79us-server \
+./w7panel-doc/tests/persistent-special-mount-test.sh
 ```
 
-`--debug-deploy` 保留为兼容入口，内部依次执行以上两个步骤。`--debug-test` 会逐一比较镜像内与宿主 `/usr/bin` 的二进制 SHA256，不一致立即失败。
+`build.sh debug` 会校验本地产物与镜像内二进制，`deploy.sh debug` 会校验镜像与宿主 `/usr/bin` 的 SHA256，不一致立即失败。
 
 #### 二进制与镜像一致性
 

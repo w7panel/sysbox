@@ -8,7 +8,7 @@
 
 ```bash
 cd sysbox
-KUBECONFIG=/home/.kubeconfig ./w7panel-doc/snapshot-test.sh
+KUBECONFIG=/home/.kubeconfig ./w7panel-doc/tests/snapshot-test.sh
 ```
 
 可通过环境变量覆盖测试参数：
@@ -21,7 +21,7 @@ TIMEOUT=300s \
 HOST_DEBUG_NAMESPACE=default \
 HOST_DEBUG_POD=sysbox-debug-tools \
 KUBECONFIG=/home/.kubeconfig \
-./w7panel-doc/snapshot-test.sh
+./w7panel-doc/tests/snapshot-test.sh
 ```
 
 脚本会检查宿主服务与 containerd plugin，创建临时 PVC/Deployment，完成 rootfs 写入、修改、删除和 Pod 重建验证，检查服务日志，最后自动删除临时资源。成功时退出码为 `0` 并输出 `PASS`。

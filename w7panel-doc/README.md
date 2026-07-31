@@ -48,20 +48,20 @@
 
 | 脚本 | 用途 |
 |---|---|
-| [build-sysbox.sh](./build-sysbox.sh) | `--debug-build` 本地构建并 push；`--debug-test` 由目标节点拉取、安装和极速测试；`--debug-deploy` 兼容一键执行 |
+| [build.sh](./build.sh) | 统一构建入口：`local`、`debug`、`release` |
 | [release.sh](./release.sh) | 构建 release、部署镜像和发布产物 |
-| [deploy-local-test.sh](./deploy-local-test.sh) | 本地源码构建、部署和 smoke test |
-| [build-and-deploy-k8s.sh](./build-and-deploy-k8s.sh) | 从当前本地源码构建、推送 ZPK 镜像并部署到指定 K8s 节点；逐二进制 SHA256 校验 |
-| [deploy.sh](./deploy.sh) | 部署已发布镜像并运行 smoke test |
+| [deploy.sh](./deploy.sh) | 统一部署入口：`debug`、`manifests`、`local-test` |
 | [uninstall.sh](./uninstall.sh) | 从 K3s 节点卸载 Sysbox |
-| [snapshot-test.sh](./snapshot-test.sh) | rootfs rw-layer 端到端测试 |
-| [persistent-special-mount-test.sh](./persistent-special-mount-test.sh) | PVC special 目录两次快速重建测试；默认只等业务容器可 exec，`TEST_WAIT_MODE=ready` 可恢复完整 Ready 等待 |
-| [test-pod.sh](./test-pod.sh) | 创建并验证 Sysbox 系统容器 |
-| [test-resource-view-pod.sh](./test-resource-view-pod.sh) | 验证容器内资源视图文件 |
-| [build-and-test-resource-view.sh](./build-and-test-resource-view.sh) | 构建并运行资源视图测试 |
-| [swaps.sh](./swaps.sh) | swap 配置和验证辅助工具 |
-| [check-lxcfs-swap.sh](./check-lxcfs-swap.sh) | 按 LXCFS 逻辑检查 swap accounting |
-| [lxcfs-virtual.sh](./lxcfs-virtual.sh) | 控制 LXCFS `/proc/loadavg` 虚拟化 |
+| [tests/test-local-docker.sh](./tests/test-local-docker.sh) | 本机 Docker 构建与资源视图测试 |
+| [tests/test-pod.sh](./tests/test-pod.sh) | 创建并验证 Sysbox 系统容器 |
+| [tests/swaps.sh](./tests/swaps.sh) | swap 配置、accounting 检查和验证 |
+| [tests/snapshot-test.sh](./tests/snapshot-test.sh) | rootfs rw-layer 端到端测试 |
+| [tests/persistent-special-mount-test.sh](./tests/persistent-special-mount-test.sh) | PVC special 目录两次快速重建测试 |
+| [tests/lxcfs-virtual.sh](./tests/lxcfs-virtual.sh) | 控制 LXCFS `/proc/loadavg` 虚拟化 |
+
+在交互终端直接运行 `build.sh` 或 `deploy.sh` 会显示模式菜单，并提示输入所选模式的必需参数。CI、管道和其他非交互环境必须显式传入子命令及必需环境变量。
+
+`build.sh debug` 会把本次镜像变量写入 `dist/debug-image.env`；后续执行 `deploy.sh debug` 时可自动读取，也可手动执行 `source dist/debug-image.env`。
 
 ---
 
@@ -314,8 +314,11 @@ Sysbox 官方发布的 v0.7.0 deb 包在 containerd 2.x + kernel 6.x 环境下�
 ## 快速开始
 
 ```bash
-# 一键构建 & 安装
-bash /root/doc/build-sysbox.sh
+# 编译本地二进制
+./w7panel-doc/build.sh local
+
+# 使用 release 镜像部署 manifests
+IMAGE=<release-image> ./w7panel-doc/deploy.sh manifests
 ```
 
 ---

@@ -3,24 +3,28 @@
 # swaps.sh - Sysbox + K3s swap view verification helper.
 #
 # Usage:
-#   ./w7panel-doc/swaps.sh --verify
-#   ./w7panel-doc/swaps.sh --all
-#   ./w7panel-doc/swaps.sh --enable-k3s
-#   ./w7panel-doc/swaps.sh --create
-#   ./w7panel-doc/swaps.sh --clean
-#   ./w7panel-doc/swaps.sh --host-swapon-test
+#   ./w7panel-doc/tests/swaps.sh --verify
+#   ./w7panel-doc/tests/swaps.sh --all
+#   ./w7panel-doc/tests/swaps.sh --enable-k3s
+#   ./w7panel-doc/tests/swaps.sh --create
+#   ./w7panel-doc/tests/swaps.sh --clean
+#   ./w7panel-doc/tests/swaps.sh --host-swapon-test
+#   ./w7panel-doc/tests/swaps.sh --check-accounting [pid]
 #
 # Environment:
 #   POD_NAME   test pod name (default: test-sysbox)
 #   IMAGE      test image
-#   KUBECTL    kubectl command (default: k3s kubectl)
+#   KUBECONFIG kubeconfig 文件 (默认: /home/.kubeconfig)
+#   KUBECTL_BIN kubectl executable (default: kubectl)
 #   SWAPFILE   temporary host swapfile for --host-swapon-test
 
 set -u
 
 POD_NAME="${POD_NAME:-test-sysbox}"
 IMAGE="${IMAGE:-docker.cnb.cool/i0358/docker-images-chrom/nestybox-ubuntu-bionic-systemd-docker}"
-KUBECTL="${KUBECTL:-k3s kubectl}"
+KUBECONFIG="${KUBECONFIG:-/home/.kubeconfig}"
+KUBECTL_BIN="${KUBECTL_BIN:-kubectl}"
+K=("${KUBECTL_BIN}" --kubeconfig "${KUBECONFIG}")
 SWAPFILE="${SWAPFILE:-/root/workspace/sysbox-host-swapon-test.swap}"
 K3S_CONFIG="${K3S_CONFIG:-/etc/rancher/k3s/config.yaml}"
 K3S_KUBELET_CONFIG_DIR="${K3S_KUBELET_CONFIG_DIR:-/var/lib/rancher/k3s/agent/etc/kubelet.conf.d}"
@@ -45,6 +49,44 @@ need_root() {
         bad "需要 root 权限"
         exit 1
     fi
+}
+
+walk_up_has_file() {
+    local base="$1" rel="$2" file="$3"
+    rel="/${rel#/}"
+
+    while :; do
+        [ -e "$base$rel/$file" ] && return 0
+        [ "$rel" = "/" ] && break
+        rel="$(dirname "$rel")"
+    done
+    return 1
+}
+
+check_accounting() {
+    local pid="${1:-$$}" cg
+
+    [ -r "/proc/$pid/cgroup" ] || {
+        echo "无法读取 /proc/$pid/cgroup" >&2
+        return 2
+    }
+
+    if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
+        cg="$(awk -F: '$1 == "0" {print $3; exit}' "/proc/$pid/cgroup")"
+        if [ -n "$cg" ] && walk_up_has_file /sys/fs/cgroup "$cg" memory.swap.current; then
+            echo "Kernel supports swap accounting"
+            return 0
+        fi
+    else
+        cg="$(awk -F: '$2 ~ /(^|,)memory(,|$)/ {print $3; exit}' "/proc/$pid/cgroup")"
+        if [ -n "$cg" ] && walk_up_has_file /sys/fs/cgroup/memory "$cg" memory.memsw.usage_in_bytes; then
+            echo "Kernel supports swap accounting"
+            return 0
+        fi
+    fi
+
+    echo "Kernel does not support swap accounting"
+    return 1
 }
 
 enable_k3s_swap() {
@@ -91,13 +133,17 @@ EOF
 
     info "重启 k3s"
     systemctl restart k3s
-    systemctl is-active --quiet k3s && ok "k3s active" || bad "k3s 未启动"
+    if systemctl is-active --quiet k3s; then
+        ok "k3s active"
+    else
+        bad "k3s 未启动"
+    fi
 }
 
 create_pod() {
     info "重建测试 pod: $POD_NAME"
-    ${KUBECTL} delete pod "$POD_NAME" --now --ignore-not-found >/dev/null 2>&1 || true
-    ${KUBECTL} apply -f - <<EOF
+    "${K[@]}" delete pod "$POD_NAME" --now --ignore-not-found >/dev/null 2>&1 || true
+    "${K[@]}" apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
@@ -116,12 +162,12 @@ spec:
         memory: "256Mi"
   restartPolicy: Always
 EOF
-    ${KUBECTL} wait --for=condition=Ready "pod/${POD_NAME}" --timeout=120s
+    "${K[@]}" wait --for=condition=Ready "pod/${POD_NAME}" --timeout=120s
 }
 
 clean_pod() {
     info "删除测试 pod: $POD_NAME"
-    ${KUBECTL} delete pod "$POD_NAME" --now --ignore-not-found
+    "${K[@]}" delete pod "$POD_NAME" --now --ignore-not-found
 }
 
 host_swapon_test() {
@@ -154,9 +200,9 @@ host_swapon_test() {
 
     echo "--- host /proc/swaps after swapon ---"
     cat /proc/swaps
-    if ${KUBECTL} get pod "$POD_NAME" >/dev/null 2>&1; then
+    if "${K[@]}" get pod "$POD_NAME" >/dev/null 2>&1; then
         echo "--- pod swap view while host swapfile is active ---"
-        ${KUBECTL} exec "$POD_NAME" -- sh -c 'cat /proc/swaps; awk "/^SwapTotal:|^SwapFree:/ {print}" /proc/meminfo'
+        "${K[@]}" exec "$POD_NAME" -- sh -c 'cat /proc/swaps; awk "/^SwapTotal:|^SwapFree:/ {print}" /proc/meminfo'
     fi
 
     swapoff "$SWAPFILE" || bad "宿主 swapoff 失败: $SWAPFILE"
@@ -182,7 +228,7 @@ verify_k3s() {
 
     if systemctl is-active --quiet k3s 2>/dev/null; then
         ok "k3s active"
-    elif ${KUBECTL} get nodes >/dev/null 2>&1; then
+    elif "${K[@]}" get nodes >/dev/null 2>&1; then
         ok "k3s kubectl 可访问节点"
     else
         bad "k3s 未启动或 kubectl 不可访问"
@@ -192,16 +238,16 @@ verify_k3s() {
 verify_pod_swap() {
     info "验证 pod swap 视图: $POD_NAME"
 
-    ${KUBECTL} get pod "$POD_NAME" >/dev/null 2>&1 || {
+    "${K[@]}" get pod "$POD_NAME" >/dev/null 2>&1 || {
         bad "pod 不存在: $POD_NAME"
         return
     }
-    ${KUBECTL} wait --for=condition=Ready "pod/${POD_NAME}" --timeout=60s >/dev/null || {
+    "${K[@]}" wait --for=condition=Ready "pod/${POD_NAME}" --timeout=60s >/dev/null || {
         bad "pod 未 Ready"
         return
     }
 
-    out="$(${KUBECTL} exec "$POD_NAME" -- sh -c '
+    out="$("${K[@]}" exec "$POD_NAME" -- sh -c '
 set -u
 echo "--- /proc/swaps ---"
 cat /proc/swaps
@@ -251,6 +297,9 @@ summary() {
 }
 
 case "${1:---verify}" in
+    --check-accounting)
+        check_accounting "${2:-$$}"
+        ;;
     --enable-k3s)
         enable_k3s_swap
         summary
@@ -278,7 +327,7 @@ case "${1:---verify}" in
         summary
         ;;
     *)
-        echo "usage: $0 [--verify|--all|--enable-k3s|--create|--clean|--host-swapon-test]" >&2
+        echo "usage: $0 [--verify|--all|--enable-k3s|--create|--clean|--host-swapon-test|--check-accounting [pid]]" >&2
         exit 2
         ;;
 esac

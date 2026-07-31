@@ -91,7 +91,7 @@ kubectl --kubeconfig "$KUBECONFIG" get storageclass
 ```bash
 KUBECONFIG="$KUBECONFIG" \
 STORAGE_CLASS=disk-default \
-bash w7panel-doc/snapshot-test.sh
+bash w7panel-doc/tests/snapshot-test.sh
 ```
 
 测试会验证：
@@ -188,7 +188,7 @@ kubectl --kubeconfig "$KUBECONFIG" \
 kubectl --kubeconfig "$KUBECONFIG" get --raw='/readyz' >/dev/null
 
 KUBECONFIG="$KUBECONFIG" STORAGE_CLASS="$STORAGE_CLASS" \
-  bash w7panel-doc/snapshot-test.sh
+  bash w7panel-doc/tests/snapshot-test.sh
 
 helm uninstall w7panel-sysbox \
   --namespace kube-system \

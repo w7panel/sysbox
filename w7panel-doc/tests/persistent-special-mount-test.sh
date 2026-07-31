@@ -9,7 +9,7 @@
 #   NAMESPACE=k3k-console-164315 \
 #   DEPLOYMENT=k3k-ckm-new-a3-server \
 #   CONTAINER=k3k-ckm-new-a3-server \
-#   ./w7panel-doc/persistent-special-mount-test.sh
+#   ./w7panel-doc/tests/persistent-special-mount-test.sh
 
 set -Eeuo pipefail
 

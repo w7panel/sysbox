@@ -195,23 +195,23 @@ k3s kubectl exec test-swap -- sh -c 'cat /sys/fs/cgroup/memory.swap.max 2>/dev/n
 
 ## 第五步：运行 swap 专项测试
 
-使用 `w7panel-doc/swaps.sh`：
+使用 `w7panel-doc/tests/swaps.sh`：
 
 ```bash
 # 开启 K3s swap 支持并重启 k3s
-bash w7panel-doc/swaps.sh --enable-k3s
+bash w7panel-doc/tests/swaps.sh --enable-k3s
 
 # 创建 / 重建测试 pod
-bash w7panel-doc/swaps.sh --create
+bash w7panel-doc/tests/swaps.sh --create
 
 # 验证 K3s 配置、pod cgroup swap、/proc/swaps、/proc/meminfo
-bash w7panel-doc/swaps.sh --verify
+bash w7panel-doc/tests/swaps.sh --verify
 
 # 一次性执行：开启 K3s swap → 重建 pod → 验证
-bash w7panel-doc/swaps.sh --all
+bash w7panel-doc/tests/swaps.sh --all
 
 # 宿主临时 swapon 测试；会创建临时 64MiB swapfile，测试后自动 swapoff 并删除
-bash w7panel-doc/swaps.sh --host-swapon-test
+bash w7panel-doc/tests/swaps.sh --host-swapon-test
 ```
 
 成功时，pod 内应看到一条虚拟 swap：
@@ -273,14 +273,14 @@ resources:
 
 ## 第六步：运行完整资源视图测试
 
-使用 `test-pod.sh` 脚本（位于 `w7panel-doc/test-pod.sh`）：
+使用 `w7panel-doc/tests/test-pod.sh`：
 
 ```bash
 # 完整流程：创建 pod → 安装工具 → 验证所有 proc/sys 文件
-bash w7panel-doc/test-pod.sh
+bash w7panel-doc/tests/test-pod.sh all
 
 # 仅验证（pod 须已运行）
-bash w7panel-doc/test-pod.sh --verify
+bash w7panel-doc/tests/test-pod.sh verify
 ```
 
 ---

@@ -47,7 +47,7 @@ LXCFS 的 `/proc/loadavg` 虚拟化不是所有安装方式都会默认启用。
 仓库提供了脚本：
 
 ```sh
-./w7panel-doc/lxcfs-virtual.sh on
+./w7panel-doc/tests/lxcfs-virtual.sh on
 ```
 
 脚本会写入 systemd override：
@@ -68,13 +68,13 @@ systemctl restart lxcfs
 关闭虚拟化：
 
 ```sh
-./w7panel-doc/lxcfs-virtual.sh off
+./w7panel-doc/tests/lxcfs-virtual.sh off
 ```
 
 只检查当前状态：
 
 ```sh
-./w7panel-doc/lxcfs-virtual.sh status
+./w7panel-doc/tests/lxcfs-virtual.sh status
 ```
 
 ### 手动开启
@@ -310,7 +310,7 @@ top -b -n1
 
 ## 测试覆盖
 
-`w7panel-doc/test-pod.sh` 已加入空闲 `top` 长时间负载为 0 的检查：
+`w7panel-doc/tests/test-pod.sh` 已加入空闲 `top` 长时间负载为 0 的检查：
 
 - 连续采样 `/proc/loadavg` 和 `top -b -n1`。
 - 校验 `top` 的 load average 与 `/proc/loadavg` 前三列一致。
