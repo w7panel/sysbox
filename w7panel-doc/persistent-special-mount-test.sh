@@ -79,14 +79,15 @@ ready_pod() {
     return 1
 }
 
-check_hidden_mount() {
+check_no_hidden_mount() {
     local pod="$1"
     local mounts
     mounts="$("${K[@]}" get pod -n "${NAMESPACE}" "${pod}" \
-        -o jsonpath="{range .spec.containers[?(@.name==\"${CONTAINER}\")].volumeMounts[*]}{.mountPath}{'\n'}{end}")"
-    grep -q '^/var/lib/sysbox/rootfs-special-volume/' <<<"${mounts}" || \
-        die "${pod}/${CONTAINER} has no admission-injected hidden PVC mount"
-    pass "admission hidden PVC mount exists"
+        -o jsonpath="{range .spec.containers[*].volumeMounts[*]}{.mountPath}{'\n'}{end}")"
+    if grep -q '^/var/lib/sysbox/rootfs-special-volume/' <<<"${mounts}"; then
+        die "${pod}/${CONTAINER} still has an admission-injected hidden PVC mount"
+    fi
+    pass "Pod YAML has no rootfs-special-volume mount"
 }
 
 check_mounts() {
@@ -167,7 +168,7 @@ main() {
     pod_uid="$("${K[@]}" get pod -n "${NAMESPACE}" "${pod}" -o jsonpath='{.metadata.uid}')"
 
     info "initial Pod: ${NAMESPACE}/${pod}"
-    check_hidden_mount "${pod}"
+    check_no_hidden_mount "${pod}"
     check_mounts "${pod}"
     check_ownership "${pod}"
     write_markers "${pod}" first
@@ -178,7 +179,7 @@ main() {
     second_uid="$("${K[@]}" get pod -n "${NAMESPACE}" "${second_pod}" -o jsonpath='{.metadata.uid}')"
 
     info "first replacement Pod: ${NAMESPACE}/${second_pod}"
-    check_hidden_mount "${second_pod}"
+    check_no_hidden_mount "${second_pod}"
     check_mounts "${second_pod}"
     check_ownership "${second_pod}"
     check_markers "${second_pod}" first
@@ -189,7 +190,7 @@ main() {
     third_pod="$(ready_pod "${selector}" "${second_uid}")" || die "second replacement Pod did not become ready"
 
     info "second replacement Pod: ${NAMESPACE}/${third_pod}"
-    check_hidden_mount "${third_pod}"
+    check_no_hidden_mount "${third_pod}"
     check_mounts "${third_pod}"
     check_ownership "${third_pod}"
     check_markers "${third_pod}" second

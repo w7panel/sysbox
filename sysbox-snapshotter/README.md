@@ -23,7 +23,7 @@ All runtime paths are explicit. `--socket` must match the containerd proxy plugi
 
 This project is intended to apply only to the `sysbox-runc` runtime path. The global CRI image snapshotter remains the host default, for example `overlayfs`.
 
-Configure containerd so only the `sysbox-runc` runtime uses this snapshotter. Also configure CRI to forward `sysbox/rootfs-rw-layer` and `sysbox/persistent-special-mounts` from Pod annotations into each container OCI spec. The snapshotter itself uses only `sysbox/rootfs-rw-layer`; the second annotation is an explicit `sysbox-runc` opt-in for PVC-backed special directories.
+Configure containerd so only the `sysbox-runc` runtime uses this snapshotter. Also configure CRI to forward `sysbox/rootfs-rw-layer` and `sysbox/persistent-special-mounts` from Pod annotations into each container OCI spec. The second annotation makes the snapshotter write a root-only PVC handoff under `/run/sysbox/rootfs-pvc-handoff`; `sysbox-runc` consumes it to configure PVC-backed special directories without adding a PVC mount to the application Pod.
 
 ```toml
 [proxy_plugins."sysbox"]

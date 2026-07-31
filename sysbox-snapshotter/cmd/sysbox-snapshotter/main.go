@@ -86,6 +86,7 @@ func serve(address, root, containerdSocket string) error {
 		MetadataResolver: rootfs.NewSidecarMetadataResolver(sidecarStore),
 		PVCResolver:      rootfs.NewPVCMountPathResolver(sidecarStore),
 		Preparer:         rootfs.NewLocalPreparer(),
+		HandoffStore:     rootfs.NewFilePersistentSpecialHandoffStore(rootfs.PersistentSpecialHandoffDir),
 	}))
 	if err != nil {
 		return err

@@ -35,15 +35,9 @@ func TestMutator_injectsSidecar_whenAnnotationIsValid(t *testing.T) {
 	require.Empty(t, sidecar.VolumeMounts[0].SubPath)
 	require.Empty(t, sidecar.Env)
 	require.Equal(t, "c1", mutated.Spec.Containers[0].Name)
-	require.Equal(t, []corev1.VolumeMount{{
-		Name:      "rootfs",
-		MountPath: filepath.Join(admission.RootfsSpecialMountPath, "rootfs"),
-	}}, mutated.Spec.Containers[0].VolumeMounts)
+	require.Empty(t, mutated.Spec.Containers[0].VolumeMounts)
 	require.Equal(t, "c2", mutated.Spec.Containers[1].Name)
-	require.Equal(t, []corev1.VolumeMount{{
-		Name:      "rootfs",
-		MountPath: filepath.Join(admission.RootfsSpecialMountPath, "rootfs"),
-	}}, mutated.Spec.Containers[1].VolumeMounts)
+	require.Empty(t, mutated.Spec.Containers[1].VolumeMounts)
 }
 
 func TestMutator_doesNotInjectSpecialMountsWithoutExplicitOptIn(t *testing.T) {

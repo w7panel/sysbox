@@ -61,6 +61,7 @@ func (r *ContainerdIdentityResolver) ResolveIdentity(ctx context.Context, snapsh
 	}
 	if spec != nil && spec.Annotations != nil {
 		request.RootfsRwLayerAnnotation = spec.Annotations[AnnotationRootfsRwLayer]
+		request.PersistentSpecialMounts = spec.Annotations[AnnotationPersistentSpecialMounts] == "true"
 	}
 	return request, nil
 }

@@ -122,15 +122,11 @@ func TestMutator_injectsDistinctSidecarMounts_whenEntriesUseDifferentPVCs(t *tes
 		{Name: "rootfs-a", MountPath: filepath.Join(admission.SidecarMountPath, "rootfs-a")},
 		{Name: "rootfs-b", MountPath: filepath.Join(admission.SidecarMountPath, "rootfs-b")},
 	}, sidecar.VolumeMounts)
-	require.Equal(t, []corev1.VolumeMount{{
-		Name: "rootfs-a", MountPath: filepath.Join(admission.RootfsSpecialMountPath, "rootfs-a"),
-	}}, mutated.Spec.Containers[0].VolumeMounts)
-	require.Equal(t, []corev1.VolumeMount{{
-		Name: "rootfs-b", MountPath: filepath.Join(admission.RootfsSpecialMountPath, "rootfs-b"),
-	}}, mutated.Spec.Containers[1].VolumeMounts)
+	require.Empty(t, mutated.Spec.Containers[0].VolumeMounts)
+	require.Empty(t, mutated.Spec.Containers[1].VolumeMounts)
 }
 
-func TestMutator_keepsCanonicalRootfsSpecialMount_whenReinvoked(t *testing.T) {
+func TestMutator_keepsApplicationMountsEmpty_whenReinvoked(t *testing.T) {
 	mutator := newTestMutator()
 	pod := validRootfsPod()
 	first, err := mutator.Mutate(context.Background(), pod)
@@ -140,35 +136,8 @@ func TestMutator_keepsCanonicalRootfsSpecialMount_whenReinvoked(t *testing.T) {
 
 	require.NoError(t, err)
 	for _, container := range second.Spec.Containers[:2] {
-		require.Equal(t, []corev1.VolumeMount{{
-			Name: "rootfs", MountPath: filepath.Join(admission.RootfsSpecialMountPath, "rootfs"),
-		}}, container.VolumeMounts)
+		require.Empty(t, container.VolumeMounts)
 	}
-}
-
-func TestMutator_rejectsConflictingRootfsSpecialMount(t *testing.T) {
-	mutator := newTestMutator()
-	pod := validRootfsPod()
-	pod.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{{
-		Name: "other", MountPath: filepath.Join(admission.RootfsSpecialMountPath, "rootfs"),
-	}}
-
-	_, err := mutator.Mutate(context.Background(), pod)
-
-	require.ErrorContains(t, err, "conflicting mount at reserved path")
-}
-
-func TestMutator_rejectsReservedRootfsSpecialMountOnUnconfiguredContainer(t *testing.T) {
-	mutator := newTestMutator()
-	pod := validRootfsPod()
-	pod.Annotations[admission.AnnotationRootfsRwLayer] = `[{"name":"c1","volumeName":"rootfs","path":"containers/c1"}]`
-	pod.Spec.Containers[1].VolumeMounts = []corev1.VolumeMount{{
-		Name: "rootfs", MountPath: filepath.Join(admission.RootfsSpecialMountPath, "rootfs"),
-	}}
-
-	_, err := mutator.Mutate(context.Background(), pod)
-
-	require.ErrorContains(t, err, "conflicting mount at reserved path")
 }
 
 func TestMutator_replacesSidecarMountsWithRequiredMounts_whenSidecarAlreadyExists(t *testing.T) {

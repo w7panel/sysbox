@@ -1,6 +1,6 @@
 # sysbox-admission
 
-`sysbox-admission` is the Kubernetes mutating admission webhook for Sysbox rootfs rw-layer persistence. It validates the `sysbox/rootfs-rw-layer` Pod annotation and injects a canonical `sysbox-rootfs` sidecar so `sysbox-snapshotter` can resolve PVC-backed rootfs upper/work directories safely. When `sysbox/persistent-special-mounts` is explicitly `"true"`, it also gives each configured app container a reserved PVC mount used by `sysbox-runc` for persistent special directories.
+`sysbox-admission` is the Kubernetes mutating admission webhook for Sysbox rootfs rw-layer persistence. It validates the `sysbox/rootfs-rw-layer` Pod annotation and injects a canonical `sysbox-rootfs` sidecar so `sysbox-snapshotter` can resolve PVC-backed rootfs upper/work directories safely. Application containers never receive the PVC mount directly.
 
 The webhook handles Pods that meet all of these conditions:
 
@@ -72,17 +72,17 @@ The sidecar does not carry rootfs rw-layer intent in environment variables. Root
 
 `sysbox-snapshotter` reads that OCI annotation for container intent and reads the `sysbox-rootfs` sidecar OCI mounts only to resolve each PVC's node-side mount path.
 
-## Persistent Special Directory Mount
+## Persistent Special Directories
 
-When `sysbox/persistent-special-mounts` is exactly `"true"`, each app container configured by `sysbox/rootfs-rw-layer` also receives its selected PVC at:
+When `sysbox/persistent-special-mounts` is exactly `"true"`, `sysbox-snapshotter` writes the resolved PVC source to a root-only handoff under:
 
 ```text
-/var/lib/sysbox/rootfs-special-volume/<volumeName>
+/run/sysbox/rootfs-pvc-handoff/<container-id-hash>.json
 ```
 
-This is an internal hand-off mount, not an application data path. `sysbox-runc` validates that its node-side source belongs to the current Pod UID, resolves the configured rw-layer directory, initializes `<path>/special`, removes the hand-off mount from the final OCI spec, and replaces it with explicit mounts for all Sysbox special directories. A user mount under the reserved base path is rejected by admission.
+`sysbox-runc` validates the handoff against the container ID, Pod UID, container name, volume name, and kubelet volume path, resolves the configured rw-layer directory, initializes `<path>/special`, and adds explicit mounts for all Sysbox special directories. The handoff is removed with the container snapshot and is never part of the Pod spec or container mount namespace.
 
-Without the explicit opt-in annotation, admission still injects the sidecar required for persistent rootfs `upper/work`, but it does not inject this hand-off mount. Existing workloads therefore retain Sysbox's legacy node-local special-directory behavior after an upgrade.
+Without the explicit opt-in annotation, the sidecar still supports persistent rootfs `upper/work`, while Sysbox retains its legacy node-local special-directory behavior.
 
 The resulting PVC layout is:
 

@@ -6,10 +6,16 @@
 #   ./build-sysbox.sh           # 完整构建 + 安装
 #   ./build-sysbox.sh --install # 安装已构建的二进制
 #   ./build-sysbox.sh --config  # 仅配置 K3s containerd
+#   ./build-sysbox.sh --debug-deploy # 构建 runc/snapshotter/admission，经 node debug Pod 部署并测试
 #
 # 环境变量:
 #   GOPROXY   Go 模块代理 (默认: https://goproxy.cn,direct)
-#   SYSBOX_DIR  源码目录 (默认: /tmp/sysbox)
+#   SYSBOX_DIR  源码目录 (默认: 当前 sysbox 仓库)
+#   KUBECONFIG  目标集群 kubeconfig (--debug-deploy 必填)
+#   TARGET_NODE 目标节点名 (--debug-deploy 必填)
+#   DEBUG_IMAGE debug Pod 镜像（构建后推送，默认见下方配置）
+#   TEST_NAMESPACE / TEST_DEPLOYMENT / TEST_CONTAINER 端到端测试目标
+#   KEEP_DEBUG_POD=true 失败或结束后保留 debug Pod
 #
 # 仓库: https://github.com/w7panel/sysbox (w7panel 分支)
 # 已知限制:
@@ -20,9 +26,17 @@
 set -euo pipefail
 
 # ─── 配置 ───────────────────────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
-SYSBOX_DIR="${SYSBOX_DIR:-/tmp/sysbox}"
+SYSBOX_DIR="${SYSBOX_DIR:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 K3S_CONFIG_DIR="/var/lib/rancher/k3s/agent/etc/containerd"
+KUBECONFIG="${KUBECONFIG:-}"
+TARGET_NODE="${TARGET_NODE:-}"
+DEBUG_NAMESPACE="${DEBUG_NAMESPACE:-default}"
+DEBUG_IMAGE="${DEBUG_IMAGE:-docker.cnb.cool/i0358/zpk/sysbox-debug-deploy:rootfs-handoff-20260731-1}"
+ADMISSION_NAMESPACE="${ADMISSION_NAMESPACE:-default}"
+ADMISSION_DEPLOYMENT="${ADMISSION_DEPLOYMENT:-w7panel-sysbox-admission}"
+KEEP_DEBUG_POD="${KEEP_DEBUG_POD:-false}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -174,6 +188,47 @@ build() {
     ls -lh "${SYSBOX_DIR}/sysbox-mgr/build/sysbox-mgr"
 }
 
+# ─── 函数: 构建快速部署组件 ─────────────────────────────────────────
+build_debug_components() {
+    info "构建快速部署组件 (sysbox-runc / snapshotter / admission)..."
+    export GOPROXY="${GOPROXY}"
+
+    pushd "${SYSBOX_DIR}" >/dev/null
+    make -C sysbox-ipc
+    make -C sysbox-runc
+    make -C sysbox-snapshotter
+    make -C sysbox-admission
+    popd >/dev/null
+
+    local files=(
+        "${SYSBOX_DIR}/sysbox-runc/build/amd64/sysbox-runc"
+        "${SYSBOX_DIR}/sysbox-snapshotter/build/amd64/sysbox-snapshotter"
+        "${SYSBOX_DIR}/sysbox-admission/build/amd64/sysbox-admission"
+    )
+    local file
+    for file in "${files[@]}"; do
+        [[ -x "${file}" ]] || { error "构建产物不存在: ${file}"; return 1; }
+        sha256sum "${file}"
+    done
+}
+
+build_and_push_debug_image() {
+    [[ "${DEBUG_IMAGE}" == docker.cnb.cool/i0358/zpk/*:* ]] || {
+        error "DEBUG_IMAGE 必须使用 docker.cnb.cool/i0358/zpk/<name>:<tag>: ${DEBUG_IMAGE}"
+        return 1
+    }
+    command -v docker >/dev/null 2>&1 || { error "本机未安装 docker"; return 1; }
+
+    info "构建小型 debug 部署镜像: ${DEBUG_IMAGE}"
+    docker build \
+        -f "${SCRIPT_DIR}/Dockerfile.sysbox-debug-deploy" \
+        -t "${DEBUG_IMAGE}" \
+        "${SYSBOX_DIR}"
+    info "推送 debug 部署镜像..."
+    docker push "${DEBUG_IMAGE}"
+    docker image inspect "${DEBUG_IMAGE}" --format '  image={{.Id}} size={{.Size}}'
+}
+
 # ─── 函数: 安装二进制 ──────────────────────────────────────────────
 install_binaries() {
     local bin_dir="${SYSBOX_DIR}"
@@ -314,6 +369,132 @@ EOF
     info "K3s 配置完成 ✅"
 }
 
+# ─── 函数: 通过 node debug Pod 快速部署 ────────────────────────────
+DEBUG_POD=""
+KUBECTL=()
+
+cleanup_debug_pod() {
+    if [[ -n "${DEBUG_POD}" && "${KEEP_DEBUG_POD}" != "true" ]]; then
+        "${KUBECTL[@]}" -n "${DEBUG_NAMESPACE}" delete pod "${DEBUG_POD}" \
+            --ignore-not-found --wait=false >/dev/null 2>&1 || true
+    elif [[ -n "${DEBUG_POD}" ]]; then
+        warn "保留 debug Pod: ${DEBUG_NAMESPACE}/${DEBUG_POD}"
+    fi
+}
+
+wait_target_api() {
+    local attempt
+    for attempt in $(seq 1 60); do
+        if "${KUBECTL[@]}" get node "${TARGET_NODE}" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 2
+    done
+    error "等待目标集群 API 恢复超时"
+    return 1
+}
+
+create_node_debug_pod() {
+    local output prefix
+    prefix="node-debugger-${TARGET_NODE//./-}-"
+    info "创建 node debug Pod: node/${TARGET_NODE} (${DEBUG_IMAGE})..."
+    output="$("${KUBECTL[@]}" -n "${DEBUG_NAMESPACE}" debug "node/${TARGET_NODE}" \
+        --image="${DEBUG_IMAGE}" --image-pull-policy=Always \
+        --profile=sysadmin --attach=false -- sleep infinity 2>&1)"
+    echo "${output}"
+    DEBUG_POD="$(grep -Eo 'node-debugger-[a-z0-9-]+' <<<"${output}" | tail -1 || true)"
+    if [[ -z "${DEBUG_POD}" ]]; then
+        DEBUG_POD="$("${KUBECTL[@]}" -n "${DEBUG_NAMESPACE}" get pods \
+            --field-selector="spec.nodeName=${TARGET_NODE}" \
+            --sort-by=.metadata.creationTimestamp -o name \
+            | sed 's@^pod/@@' | grep "^${prefix}" | tail -1 || true)"
+    fi
+    [[ -n "${DEBUG_POD}" ]] || { error "无法取得 node debug Pod 名称"; return 1; }
+    "${KUBECTL[@]}" -n "${DEBUG_NAMESPACE}" wait --for=condition=Ready \
+        "pod/${DEBUG_POD}" --timeout=120s
+}
+
+install_binaries_from_debug_image() {
+    info "从 debug 镜像原子安装三个宿主二进制..."
+    "${KUBECTL[@]}" -n "${DEBUG_NAMESPACE}" exec "${DEBUG_POD}" -- sh -c '
+        set -eu
+        for name in sysbox-runc sysbox-snapshotter sysbox-admission; do
+            source="/sysbox-bin/${name}"
+            temporary="/host/usr/bin/.${name}.new"
+            test -x "${source}"
+            cp "${source}" "${temporary}"
+            chmod 0755 "${temporary}"
+            mv -f "${temporary}" "/host/usr/bin/${name}"
+        done
+    '
+}
+
+ensure_remote_containerd_annotations() {
+    local config_dir="/host/var/lib/rancher/k3s/agent/etc/containerd"
+    local live
+    live="$("${KUBECTL[@]}" -n "${DEBUG_NAMESPACE}" exec "${DEBUG_POD}" -- \
+        sh -c "grep -h 'pod_annotations' '${config_dir}/config.toml' 2>/dev/null || true")"
+    if grep -q 'sysbox/persistent-special-mounts' <<<"${live}"; then
+        info "containerd 已转发 persistent-special-mounts，跳过 K3s 重启"
+        return 0
+    fi
+
+    info "补充 containerd Pod annotation 并重启目标 K3s..."
+    "${KUBECTL[@]}" -n "${DEBUG_NAMESPACE}" exec "${DEBUG_POD}" -- sh -c \
+        "for f in '${config_dir}/config-v3.toml.tmpl' '${config_dir}/config.toml'; do
+            [ -f \"\${f}\" ] || continue
+            sed -i 's@pod_annotations = \[\"sysbox/rootfs-rw-layer\"\]@pod_annotations = [\"sysbox/rootfs-rw-layer\", \"sysbox/persistent-special-mounts\"]@' \"\${f}\"
+        done"
+    "${KUBECTL[@]}" -n "${DEBUG_NAMESPACE}" exec "${DEBUG_POD}" -- \
+        chroot /host systemctl restart k3s >/dev/null 2>&1 || true
+    wait_target_api
+}
+
+verify_remote_debug_deploy() {
+    info "校验目标宿主二进制与服务..."
+    "${KUBECTL[@]}" -n "${DEBUG_NAMESPACE}" exec "${DEBUG_POD}" -- sh -c \
+        'sha256sum /host/usr/bin/sysbox-runc /host/usr/bin/sysbox-snapshotter /host/usr/bin/sysbox-admission'
+    "${KUBECTL[@]}" -n "${DEBUG_NAMESPACE}" exec "${DEBUG_POD}" -- \
+        chroot /host systemctl is-active sysbox-fs sysbox-mgr sysbox-snapshotter
+
+    if [[ -n "${TEST_DEPLOYMENT:-}" ]]; then
+        info "运行特殊目录端到端测试: ${TEST_NAMESPACE:-default}/${TEST_DEPLOYMENT}"
+        KUBECONFIG="${KUBECONFIG}" \
+        NAMESPACE="${TEST_NAMESPACE:-default}" \
+        DEPLOYMENT="${TEST_DEPLOYMENT}" \
+        CONTAINER="${TEST_CONTAINER:-${TEST_DEPLOYMENT}}" \
+            bash "${SCRIPT_DIR}/persistent-special-mount-test.sh"
+    else
+        warn "未设置 TEST_DEPLOYMENT，仅完成宿主部署校验；设置后会自动运行特殊目录测试"
+    fi
+}
+
+debug_deploy() {
+    [[ -n "${KUBECONFIG}" ]] || { error "--debug-deploy 需要设置 KUBECONFIG"; return 1; }
+    [[ -n "${TARGET_NODE}" ]] || { error "--debug-deploy 需要设置 TARGET_NODE"; return 1; }
+    [[ -f "${KUBECONFIG}" ]] || { error "kubeconfig 不存在: ${KUBECONFIG}"; return 1; }
+
+    KUBECTL=(kubectl --kubeconfig "${KUBECONFIG}")
+    create_node_debug_pod
+    trap cleanup_debug_pod EXIT
+
+    install_binaries_from_debug_image
+
+    info "重启 snapshotter 与 admission..."
+    "${KUBECTL[@]}" -n "${DEBUG_NAMESPACE}" exec "${DEBUG_POD}" -- \
+        chroot /host systemctl restart sysbox-snapshotter
+    ensure_remote_containerd_annotations
+    "${KUBECTL[@]}" -n "${ADMISSION_NAMESPACE}" rollout restart \
+        "deployment/${ADMISSION_DEPLOYMENT}"
+    "${KUBECTL[@]}" -n "${ADMISSION_NAMESPACE}" rollout status \
+        "deployment/${ADMISSION_DEPLOYMENT}" --timeout=180s
+
+    verify_remote_debug_deploy
+    cleanup_debug_pod
+    trap - EXIT
+    info "node debug Pod 快速部署与测试完成 ✅"
+}
+
 # ─── 函数: 验证 ─────────────────────────────────────────────────────
 verify() {
     echo ""
@@ -367,6 +548,11 @@ main() {
             ;;
         --verify)
             verify
+            ;;
+        --debug-deploy)
+            build_debug_components
+            build_and_push_debug_image
+            debug_deploy
             ;;
         *)
             install_deps

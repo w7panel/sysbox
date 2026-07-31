@@ -26,13 +26,13 @@ sysbox/persistent-special-mounts: "true"
     └── containerd-overlay/
 ```
 
-`sysbox-admission` 把目标 PVC 以保留路径注入业务容器的 OCI mount 列表。`sysbox-runc` 在创建容器时完成以下操作：
+`sysbox-snapshotter` 从 `sysbox-rootfs` sidecar 解析目标 PVC，在宿主机 `/run/sysbox/rootfs-pvc-handoff/` 写入 root-only handoff。业务容器的 Pod YAML 和 OCI mount 列表都不再注入整块 PVC。`sysbox-runc` 在创建容器时完成以下操作：
 
 1. 先确认 `sysbox/persistent-special-mounts` 精确为 `"true"`，再用容器名、Pod UID 和 `sysbox/rootfs-rw-layer` 匹配当前 entry。
-2. 校验隐藏 mount 的 source 确实属于当前 Pod 的 kubelet volume 目录。
+2. 按 container ID 读取 handoff，校验 Pod UID、容器名、volumeName 及 source 确实属于当前 Pod 的 kubelet volume 目录。
 3. 首次用 `rsync -aHAX --numeric-ids --one-file-system` 把镜像预置内容复制到 staging 目录。
 4. 写入 `meta.json` 后原子 rename 为 `special/`；已有未标记目录、映射变化或初始化失败均阻止启动。
-5. 从最终 OCI spec 删除隐藏 PVC mount，为全部七个特殊目录追加 `rbind,rprivate` 显式 mount。
+5. 为全部七个特殊目录追加 `rbind,rprivate` 显式 mount；handoff 从不进入 Pod 或容器 mount namespace。
 6. 复用现有 `sysbox-mgr PrepMounts()` 完成 UID shifting，不再为这些目录申请 `/var/lib/sysbox/<kind>/<container-id>` 节点本地 volume。
 
 没有显式设置 `sysbox/persistent-special-mounts: "true"`、没有 rootfs annotation，或 rootfs entry 不匹配当前容器时，仍使用原来的节点本地 special volume。这样升级 Sysbox 不会改变旧 CKM 的挂载语义。两个注解都匹配的容器中，Docker、Kubelet、k0s、K3s agent、RKE2、BuildKit 和 standalone containerd overlay 全部使用同一 PVC 下的 `special/`。
@@ -61,7 +61,7 @@ Deployment `220` 完成了迁移、重建和再次重建验证：
 
 - `/var/lib/docker` source 为 Longhorn PVC 的 `/special-v4-220/special/docker`，FSTYPE 为 ext4，mount 带 `idmapped`。
 - K3s agent 和 standalone containerd overlay 目录也指向同一 PVC 的对应 `special/` 子目录。
-- admission 注入的 `/var/lib/sysbox/rootfs-special-volume/...` 已从最终 mountinfo 删除。
+- 业务 Pod YAML 和最终 mountinfo 均不包含 `/var/lib/sysbox/rootfs-special-volume/...`。
 - Docker `overlay2` 正常拉取并运行 `ccr.ccs.tencentyun.com/afan-public/nginx:latest`。
 - 外层 Pod 再次重建后 Docker marker 与镜像 metadata 均保留。
 

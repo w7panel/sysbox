@@ -10,9 +10,10 @@ import (
 var ErrRootfsRwLayerNotConfigured = errors.New("rootfs rw-layer not configured")
 
 const (
-	AnnotationRootfsRwLayer = "sysbox/rootfs-rw-layer"
-	SidecarMountPath        = "/var/lib/sysbox/rootfs-rw-volume"
-	SidecarContainerName    = "sysbox-rootfs"
+	AnnotationRootfsRwLayer           = "sysbox/rootfs-rw-layer"
+	AnnotationPersistentSpecialMounts = "sysbox/persistent-special-mounts"
+	SidecarMountPath                  = "/var/lib/sysbox/rootfs-rw-volume"
+	SidecarContainerName              = "sysbox-rootfs"
 )
 
 type RootfsRwLayerRequest struct {
@@ -20,6 +21,7 @@ type RootfsRwLayerRequest struct {
 	PodUID                  string
 	ContainerName           string
 	RootfsRwLayerAnnotation string
+	PersistentSpecialMounts bool
 }
 
 type IdentityResolver interface {
@@ -56,6 +58,20 @@ type PrepareRootfsRequest struct {
 type PreparedRootfs struct {
 	UpperDir string
 	WorkDir  string
+}
+
+type PersistentSpecialHandoff struct {
+	Version       int    `json:"version"`
+	SnapshotKey   string `json:"snapshotKey"`
+	PodUID        string `json:"podUID"`
+	ContainerName string `json:"containerName"`
+	VolumeName    string `json:"volumeName"`
+	PVCMountPath  string `json:"pvcMountPath"`
+}
+
+type PersistentSpecialHandoffStore interface {
+	Write(context.Context, PersistentSpecialHandoff) error
+	Remove(context.Context, string) error
 }
 
 type Intent struct {

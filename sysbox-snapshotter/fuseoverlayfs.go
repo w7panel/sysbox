@@ -271,7 +271,21 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 
 	}
 
-	return t.Commit()
+	if err := t.Commit(); err != nil {
+		return err
+	}
+	if o.rootfsHooks.HandoffStore != nil {
+		keys := []string{key}
+		if base := filepath.Base(key); base != key {
+			keys = append(keys, base)
+		}
+		for _, handoffKey := range keys {
+			if err := o.rootfsHooks.HandoffStore.Remove(ctx, handoffKey); err != nil {
+				log.G(ctx).WithError(err).WithField("snapshot", handoffKey).Warn("failed to remove persistent special handoff")
+			}
+		}
+	}
+	return nil
 }
 
 // Walk the committed snapshots.
@@ -518,6 +532,7 @@ type RootfsHooks struct {
 	MetadataResolver rootfs.MetadataResolver
 	PVCResolver      rootfs.PVCMountPathResolver
 	Preparer         rootfs.RootfsPreparer
+	HandoffStore     rootfs.PersistentSpecialHandoffStore
 }
 
 func WithRootfsHooks(hooks RootfsHooks) Opt {
@@ -561,6 +576,21 @@ func applyRootfsHook(ctx context.Context, hooks RootfsHooks, snapshotKey string,
 	})
 	if err != nil {
 		return nil, err
+	}
+	if request.PersistentSpecialMounts {
+		if hooks.HandoffStore == nil {
+			return nil, fmt.Errorf("persistent special handoff store is not configured")
+		}
+		if err := hooks.HandoffStore.Write(ctx, rootfs.PersistentSpecialHandoff{
+			Version:       rootfs.PersistentSpecialHandoffVersion,
+			SnapshotKey:   request.SnapshotKey,
+			PodUID:        request.PodUID,
+			ContainerName: request.ContainerName,
+			VolumeName:    spec.VolumeName,
+			PVCMountPath:  pvcMountPath,
+		}); err != nil {
+			return nil, err
+		}
 	}
 	return rewriteFuseOverlayMounts(mounts, prepared.UpperDir, prepared.WorkDir), nil
 }
