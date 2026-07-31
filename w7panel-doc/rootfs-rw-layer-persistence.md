@@ -18,7 +18,7 @@ rootfs 读写层持久化让用户通过 Pod annotation 为指定容器声明一
 4. 不实现跨镜像自动迁移或转换旧 `upper/`；同一 PVC/path 的复用由用户显式选择。
 5. 不通过停止时 rsync 或打包 merged rootfs 实现持久化。
 6. 不把业务容器可见 mount 或 `sysbox-runc` remount 作为主实现路径。
-7. 不使用文件型 Pod metadata registry；rootfs intent 来自 sidecar OCI spec 中的 `ROOTFS_RW_LAYER_SPEC`。
+7. 不使用文件型 Pod metadata registry；rootfs intent 来自业务容器 OCI spec 中转发的 `sysbox/rootfs-rw-layer` annotation，sidecar OCI spec 只用于解析 PVC mount source。
 
 ## 用户接口
 
@@ -66,10 +66,11 @@ spec:
 | 组件 | 当前职责 |
 |---|---|
 | Pod annotation | 用户声明目标业务容器、PVC Volume 与 Volume 内路径。 |
-| `sysbox-admission` | 校验 annotation，注入 canonical `sysbox-rootfs` sidecar，把 intent 写入 sidecar 的 `ROOTFS_RW_LAYER_SPEC` 环境变量。 |
-| `sysbox-snapshotter` | 作为 containerd proxy snapshotter，在 writable snapshot mount 返回前解析 intent 与 sidecar mount，改写 overlay `upperdir/workdir`。 |
-| `sysbox-snapshotter/rootfs.LocalPreparer` | 在 PVC-backed 路径下准备并校验 `upper/`、`work/`、`meta.json`。 |
-| `sysbox-runc`、`sysbox-fs`、`sysbox-mgr` | 继续承担既有 Sysbox runtime、proc/sys 虚拟化、user namespace 和管理职责；不作为 rootfs rw-layer 主实现。 |
+| `sysbox-admission` | 校验 annotation，注入 canonical `sysbox-rootfs` sidecar；PVC 只挂载到 sidecar，不挂载到业务容器。 |
+| `sysbox-snapshotter` | 从业务容器 OCI annotation 读取 intent，从 sidecar OCI mount 解析 PVC source，改写 overlay `upperdir/workdir`；启用 special 持久化时写入 root-only handoff。 |
+| `sysbox-snapshotter/rootfs.LocalPreparer` | 在 PVC-backed 路径下准备并校验 `upper/`、`work/`；不生成顶层 `meta.json`。 |
+| `sysbox-runc` | 消费 handoff，在同一 PVC 的 `upper/` 真实目标路径下创建空目录，并将 raw upper bind mount 回容器。 |
+| `sysbox-fs`、`sysbox-mgr` | 继续承担 proc/sys 虚拟化、user namespace、ID shifting 和既有管理职责。 |
 
 当前实现中，rootfs rw-layer 目录准备逻辑位于 `sysbox-snapshotter/rootfs`，不是 `sysbox-mgr` API。
 
@@ -81,25 +82,7 @@ spec:
 /var/lib/sysbox/rootfs-rw-volume/<volumeName>
 ```
 
-sidecar 不使用 `subPath`。这样 kubelet/CSI 会在节点侧完成 PVC 根目录挂载，`sysbox-snapshotter` 可以从 sidecar OCI mounts 中读取真实宿主 source path。
-
-同一个 sidecar 的 `ROOTFS_RW_LAYER_SPEC` 环境变量保存完整 intent：
-
-```json
-{
-  "version": 1,
-  "entries": [
-    {
-      "containerName": "c1",
-      "volumeName": "rootfs",
-      "path": "containers/c1",
-      "pvcClaimName": "sysbox-rootfs-pvc"
-    }
-  ]
-}
-```
-
-业务容器通过 `containerName` 匹配对应 entry。`sysbox-snapshotter` 不从 `volumeName` 猜测宿主路径，也不读取 Pod 文件型 registry；它只信任当前 Pod 的 sidecar OCI spec 与 OCI mounts。
+sidecar 不使用 `subPath`，也不携带 intent 环境变量。containerd 将 Pod 的 `sysbox/rootfs-rw-layer` annotation 转发到业务容器 OCI spec；snapshotter 用容器名匹配 annotation entry，再从当前 Pod 的 sidecar OCI mounts 解析真实宿主 source。它不从 `volumeName` 猜测路径，也不读取 Pod 文件型 registry。
 
 ## Snapshotter 数据路径
 
@@ -107,14 +90,13 @@ sidecar 不使用 `subPath`。这样 kubelet/CSI 会在节点侧完成 PVC 根�
 
 1. containerd 使用 `sysbox` proxy snapshotter 为 `sysbox-runc` runtime path 准备 writable snapshot。
 2. `sysbox-snapshotter` 根据 snapshot key 与 containerd labels 解析 Pod namespace、Pod name、Pod UID、业务容器名和 userns remap labels。
-3. `SidecarMetadataResolver` 读取当前 Pod 的 `sysbox-rootfs` sidecar OCI spec，并从 `ROOTFS_RW_LAYER_SPEC` 找到业务容器对应的 intent entry。
+3. `ContainerdIdentityResolver` 从业务容器 OCI spec 读取 `sysbox/rootfs-rw-layer`，`SidecarMetadataResolver` 按业务容器名找到 intent entry，并加载当前 Pod 的 `sysbox-rootfs` sidecar OCI spec。
 4. `PVCMountPathResolverFromSidecar` 从 sidecar OCI mounts 解析 `/var/lib/sysbox/rootfs-rw-volume/<volumeName>` 对应的宿主 source path。
 5. `LocalPreparer` 在 `<pvc-source>/<path>/` 下准备并校验：
 
 ```text
 upper/
 work/
-meta.json
 ```
 
 6. `sysbox-snapshotter` 只改写 overlay mount options 中的 `upperdir=` 与 `workdir=`，保持 `lowerdir=` 由 containerd / overlay snapshotter / idmapped mount 逻辑原样决定。
@@ -130,33 +112,34 @@ merged   = task rootfs
 
 ## 失败语义
 
-未配置 rootfs rw-layer 的容器走原生 overlay 行为。`SidecarMetadataResolver` 找不到 sidecar OCI spec、sidecar 中没有 `ROOTFS_RW_LAYER_SPEC`、或 intent 中没有当前业务容器 entry 时，都表示当前容器没有可信 rootfs rw-layer intent，snapshotter 返回原生 mounts。
+未配置 `sysbox/rootfs-rw-layer`，或 annotation 中没有当前业务容器 entry 时，容器走原生 overlay 行为。
 
-一旦从 `ROOTFS_RW_LAYER_SPEC` 解析出当前业务容器的 intent entry，后续错误必须 fail closed，不能静默回退到原生 overlay `upperdir/workdir`：
+一旦 OCI annotation 声明了当前业务容器，后续错误必须 fail closed，不能静默回退到原生 overlay `upperdir/workdir`：
 
-1. sidecar OCI spec malformed。
-2. `ROOTFS_RW_LAYER_SPEC` 解析失败或版本不支持。
+1. `sysbox/rootfs-rw-layer` JSON 格式错误。
+2. 当前 Pod 的 sidecar OCI spec 尚不可用或格式错误。
 3. intent entry 的 `path` 逃逸 PVC 根目录。
 4. intent entry 引用的 PVC mount 在 sidecar OCI mounts 中不存在。
 5. PVC mount source 为空。
-6. `LocalPreparer` 无法准备或校验 `upper/`、`work/`、`meta.json`。
+6. `LocalPreparer` 无法准备或校验 `upper/`、`work/`。
 
-因此，“sidecar spec 不可用”本身不是运行时策略分支：在 metadata 解析阶段它等价于没有可信 intent；在已获得 intent 后，PVC/mount 解析错误才是该 rootfs rw-layer 请求的 fail-closed 条件。
+因此，“sidecar spec 不可用”不是回退条件。已匹配到当前容器 entry 后，它会让本次容器创建失败，由 kubelet 重试；218 上全新 CKM 的首次启动曾触发一次该时序，随后自动恢复且没有把数据写入节点本地目录。
 
-## 元数据与复用
+## 目录复用与 metadata 边界
 
-`LocalPreparer` 在 backing root 下维护 `meta.json`。当前 metadata 用于记录该目录由 Sysbox 管理以及与本次请求相关的 namespace、Pod、容器、PVC/path、snapshot key、id mapping 等信息。
+`LocalPreparer` 当前不在 rootfs backing root 下生成或读取 `meta.json`。顶层只维护 `upper/` 与 `work/`；二者必须是实际目录，不能是 symlink 或普通文件。
 
 复用规则以当前实现为准：
 
-1. backing root 不存在时创建目录并初始化 `upper/`、`work/`、`meta.json`。
-2. backing root 已存在但没有 `meta.json`，且目录非空时 fail closed，避免复用外部数据。
-3. `upper/` 与 `work/` 必须存在或可创建，并满足 overlayfs 的基本目录要求。
-4. `meta.json` 是本地目录状态，不是 Pod 间 intent registry。
+1. backing root 不存在时创建 `upper/` 与 `work/`。
+2. backing root 已存在时复用合法的 `upper/` 与 `work/`；路径逃逸、symlink 或同名非目录对象会 fail closed。
+3. 同一个 PVC/path 不能被多个运行中容器并发用作同一 overlay upper/work，生命周期互斥由上层保证。
+
+当前实现的 PVC 中完全不使用 `meta.json`，也不创建独立 `special/`。七个目标直接位于 `upper/<容器内绝对路径>`；runc 每次根据代码中的固定语义和镜像配置动态计算目标，校验路径无逃逸、无 symlink、无普通文件且彼此不重叠。
 
 同一个 rootfs rw-layer 的复用身份是用户配置的 PVC-backed `volumeName + path`，不是容器镜像。Pod 使用相同 PVC/path 重建时，可以在不同镜像上复用已有 `upper/` 与 `work/`；这是当前持久化语义的一部分，用于允许用户显式保留 rootfs 写入状态。用户需要为不同生命周期或不希望共享状态的容器选择不同 `path`。
 
-当前实现保留 `imageChainID` 字段用于 metadata 记录与未来扩展，但 Kubernetes sidecar intent 路径不使用 image chain identity 拒绝跨镜像复用，也不把它作为解析 PVC 或匹配业务容器的主身份。
+当前实现不使用 image chain identity 拒绝跨镜像复用，也不把镜像身份作为解析 PVC 或匹配业务容器的主身份。
 
 ## Idmapped Mount 契约
 
@@ -191,8 +174,8 @@ merged   = task rootfs
 4. 验证 rootfs 写入、修改和 whiteout 仍然存在。
 5. 验证未配置该 annotation 的 sysbox 容器仍走原生 overlay 行为。
 6. 验证未注入 rootfs intent 的普通 sysbox pod 仍走原生 overlay 行为。
-7. 验证已解析到 rootfs intent 后，PVC mount 缺失、path 逃逸、非空外部目录等错误均 fail closed。
-7. 验证 `overlayutils` 与 idmapped mount capability 契约未回归。
+7. 验证已解析到 rootfs intent 后，PVC mount 缺失、path 逃逸、symlink 或同名非目录等错误均 fail closed。
+8. 验证 `overlayutils` 与 idmapped mount capability 契约未回归。
 
 集群验收时还应检查 `sysbox-snapshotter`、`sysbox-fs`、`sysbox-mgr` 日志，确认没有 panic、fatal、unsafe rootfs metadata key、snapshot prepare/unpack 错误或 sysbox-fs 旧容器注册状态误报。
 

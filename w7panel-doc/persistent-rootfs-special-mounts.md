@@ -1,6 +1,6 @@
-# Sysbox 持久 rootfs 的 PVC special 目录方案
+# Sysbox 持久 rootfs 的 Raw Upper 特殊挂载方案
 
-> 2026-07-30 更新：当前实现已从“取消特殊挂载、让数据直接进入 rootfs upper”调整为“在同一 PVC 内建立独立 `special/`，由 `sysbox-runc` bind mount”。本文后半部分保留的取消挂载测试是历史记录，不再代表当前实现。
+> 2026-07-31 更新：当前实现不再建立独立 `special/`，七个特殊目录直接使用 PVC rootfs 的 raw `upper/<容器目标路径>`。PVC source 通过 snapshotter root-only handoff 交给 runc，不出现在业务 Pod YAML。本文后半部分保留的旧方案测试仅用于追溯。
 
 ## 当前结论
 
@@ -14,48 +14,103 @@ sysbox/persistent-special-mounts: "true"
 ```text
 <PVC>/<annotation.path>/
 ├── upper/
-├── work/
-└── special/
-    ├── meta.json
-    ├── docker/
-    ├── kubelet/
-    ├── k0s/
-    ├── k3s-agent/
-    ├── rke2/
-    ├── buildkit/
-    └── containerd-overlay/
+│   ├── var/lib/docker/
+│   ├── var/lib/kubelet/
+│   ├── var/lib/k0s/
+│   ├── var/lib/rancher/k3s/agent/
+│   ├── var/lib/rancher/rke2/
+│   ├── var/lib/buildkit/
+│   └── var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/
+└── work/
 ```
 
 `sysbox-snapshotter` 从 `sysbox-rootfs` sidecar 解析目标 PVC，在宿主机 `/run/sysbox/rootfs-pvc-handoff/` 写入 root-only handoff。业务容器的 Pod YAML 和 OCI mount 列表都不再注入整块 PVC。`sysbox-runc` 在创建容器时完成以下操作：
 
 1. 先确认 `sysbox/persistent-special-mounts` 精确为 `"true"`，再用容器名、Pod UID 和 `sysbox/rootfs-rw-layer` 匹配当前 entry。
 2. 按 container ID 读取 handoff，校验 Pod UID、容器名、volumeName 及 source 确实属于当前 Pod 的 kubelet volume 目录。
-3. 首次用 `rsync -aHAX --numeric-ids --one-file-system` 把镜像预置内容复制到 staging 目录。
-4. 写入 `meta.json` 后原子 rename 为 `special/`；已有未标记目录、映射变化或初始化失败均阻止启动。
-5. 为全部七个特殊目录追加 `rbind,rprivate` 显式 mount；handoff 从不进入 Pod 或容器 mount namespace。
-6. 复用现有 `sysbox-mgr PrepMounts()` 完成 UID shifting，不再为这些目录申请 `/var/lib/sysbox/<kind>/<container-id>` 节点本地 volume。
+3. 在 layer 文件锁内幂等创建七个空的 raw upper 目标目录；不复制镜像 lowerdir 的预置内容，不生成 metadata。
+4. 校验目标没有路径逃逸、symlink、普通文件或父子重叠。
+5. 把 raw upper 目录以 `rbind,rprivate` bind mount 回相同容器路径，使内层运行时直接看到 Longhorn ext4；handoff 不进入 Pod 或容器 mount namespace。
+6. 复用现有 `sysbox-mgr PrepMounts()` 完成 idmapped/ownership 准备，不再申请 `/var/lib/sysbox/<kind>/<container-id>` 节点本地 volume。
 
-没有显式设置 `sysbox/persistent-special-mounts: "true"`、没有 rootfs annotation，或 rootfs entry 不匹配当前容器时，仍使用原来的节点本地 special volume。这样升级 Sysbox 不会改变旧 CKM 的挂载语义。两个注解都匹配的容器中，Docker、Kubelet、k0s、K3s agent、RKE2、BuildKit 和 standalone containerd overlay 全部使用同一 PVC 下的 `special/`。
+没有显式设置 `sysbox/persistent-special-mounts: "true"`、没有 rootfs annotation，或 rootfs entry 不匹配当前容器时，仍使用原来的节点本地 special volume。两个注解都匹配时，Docker、Kubelet、k0s、K3s agent、RKE2、BuildKit 和 standalone containerd overlay 全部直接使用同一 PVC 的 raw upper。
 
-### 为什么不直接使用 `upper/var/lib/...`
+### 为什么仍需要显式 bind
 
-`upper/` 是外层 `fuse-overlayfs` 的实现目录，不适合作为独立 bind source。直接使用它会绕过 merged-rootfs 语义，并让内层 overlayfs 仍依赖 overlay-on-FUSE。独立 `special/` 同时满足两个目标：数据仍在 rootfs PVC 的备份边界内，内层运行时目录又直接落在 Longhorn 卷的实际文件系统上。
+数据虽然位于 `upper/var/lib/...`，但容器若只通过 outer merged rootfs 访问，看到的仍是 FUSE。runc 因此把 raw upper 真实目录 bind mount 到相同容器路径；这样数据属于 outer upper 的备份边界，同时内层 Docker/K3s 获得 Longhorn ext4，避免 overlay-on-FUSE。该 bind 会遮盖镜像 lowerdir 在这些路径下的预置内容，这是当前明确选择；运行时镜像必须通过 registry/mirror 获取。
 
 ### K3s snapshotter 结论
 
-历史测试中 K3s 必须使用 `native`，是因为数据目录直接位于外层 FUSE rootfs，内层 kernel overlayfs 返回 `EINVAL`；不是因为“PVC 不能挂载 overlay”。新方案把 `special/k3s-agent` 直接 bind mount 到容器；节点侧 Longhorn volume 为 ext4 时，K3s `overlayfs` 已验证可用。
+历史测试中 K3s 必须使用 `native`，是因为数据目录位于外层 FUSE merged rootfs，内层 kernel overlayfs 返回 `EINVAL`。新方案把 `upper/var/lib/rancher/k3s/agent` 的 raw ext4 目录直接 bind mount 到容器，K3s 可继续使用 `overlayfs`。
 
 部署验证顺序为：
 
-1. 用 `findmnt -T /var/lib/rancher/k3s/agent` 确认 source 来自 PVC `special/k3s-agent`，FSTYPE 不是外层 `fuse.fuse-overlayfs`。
+1. 用 `findmnt -T /var/lib/rancher/k3s/agent` 确认 mount root 为 `/rootfs/upper/var/lib/rancher/k3s/agent`，FSTYPE 为 Longhorn ext4。
 2. 使用 K3s `overlayfs`，创建全新 Pod 并验证镜像解包、容器启动和重建。
-3. 检查 containerd 的 lowerdir、upperdir 和 workdir 均位于 PVC 的 `special/k3s-agent`。
+3. 检查内层 containerd 的 lowerdir、upperdir 和 workdir 均位于 PVC raw upper 的 K3s agent 树。
 
 ### 上线迁移约束
 
-线上旧 CKM 来自 `dev-v1-k3k-deployment`，其 PVC 直接挂载在 `/var/lib/rancher/k3s`。模板升级必须先停止旧 Pod，再把 PVC 顶层的 K3s 数据拆分到 `rootfs/upper/var/lib/rancher/k3s` 与 `rootfs/special/k3s-agent`，创建其余空 special 目录并生成与 runc 一致的 v3 `meta.json`，校验完成后才能删除旧布局并启动新模板。开发阶段生成的旧 metadata 不做原地兼容。
+线上旧 CKM 来自 `dev-v1-k3k-deployment`，其 PVC 直接挂载在 `/var/lib/rancher/k3s`。模板升级必须先停止旧 Pod，再把 PVC 顶层 K3s 数据迁移到 `rootfs/upper/var/lib/rancher/k3s`，创建其余空 raw upper 目标目录，完成 manifest 校验后才能删除旧布局并启动新模板。此前开发阶段的 `special/meta.json` 布局不兼容，测试必须使用全新 PVC。
 
 ### 218 集成验证结果
+
+#### 全新 CKM `ckm-z79us`
+
+2026-07-31 使用当前 `v3.4` 模板新建 `k3k-console-164315/ckm-z79us`，对应 10 GiB Longhorn PVC `pvc-f13cf644-a7e2-4cb9-bfdc-274d17a10520`。自动化测试结果：
+
+- CKM 最终为 `ready / Ready`，Server Pod 为 `2/2 Running`。
+- Pod YAML 不包含 `/var/lib/sysbox/rootfs-special-volume/...`。
+- Docker、Kubelet、k0s、K3s agent、RKE2、BuildKit、standalone containerd overlay 七个目录全部来自同一个 Longhorn ext4 PVC，mount 带 `idmapped`，容器内 root ownership 正确。
+- 分别在七个目录写入第一轮 marker，删除 Pod；新 Pod 全部读回后写入第二轮 marker，再次删除 Pod；第三个 Pod 再次读回全部 marker。
+- 首次启动曾出现一次 `sysbox sidecar oci spec unavailable`，kubelet 重试后恢复；后续两次重建和最终状态正常。该现象属于 sidecar OCI spec 可见性的启动时序，未造成数据回退到节点本地目录。
+
+复现命令：
+
+```bash
+KUBECONFIG=/root/.kube/218.config \
+NAMESPACE=k3k-console-164315 \
+DEPLOYMENT=k3k-ckm-z79us-server \
+CONTAINER=k3k-ckm-z79us-server \
+bash w7panel-doc/persistent-special-mount-test.sh
+```
+
+默认 `TEST_WAIT_MODE=exec`：每次重建后只等待目标业务容器进入 Running 且 `kubectl exec` 可用，不等待内层 K3s/coredns 使外层 Pod 达到 `2/2 Ready`。脚本仍重建两次并验证两轮 marker，同时把七个目录的 mount、ext4、idmapped、属主及 marker 操作合并到每个 Pod 一次 exec。218 上 `ckm-z79us` 两次重建实测约 14 秒完成。需要同时诊断 CKM Ready 时可设置 `TEST_WAIT_MODE=ready`，恢复原来的慢速等待。
+
+本地编译到目标集群测试拆为两个步骤：
+
+```bash
+# 1. 本地增量编译三个组件、构建并 push debug 镜像
+DEBUG_IMAGE=docker.cnb.cool/i0358/zpk/sysbox-debug-deploy:<tag> \
+bash w7panel-doc/build-sysbox.sh --debug-build
+
+# 2. 218 直接拉取镜像、原子安装并快速重建 CKM 两次
+KUBECONFIG=/root/.kube/218.config \
+TARGET_NODE=server1 \
+DEBUG_IMAGE=docker.cnb.cool/i0358/zpk/sysbox-debug-deploy:<tag> \
+TEST_NAMESPACE=k3k-console-164315 \
+TEST_DEPLOYMENT=k3k-ckm-z79us-server \
+TEST_CONTAINER=k3k-ckm-z79us-server \
+bash w7panel-doc/build-sysbox.sh --debug-test
+```
+
+`--debug-deploy` 保留为兼容入口，内部依次执行以上两个步骤。`--debug-test` 会逐一比较镜像内与宿主 `/usr/bin` 的二进制 SHA256，不一致立即失败。
+
+#### 二进制与镜像一致性
+
+218 宿主 `/usr/bin`、本地最新源码构建产物、可拉取的 debug 镜像以及节点缓存的 deploy 镜像内 artifact SHA256 全部一致：
+
+| 二进制 | SHA256 |
+|---|---|
+| `sysbox-runc` | `2dcb9a10cd87565c72573ab11f79e88dbed0e4871aadd3a94a8661859f1573bc` |
+| `sysbox-snapshotter` | `8d27db8f6d63bcdf8c479c87b84cd603e50d333a0e07f54cb5e1b81d3ca12918` |
+| `sysbox-admission` | `ac47fa2167ff26501ff85d186febb1120fc5b37f8e414511e6b1606042e4bcf0` |
+
+debug 镜像为 `docker.cnb.cool/i0358/zpk/sysbox-debug-deploy:rootfs-handoff-20260731-1`，远端 digest 为 `sha256:12e1ac6da5820a75359aba5740cf0535a8a52538df8d3b82597a55e863642467`，218 使用 `Always` 已验证可重新拉取。
+
+Deployment 当前引用的 `docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:rootfs-handoff-20260731-1` 在 server1 缓存中的 artifact 哈希也一致，但从 registry 重新拉取返回 `artifact not found`，现有 Pod 因 `IfNotPresent` 使用缓存仍可运行。发布或换节点前必须重新构建并 push deploy 镜像，不能把节点缓存视为可用发布物。admission 容器实际执行 hostPath 挂载的 `/host/usr/bin/sysbox-admission`，当前运行二进制已经过上述哈希确认。
+
+#### 历史 Deployment 验证
 
 Deployment `220` 完成了迁移、重建和再次重建验证：
 

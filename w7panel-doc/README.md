@@ -48,13 +48,13 @@
 
 | 脚本 | 用途 |
 |---|---|
-| [build-sysbox.sh](./build-sysbox.sh) | 构建、安装和配置 Sysbox |
+| [build-sysbox.sh](./build-sysbox.sh) | `--debug-build` 本地构建并 push；`--debug-test` 由目标节点拉取、安装和极速测试；`--debug-deploy` 兼容一键执行 |
 | [release.sh](./release.sh) | 构建 release、部署镜像和发布产物 |
 | [deploy-local-test.sh](./deploy-local-test.sh) | 本地源码构建、部署和 smoke test |
 | [deploy.sh](./deploy.sh) | 部署已发布镜像并运行 smoke test |
 | [uninstall.sh](./uninstall.sh) | 从 K3s 节点卸载 Sysbox |
 | [snapshot-test.sh](./snapshot-test.sh) | rootfs rw-layer 端到端测试 |
-| [persistent-special-mount-test.sh](./persistent-special-mount-test.sh) | PVC special 目录持久化与 Pod 重建测试 |
+| [persistent-special-mount-test.sh](./persistent-special-mount-test.sh) | PVC special 目录两次快速重建测试；默认只等业务容器可 exec，`TEST_WAIT_MODE=ready` 可恢复完整 Ready 等待 |
 | [test-pod.sh](./test-pod.sh) | 创建并验证 Sysbox 系统容器 |
 | [test-resource-view-pod.sh](./test-resource-view-pod.sh) | 验证容器内资源视图文件 |
 | [build-and-test-resource-view.sh](./build-and-test-resource-view.sh) | 构建并运行资源视图测试 |

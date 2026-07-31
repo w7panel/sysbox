@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# Verify that Sysbox special directories use the rootfs PVC and survive a Pod
-# recreation. This test restarts one Pod managed by the target Deployment.
+# Verify that Sysbox special directories use the rootfs PVC and survive two Pod
+# recreations. By default it waits only until the target container can exec;
+# use TEST_WAIT_MODE=ready when the whole Pod must become Ready between checks.
 #
 # Usage:
 #   KUBECONFIG=/root/.kube/218.config \
@@ -17,6 +18,7 @@ NAMESPACE="${NAMESPACE:-default}"
 DEPLOYMENT="${DEPLOYMENT:?DEPLOYMENT is required}"
 CONTAINER="${CONTAINER:-}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-300}"
+TEST_WAIT_MODE="${TEST_WAIT_MODE:-exec}"
 KUBECTL_BIN="${KUBECTL_BIN:-kubectl}"
 
 K=("${KUBECTL_BIN}" --kubeconfig "${KUBECONFIG}" --request-timeout=30s)
@@ -52,29 +54,31 @@ deployment_selector() {
     printf '%s\n' "${selector}"
 }
 
-ready_pod() {
+usable_pod() {
     local selector="$1"
     local excluded_uid="${2:-}"
     local deadline=$((SECONDS + TIMEOUT_SECONDS))
-    local pod uid ready deleting
+    local pod state uid deleting running ready
 
     while ((SECONDS < deadline)); do
         while read -r pod; do
             [[ -n "${pod}" ]] || continue
             pod="${pod#pod/}"
-            uid="$("${K[@]}" get pod -n "${NAMESPACE}" "${pod}" \
-                -o jsonpath='{.metadata.uid}' 2>/dev/null || true)"
-            ready="$("${K[@]}" get pod -n "${NAMESPACE}" "${pod}" \
-                -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
-            deleting="$("${K[@]}" get pod -n "${NAMESPACE}" "${pod}" \
-                -o jsonpath='{.metadata.deletionTimestamp}' 2>/dev/null || true)"
-            if [[ -n "${uid}" && "${uid}" != "${excluded_uid}" && "${ready}" == True && -z "${deleting}" ]]; then
+            state="$("${K[@]}" get pod -n "${NAMESPACE}" "${pod}" \
+                -o jsonpath="{.metadata.uid}|{.metadata.deletionTimestamp}|{.status.conditions[?(@.type=='Ready')].status}|{.status.containerStatuses[?(@.name=='${CONTAINER}')].state.running.startedAt}" \
+                2>/dev/null || true)"
+            IFS='|' read -r uid deleting ready running <<<"${state}"
+            [[ -n "${uid}" && "${uid}" != "${excluded_uid}" && -z "${deleting}" ]] || continue
+            if [[ "${TEST_WAIT_MODE}" == "ready" && "${ready}" != True ]]; then
+                continue
+            fi
+            if [[ -n "${running}" ]] && pod_exec "${pod}" true >/dev/null 2>&1; then
                 printf '%s\n' "${pod}"
                 return 0
             fi
         done < <("${K[@]}" get pod -n "${NAMESPACE}" -l "${selector}" \
             --sort-by=.metadata.creationTimestamp -o name 2>/dev/null || true)
-        sleep 2
+        sleep 1
     done
     return 1
 }
@@ -90,69 +94,63 @@ check_no_hidden_mount() {
     pass "Pod YAML has no rootfs-special-volume mount"
 }
 
-check_mounts() {
+check_and_update_markers() {
     local pod="$1"
-    local pair name path line
+    local expected_phase="$2"
+    local write_phase="$3"
+    local args=() pair
 
     for pair in "${SPECIAL_MOUNTS[@]}"; do
-        name="${pair%%|*}"
-        path="${pair#*|}"
-        line="$(pod_exec "${pod}" sh -c '
-            line="$(grep -F " /rootfs/special/$2 $1 " /proc/self/mountinfo | tail -1)"
-            [ -n "$line" ] || exit 1
-            printf "%s\n" "$line"
-        ' sh "${path}" "${name}")" || die "${path} is not mounted from PVC rootfs/special/${name}"
-        printf '  %s\n' "${line}"
+        args+=("${pair%%|*}" "${pair#*|}")
     done
-    pass "all seven special directories are PVC-backed"
-}
-
-check_ownership() {
-    local pod="$1"
-    local pair path owner
-
-    for pair in "${SPECIAL_MOUNTS[@]}"; do
-        path="${pair#*|}"
-        owner="$(pod_exec "${pod}" stat -c '%u:%g' "${path}")"
-        [[ "${owner}" == "0:0" ]] || die "${path} owner is ${owner}, want 0:0"
-    done
-    pass "all seven special directories have container root ownership"
-}
-
-write_markers() {
-    local pod="$1"
-    local phase="$2"
-    local pair path
-
-    for pair in "${SPECIAL_MOUNTS[@]}"; do
-        path="${pair#*|}"
-        pod_exec "${pod}" sh -c 'printf "%s\n" "$1:$2:$3" > "$3/$4"' \
-            sh "${TOKEN}" "${phase}" "${path}" "${MARKER}" || die "${path} is not writable"
-    done
-    pass "${phase} persistence markers written"
-}
-
-check_markers() {
-    local pod="$1"
-    local phase="$2"
-    local pair path actual
-
-    for pair in "${SPECIAL_MOUNTS[@]}"; do
-        path="${pair#*|}"
-        actual="$(pod_exec "${pod}" sh -c 'cat "$1/$2"' sh "${path}" "${MARKER}")"
-        [[ "${actual}" == "${TOKEN}:${phase}:${path}" ]] || die "marker mismatch under ${path}: ${actual}"
-    done
-    pass "all seven ${phase} markers survived Pod recreation"
-}
-
-remove_markers() {
-    local pod="$1"
-    local pair path
-
-    for pair in "${SPECIAL_MOUNTS[@]}"; do
-        path="${pair#*|}"
-        pod_exec "${pod}" rm -f "${path}/${MARKER}" >/dev/null
-    done
+    pod_exec "${pod}" sh -c '
+        set -eu
+        token="$1"
+        marker="$2"
+        expected_phase="$3"
+        write_phase="$4"
+        shift 4
+        expected_source=""
+        while [ "$#" -gt 0 ]; do
+            name="$1"
+            path="$2"
+            shift 2
+            line="$(grep -F " /rootfs/upper${path} ${path} " /proc/self/mountinfo | tail -1)"
+            [ -n "${line}" ] || { echo "missing PVC raw upper mount: ${path}" >&2; exit 1; }
+            case "${line}" in *idmapped*) ;; *) echo "mount is not idmapped: ${path}" >&2; exit 1;; esac
+            case "${line}" in *" - ext4 "*) ;; *) echo "mount is not ext4: ${path}" >&2; exit 1;; esac
+            source="$(printf "%s\n" "${line}" | awk "{for (i=1; i<=NF; i++) if (\$i == \"-\") {print \$(i+2); exit}}")"
+            [ -n "${source}" ] || { echo "mount source is empty: ${path}" >&2; exit 1; }
+            if [ -z "${expected_source}" ]; then
+                expected_source="${source}"
+            elif [ "${source}" != "${expected_source}" ]; then
+                echo "mount source mismatch: ${path}: ${source}, want ${expected_source}" >&2
+                exit 1
+            fi
+            owner="$(stat -c "%u:%g" "${path}")"
+            [ "${owner}" = "0:0" ] || { echo "owner mismatch: ${path}: ${owner}" >&2; exit 1; }
+            if [ -n "${expected_phase}" ]; then
+                actual="$(cat "${path}/${marker}")"
+                expected="${token}:${expected_phase}:${path}"
+                [ "${actual}" = "${expected}" ] || { echo "marker mismatch: ${path}: ${actual}" >&2; exit 1; }
+            fi
+            if [ -n "${write_phase}" ]; then
+                printf "%s\n" "${token}:${write_phase}:${path}" > "${path}/${marker}"
+            else
+                rm -f "${path}/${marker}"
+            fi
+            printf "  %s\n" "${line}"
+        done
+        printf "SOURCE=%s\n" "${expected_source}"
+    ' sh "${TOKEN}" "${MARKER}" "${expected_phase}" "${write_phase}" "${args[@]}" || \
+        die "batched special mount or marker validation failed for ${pod}"
+    pass "all seven special directories are PVC-backed ext4 idmapped mounts with root ownership"
+    if [[ -n "${expected_phase}" ]]; then
+        pass "all seven ${expected_phase} markers survived Pod recreation"
+    fi
+    if [[ -n "${write_phase}" ]]; then
+        pass "${write_phase} persistence markers written"
+    fi
 }
 
 main() {
@@ -164,38 +162,32 @@ main() {
             -o jsonpath='{.spec.template.spec.containers[0].name}')"
     fi
     selector="$(deployment_selector)"
-    pod="$(ready_pod "${selector}")" || die "no ready Pod found for ${DEPLOYMENT}"
+    [[ "${TEST_WAIT_MODE}" == "exec" || "${TEST_WAIT_MODE}" == "ready" ]] || \
+        die "TEST_WAIT_MODE must be exec or ready"
+    pod="$(usable_pod "${selector}")" || die "no usable Pod found for ${DEPLOYMENT}"
     pod_uid="$("${K[@]}" get pod -n "${NAMESPACE}" "${pod}" -o jsonpath='{.metadata.uid}')"
 
     info "initial Pod: ${NAMESPACE}/${pod}"
     check_no_hidden_mount "${pod}"
-    check_mounts "${pod}"
-    check_ownership "${pod}"
-    write_markers "${pod}" first
+    check_and_update_markers "${pod}" "" first
 
-    info "delete ${pod} and wait for a new ready Pod"
+    info "delete ${pod} and wait for a new usable Pod (${TEST_WAIT_MODE})"
     "${K[@]}" delete pod -n "${NAMESPACE}" "${pod}" --wait=false >/dev/null
-    second_pod="$(ready_pod "${selector}" "${pod_uid}")" || die "first replacement Pod did not become ready"
+    second_pod="$(usable_pod "${selector}" "${pod_uid}")" || die "first replacement Pod did not become usable"
     second_uid="$("${K[@]}" get pod -n "${NAMESPACE}" "${second_pod}" -o jsonpath='{.metadata.uid}')"
 
     info "first replacement Pod: ${NAMESPACE}/${second_pod}"
     check_no_hidden_mount "${second_pod}"
-    check_mounts "${second_pod}"
-    check_ownership "${second_pod}"
-    check_markers "${second_pod}" first
-    write_markers "${second_pod}" second
+    check_and_update_markers "${second_pod}" first second
 
-    info "delete ${second_pod} and wait for a second replacement Pod"
+    info "delete ${second_pod} and wait for a second usable Pod (${TEST_WAIT_MODE})"
     "${K[@]}" delete pod -n "${NAMESPACE}" "${second_pod}" --wait=false >/dev/null
-    third_pod="$(ready_pod "${selector}" "${second_uid}")" || die "second replacement Pod did not become ready"
+    third_pod="$(usable_pod "${selector}" "${second_uid}")" || die "second replacement Pod did not become usable"
 
     info "second replacement Pod: ${NAMESPACE}/${third_pod}"
     check_no_hidden_mount "${third_pod}"
-    check_mounts "${third_pod}"
-    check_ownership "${third_pod}"
-    check_markers "${third_pod}" second
-    remove_markers "${third_pod}"
-    pass "persistent special mount end-to-end test passed"
+    check_and_update_markers "${third_pod}" second ""
+    pass "persistent special mount end-to-end test passed (wait mode: ${TEST_WAIT_MODE})"
 }
 
 main "$@"

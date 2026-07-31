@@ -80,7 +80,7 @@ When `sysbox/persistent-special-mounts` is exactly `"true"`, `sysbox-snapshotter
 /run/sysbox/rootfs-pvc-handoff/<container-id-hash>.json
 ```
 
-`sysbox-runc` validates the handoff against the container ID, Pod UID, container name, volume name, and kubelet volume path, resolves the configured rw-layer directory, initializes `<path>/special`, and adds explicit mounts for all Sysbox special directories. The handoff is removed with the container snapshot and is never part of the Pod spec or container mount namespace.
+`sysbox-runc` validates the handoff against the container ID, Pod UID, container name, volume name, and kubelet volume path, resolves the configured rw-layer directory, creates the special targets directly under `<path>/upper`, and bind-mounts those raw upper directories back onto the corresponding container paths. The handoff is removed with the container snapshot and is never part of the Pod spec or container mount namespace.
 
 Without the explicit opt-in annotation, the sidecar still supports persistent rootfs `upper/work`, while Sysbox retains its legacy node-local special-directory behavior.
 
@@ -89,19 +89,17 @@ The resulting PVC layout is:
 ```text
 <PVC>/<path>/
 ├── upper/
-├── work/
-└── special/
-    ├── meta.json
-    ├── docker/
-    ├── kubelet/
-    ├── k0s/
-    ├── k3s-agent/
-    ├── rke2/
-    ├── buildkit/
-    └── containerd-overlay/
+│   ├── var/lib/docker/
+│   ├── var/lib/kubelet/
+│   ├── var/lib/k0s/
+│   ├── var/lib/rancher/k3s/agent/
+│   ├── var/lib/rancher/rke2/
+│   ├── var/lib/buildkit/
+│   └── var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/
+└── work/
 ```
 
-The separate `special/` tree is intentional. These directories are backed directly by the PVC filesystem rather than nested inside the FUSE overlay rootfs, while remaining part of the same PVC backup and restore boundary.
+There is no `special/` tree or `meta.json`. The raw upper directories are bind-mounted explicitly so inner Docker and K3s see the PVC's real filesystem rather than overlay-on-FUSE. Initial image contents under those paths are intentionally not copied; the bind targets start empty.
 
 ## Webhook Server
 

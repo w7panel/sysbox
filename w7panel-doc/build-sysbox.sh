@@ -6,7 +6,9 @@
 #   ./build-sysbox.sh           # 完整构建 + 安装
 #   ./build-sysbox.sh --install # 安装已构建的二进制
 #   ./build-sysbox.sh --config  # 仅配置 K3s containerd
-#   ./build-sysbox.sh --debug-deploy # 构建 runc/snapshotter/admission，经 node debug Pod 部署并测试
+#   ./build-sysbox.sh --debug-build  # 第一步：构建 runc/snapshotter/admission 并 push debug 镜像
+#   ./build-sysbox.sh --debug-test   # 第二步：目标节点拉取 debug 镜像、安装并测试
+#   ./build-sysbox.sh --debug-deploy # 兼容入口：依次执行 --debug-build 与 --debug-test
 #
 # 环境变量:
 #   GOPROXY   Go 模块代理 (默认: https://goproxy.cn,direct)
@@ -15,6 +17,7 @@
 #   TARGET_NODE 目标节点名 (--debug-deploy 必填)
 #   DEBUG_IMAGE debug Pod 镜像（构建后推送，默认见下方配置）
 #   TEST_NAMESPACE / TEST_DEPLOYMENT / TEST_CONTAINER 端到端测试目标
+#   TEST_WAIT_MODE=exec|ready 特殊目录测试等待策略（默认 exec）
 #   KEEP_DEBUG_POD=true 失败或结束后保留 debug Pod
 #
 # 仓库: https://github.com/w7panel/sysbox (w7panel 分支)
@@ -213,20 +216,42 @@ build_debug_components() {
 }
 
 build_and_push_debug_image() {
+    local temporary_docker_config=""
+    local command_status=0
+
     [[ "${DEBUG_IMAGE}" == docker.cnb.cool/i0358/zpk/*:* ]] || {
         error "DEBUG_IMAGE 必须使用 docker.cnb.cool/i0358/zpk/<name>:<tag>: ${DEBUG_IMAGE}"
         return 1
     }
     command -v docker >/dev/null 2>&1 || { error "本机未安装 docker"; return 1; }
 
+    # Some shared workspaces expose ~/.docker as read-only. Buildx writes
+    # activity metadata even for a normal docker build, so use an isolated
+    # config directory while preserving the existing registry login.
+    if [[ -z "${DOCKER_CONFIG:-}" ]]; then
+        temporary_docker_config="$(mktemp -d "${TMPDIR:-/tmp}/sysbox-docker-config.XXXXXX")"
+        if [[ -f "${HOME}/.docker/config.json" ]]; then
+            cp "${HOME}/.docker/config.json" "${temporary_docker_config}/config.json"
+        fi
+        export DOCKER_CONFIG="${temporary_docker_config}"
+    fi
+
     info "构建小型 debug 部署镜像: ${DEBUG_IMAGE}"
     docker build \
         -f "${SCRIPT_DIR}/Dockerfile.sysbox-debug-deploy" \
         -t "${DEBUG_IMAGE}" \
-        "${SYSBOX_DIR}"
-    info "推送 debug 部署镜像..."
-    docker push "${DEBUG_IMAGE}"
-    docker image inspect "${DEBUG_IMAGE}" --format '  image={{.Id}} size={{.Size}}'
+        "${SYSBOX_DIR}" || command_status=$?
+    if ((command_status == 0)); then
+        info "推送 debug 部署镜像..."
+        docker push "${DEBUG_IMAGE}" || command_status=$?
+    fi
+    if ((command_status == 0)); then
+        docker image inspect "${DEBUG_IMAGE}" --format '  image={{.Id}} size={{.Size}}' || command_status=$?
+    fi
+    if [[ -n "${temporary_docker_config}" ]]; then
+        rm -rf -- "${temporary_docker_config}"
+    fi
+    return "${command_status}"
 }
 
 # ─── 函数: 安装二进制 ──────────────────────────────────────────────
@@ -451,9 +476,19 @@ ensure_remote_containerd_annotations() {
 }
 
 verify_remote_debug_deploy() {
-    info "校验目标宿主二进制与服务..."
-    "${KUBECTL[@]}" -n "${DEBUG_NAMESPACE}" exec "${DEBUG_POD}" -- sh -c \
-        'sha256sum /host/usr/bin/sysbox-runc /host/usr/bin/sysbox-snapshotter /host/usr/bin/sysbox-admission'
+    info "校验目标宿主二进制与 debug 镜像逐字节一致..."
+    "${KUBECTL[@]}" -n "${DEBUG_NAMESPACE}" exec "${DEBUG_POD}" -- sh -c '
+        set -eu
+        for name in sysbox-runc sysbox-snapshotter sysbox-admission; do
+            image_sha="$(sha256sum "/sysbox-bin/${name}" | awk "{print \$1}")"
+            host_sha="$(sha256sum "/host/usr/bin/${name}" | awk "{print \$1}")"
+            [ "${image_sha}" = "${host_sha}" ] || {
+                echo "${name}: image=${image_sha} host=${host_sha}" >&2
+                exit 1
+            }
+            echo "${host_sha}  /host/usr/bin/${name}"
+        done
+    '
     "${KUBECTL[@]}" -n "${DEBUG_NAMESPACE}" exec "${DEBUG_POD}" -- \
         chroot /host systemctl is-active sysbox-fs sysbox-mgr sysbox-snapshotter
 
@@ -463,6 +498,7 @@ verify_remote_debug_deploy() {
         NAMESPACE="${TEST_NAMESPACE:-default}" \
         DEPLOYMENT="${TEST_DEPLOYMENT}" \
         CONTAINER="${TEST_CONTAINER:-${TEST_DEPLOYMENT}}" \
+        TEST_WAIT_MODE="${TEST_WAIT_MODE:-exec}" \
             bash "${SCRIPT_DIR}/persistent-special-mount-test.sh"
     else
         warn "未设置 TEST_DEPLOYMENT，仅完成宿主部署校验；设置后会自动运行特殊目录测试"
@@ -548,6 +584,13 @@ main() {
             ;;
         --verify)
             verify
+            ;;
+        --debug-build)
+            build_debug_components
+            build_and_push_debug_image
+            ;;
+        --debug-test)
+            debug_deploy
             ;;
         --debug-deploy)
             build_debug_components

@@ -22,7 +22,7 @@ COPY sysbox-admission ./sysbox-admission
 COPY sysbox-libs/containerdUtils ./sysbox-libs/containerdUtils
 
 WORKDIR /src/sysbox-admission
-RUN make sysbox-admission TARGET_ARCH="${TARGETARCH}" VERSION="${VERSION}" COMMIT="${REVISION}"
+RUN make -B sysbox-admission TARGET_ARCH="${TARGETARCH}" VERSION="${VERSION}" COMMIT="${REVISION}"
 
 FROM ${BASE_IMAGE}
 
