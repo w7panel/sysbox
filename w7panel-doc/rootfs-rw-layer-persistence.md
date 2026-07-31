@@ -69,7 +69,7 @@ spec:
 | `sysbox-admission` | 校验 annotation，注入 canonical `sysbox-rootfs` sidecar；PVC 只挂载到 sidecar，不挂载到业务容器。 |
 | `sysbox-snapshotter` | 从业务容器 OCI annotation 读取 intent，从 sidecar OCI mount 解析 PVC source，改写 overlay `upperdir/workdir`；启用 special 持久化时写入 root-only handoff。 |
 | `sysbox-snapshotter/rootfs.LocalPreparer` | 在 PVC-backed 路径下准备并校验 `upper/`、`work/`；不生成顶层 `meta.json`。 |
-| `sysbox-runc` | 消费 handoff，在同一 PVC 的 `upper/` 真实目标路径下创建空目录，并将 raw upper bind mount 回容器。 |
+| `sysbox-runc` | 消费 handoff；raw upper 目标首次缺失时从 merged image rootfs 一次性初始化，之后以 PVC 为准，并将其 bind mount 回容器。 |
 | `sysbox-fs`、`sysbox-mgr` | 继续承担 proc/sys 虚拟化、user namespace、ID shifting 和既有管理职责。 |
 
 当前实现中，rootfs rw-layer 目录准备逻辑位于 `sysbox-snapshotter/rootfs`，不是 `sysbox-mgr` API。
@@ -135,9 +135,9 @@ merged   = task rootfs
 2. backing root 已存在时复用合法的 `upper/` 与 `work/`；路径逃逸、symlink 或同名非目录对象会 fail closed。
 3. 同一个 PVC/path 不能被多个运行中容器并发用作同一 overlay upper/work，生命周期互斥由上层保证。
 
-当前实现的 PVC 中完全不使用 `meta.json`，也不创建独立 `special/`。七个目标直接位于 `upper/<容器内绝对路径>`；runc 每次根据代码中的固定语义和镜像配置动态计算目标，校验路径无逃逸、无 symlink、无普通文件且彼此不重叠。
+当前实现的 PVC 中完全不使用 `meta.json`，也不创建独立 `special/`。七个目标直接位于 `upper/<容器内绝对路径>`；runc 每次根据代码中的固定语义和镜像配置动态计算目标，校验路径无逃逸、无 symlink、无普通文件且彼此不重叠。目标目录首次缺失时，runc 在 bind mount 前从 merged image rootfs 对应目录一次性复制内容到 staging 目录后原子发布；若镜像目录不存在则发布空目录。
 
-同一个 rootfs rw-layer 的复用身份是用户配置的 PVC-backed `volumeName + path`，不是容器镜像。Pod 使用相同 PVC/path 重建时，可以在不同镜像上复用已有 `upper/` 与 `work/`；这是当前持久化语义的一部分，用于允许用户显式保留 rootfs 写入状态。用户需要为不同生命周期或不希望共享状态的容器选择不同 `path`。
+同一个 rootfs rw-layer 的复用身份是用户配置的 PVC-backed `volumeName + path`，不是容器镜像。Pod 使用相同 PVC/path 重建时，可以在不同镜像上复用已有 `upper/` 与 `work/`；这是当前持久化语义的一部分，用于允许用户显式保留 rootfs 写入状态。已有目标目录完全由 PVC 内容决定，镜像升级不会自动把新文件合并进来，也不会覆盖已有文件；用户需要为不同生命周期或不希望共享状态的容器选择不同 `path`。
 
 当前实现不使用 image chain identity 拒绝跨镜像复用，也不把镜像身份作为解析 PVC 或匹配业务容器的主身份。
 

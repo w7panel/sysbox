@@ -80,7 +80,7 @@ When `sysbox/persistent-special-mounts` is exactly `"true"`, `sysbox-snapshotter
 /run/sysbox/rootfs-pvc-handoff/<container-id-hash>.json
 ```
 
-`sysbox-runc` validates the handoff against the container ID, Pod UID, container name, volume name, and kubelet volume path, resolves the configured rw-layer directory, creates the special targets directly under `<path>/upper`, and bind-mounts those raw upper directories back onto the corresponding container paths. The handoff is removed with the container snapshot and is never part of the Pod spec or container mount namespace.
+`sysbox-runc` validates the handoff against the container ID, Pod UID, container name, volume name, and kubelet volume path, resolves the configured rw-layer directory, and bind-mounts raw upper directories back onto the corresponding container paths. When a raw upper directory is first created, runc seeds it once from the matching directory in the merged image rootfs before installing the bind mount. The handoff is removed with the container snapshot and is never part of the Pod spec or container mount namespace.
 
 Without the explicit opt-in annotation, the sidecar still supports persistent rootfs `upper/work`, while Sysbox retains its legacy node-local special-directory behavior.
 
@@ -99,7 +99,7 @@ The resulting PVC layout is:
 └── work/
 ```
 
-There is no `special/` tree or `meta.json`. The raw upper directories are bind-mounted explicitly so inner Docker and K3s see the PVC's real filesystem rather than overlay-on-FUSE. Initial image contents under those paths are intentionally not copied; the bind targets start empty.
+There is no `special/` tree or `meta.json`. The raw upper directories are bind-mounted explicitly so inner Docker and K3s see the PVC's real filesystem rather than overlay-on-FUSE. A missing raw upper directory is initialized once from the image directory (or created empty if that image directory is absent), then atomically published. Once the directory exists, its PVC state is authoritative: restarts and image upgrades never merge, overwrite, or re-seed it.
 
 ## Webhook Server
 

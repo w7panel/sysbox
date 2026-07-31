@@ -1,6 +1,8 @@
 FROM busybox:1.36
 
 COPY --chmod=0755 sysbox-runc/build/amd64/sysbox-runc /sysbox-bin/sysbox-runc
+COPY --chmod=0755 sysbox-mgr/build/sysbox-mgr /sysbox-bin/sysbox-mgr
+COPY --chmod=0755 sysbox-fs/build/amd64/sysbox-fs /sysbox-bin/sysbox-fs
 COPY --chmod=0755 sysbox-snapshotter/build/amd64/sysbox-snapshotter /sysbox-bin/sysbox-snapshotter
 COPY --chmod=0755 sysbox-admission/build/amd64/sysbox-admission /sysbox-bin/sysbox-admission
 

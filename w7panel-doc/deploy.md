@@ -97,6 +97,20 @@ docker save -o /tmp/sysbox-deploy-k3s.tar docker.cnb.cool/i0358/docker-images-ch
 k3s ctr images import /tmp/sysbox-deploy-k3s.tar
 ```
 
+## 当前本地源码构建并部署到指定节点
+
+`build-and-deploy-k8s.sh` 在当前主机直接编译五个 Sysbox 二进制，并通过轻量 `Dockerfile.sysbox-debug-deploy` 打包为 ZPK debug 镜像。它不执行 `sysbox-pkgr/deb generic`、不构建 `sysbox-pkgr/deb/ubuntu-jammy/Dockerfile`，也不使用 `Dockerfile.sysbox-k3s`。镜像由 `kubectl debug node/TARGET_NODE` 拉取，再将二进制原子复制到宿主机 `/usr/bin`。
+
+```bash
+KUBECONFIG=/root/.kube/218.config \
+TARGET_NODE=server1 \
+./w7panel-doc/build-and-deploy-k8s.sh
+```
+
+默认镜像为 `docker.cnb.cool/i0358/zpk/sysbox-debug-deploy:<git-sha>`。如果源码或任一子模块存在未提交内容，tag 会附加 `-dirty-<内容哈希>`，避免把本地修改伪装成已提交版本。可通过 `IMAGE_TAG` 明确指定 tag。
+
+脚本分七个阶段显示进度。它会逐一比较 `sysbox-runc`、`sysbox-mgr`、`sysbox-fs`、`sysbox-snapshotter`、`sysbox-admission` 的本地构建文件、debug 镜像内文件和目标节点 `/usr/bin` 文件的 SHA256；任一不一致都会失败。需要额外创建系统容器 smoke Pod 时设置 `RUN_SMOKE_TEST=true`。
+
 ## 验证命令
 
 ```bash

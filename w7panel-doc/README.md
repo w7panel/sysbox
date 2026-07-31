@@ -51,6 +51,7 @@
 | [build-sysbox.sh](./build-sysbox.sh) | `--debug-build` 本地构建并 push；`--debug-test` 由目标节点拉取、安装和极速测试；`--debug-deploy` 兼容一键执行 |
 | [release.sh](./release.sh) | 构建 release、部署镜像和发布产物 |
 | [deploy-local-test.sh](./deploy-local-test.sh) | 本地源码构建、部署和 smoke test |
+| [build-and-deploy-k8s.sh](./build-and-deploy-k8s.sh) | 从当前本地源码构建、推送 ZPK 镜像并部署到指定 K8s 节点；逐二进制 SHA256 校验 |
 | [deploy.sh](./deploy.sh) | 部署已发布镜像并运行 smoke test |
 | [uninstall.sh](./uninstall.sh) | 从 K3s 节点卸载 Sysbox |
 | [snapshot-test.sh](./snapshot-test.sh) | rootfs rw-layer 端到端测试 |

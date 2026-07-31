@@ -28,7 +28,7 @@ sysbox/persistent-special-mounts: "true"
 
 1. 先确认 `sysbox/persistent-special-mounts` 精确为 `"true"`，再用容器名、Pod UID 和 `sysbox/rootfs-rw-layer` 匹配当前 entry。
 2. 按 container ID 读取 handoff，校验 Pod UID、容器名、volumeName 及 source 确实属于当前 Pod 的 kubelet volume 目录。
-3. 在 layer 文件锁内幂等创建七个空的 raw upper 目标目录；不复制镜像 lowerdir 的预置内容，不生成 metadata。
+3. 在 layer 文件锁内初始化七个 raw upper 目标目录：目录首次缺失时，先从 merged image rootfs 的对应目录一次性复制到同级 staging 目录，再原子发布；镜像目录不存在时发布空目录。不生成 metadata。
 4. 校验目标没有路径逃逸、symlink、普通文件或父子重叠。
 5. 把 raw upper 目录以 `rbind,rprivate` bind mount 回相同容器路径，使内层运行时直接看到 Longhorn ext4；handoff 不进入 Pod 或容器 mount namespace。
 6. 复用现有 `sysbox-mgr PrepMounts()` 完成 idmapped/ownership 准备，不再申请 `/var/lib/sysbox/<kind>/<container-id>` 节点本地 volume。
@@ -37,7 +37,7 @@ sysbox/persistent-special-mounts: "true"
 
 ### 为什么仍需要显式 bind
 
-数据虽然位于 `upper/var/lib/...`，但容器若只通过 outer merged rootfs 访问，看到的仍是 FUSE。runc 因此把 raw upper 真实目录 bind mount 到相同容器路径；这样数据属于 outer upper 的备份边界，同时内层 Docker/K3s 获得 Longhorn ext4，避免 overlay-on-FUSE。该 bind 会遮盖镜像 lowerdir 在这些路径下的预置内容，这是当前明确选择；运行时镜像必须通过 registry/mirror 获取。
+数据虽然位于 `upper/var/lib/...`，但容器若只通过 outer merged rootfs 访问，看到的仍是 FUSE。runc 因此把 raw upper 真实目录 bind mount 到相同容器路径；这样数据属于 outer upper 的备份边界，同时内层 Docker/K3s 获得 Longhorn ext4，避免 overlay-on-FUSE。首次 bind 前已一次性复制镜像 lowerdir 的对应目录，避免 bind 遮盖预置内容；之后目录一旦存在就以 PVC 为准，重启或镜像升级都不会自动合并或覆盖。
 
 ### K3s snapshotter 结论
 
