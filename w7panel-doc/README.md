@@ -2,9 +2,69 @@
 
 在 **Debian 13 (trixie)** + **kernel 6.12** + **containerd 2.x** 环境下，从源码构建 Sysbox 并配置 K3s 使用 sysbox-runc 运行系统容器。
 
+## 文档导航
+
+### 构建、发布与部署
+
+| 文档 | 用途 |
+|---|---|
+| [README.md](./README.md) | 当前文件：源码构建、组件说明和 K3s/containerd 接入 |
+| [deploy.md](./deploy.md) | 早期 `v0.7.0-1` 打包、部署和验证记录 |
+| [helm.md](./helm.md) | Helm 安装、验证、升级和卸载 |
+| [snapshot-test.md](./snapshot-test.md) | rootfs 持久化部署与端到端测试 |
+| [problem.md](./problem.md) | 已知问题与修复入口 |
+
+### PVC rootfs 与特殊目录
+
+| 文档 | 用途 |
+|---|---|
+| [rootfs-rw-layer-persistence.md](./rootfs-rw-layer-persistence.md) | PVC-backed rootfs 的组件契约和数据流 |
+| [persistent-rootfs-special-mounts.md](./persistent-rootfs-special-mounts.md) | 当前 PVC `special/` 方案；后半部分保留历史方案记录 |
+| [sysbox-special-mounts-preload.svg](./sysbox-special-mounts-preload.svg) | 特殊目录、Pod 和 inner image preload 关系图 |
+| [sysbox-snapshotter-remap-ids-root-cause.md](./sysbox-snapshotter-remap-ids-root-cause.md) | snapshotter `remap-ids` 权限问题根因 |
+
+当前实现判断以代码和测试为准；专题文档中明确标为“历史”的章节仅用于追溯，不应作为部署依据。
+
+### 资源视图与隔离
+
+| 文档 | 用途 |
+|---|---|
+| [resource-view-isolation-change.md](./resource-view-isolation-change.md) | CPU、内存、uptime、pressure 等资源视图改动总览 |
+| [sysinfo.md](./sysinfo.md) | `sysinfo(2)` 本地虚拟化实现 |
+| [loadavg.md](./loadavg.md) | `/proc/loadavg` 与 LXCFS 对齐说明 |
+| [swaps.md](./swaps.md) | cgroup v2 swap 配置和验证 |
+| [sysbox-vs-lxcfs.md](./sysbox-vs-lxcfs.md) | Sysbox-FS 与 LXCFS 实现差异 |
+| [performance-analysis.md](./performance-analysis.md) | 性能问题、瓶颈和测试记录 |
+| [`diff/`](./diff/) | 各虚拟化文件的样例差异 |
+
+### 对外材料
+
+| 文档 | 用途 |
+|---|---|
+| [container-view-isolation-article.md](./container-view-isolation-article.md) | 完整技术文章 |
+| [container-view-isolation-wechat.md](./container-view-isolation-wechat.md) | 微信公众号精简版 |
+
+### 常用脚本
+
+| 脚本 | 用途 |
+|---|---|
+| [build-sysbox.sh](./build-sysbox.sh) | 构建、安装和配置 Sysbox |
+| [release.sh](./release.sh) | 构建 release、部署镜像和发布产物 |
+| [deploy-local-test.sh](./deploy-local-test.sh) | 本地源码构建、部署和 smoke test |
+| [deploy.sh](./deploy.sh) | 部署已发布镜像并运行 smoke test |
+| [uninstall.sh](./uninstall.sh) | 从 K3s 节点卸载 Sysbox |
+| [snapshot-test.sh](./snapshot-test.sh) | rootfs rw-layer 端到端测试 |
+| [persistent-special-mount-test.sh](./persistent-special-mount-test.sh) | PVC special 目录持久化与 Pod 重建测试 |
+| [test-pod.sh](./test-pod.sh) | 创建并验证 Sysbox 系统容器 |
+| [test-resource-view-pod.sh](./test-resource-view-pod.sh) | 验证容器内资源视图文件 |
+| [build-and-test-resource-view.sh](./build-and-test-resource-view.sh) | 构建并运行资源视图测试 |
+| [swaps.sh](./swaps.sh) | swap 配置和验证辅助工具 |
+| [check-lxcfs-swap.sh](./check-lxcfs-swap.sh) | 按 LXCFS 逻辑检查 swap accounting |
+| [lxcfs-virtual.sh](./lxcfs-virtual.sh) | 控制 LXCFS `/proc/loadavg` 虚拟化 |
+
 ---
 
-## 目录
+## 本文目录
 
 - [Sysbox 组件详解](#sysbox-组件详解)
 - [背景与问题](#背景与问题)
