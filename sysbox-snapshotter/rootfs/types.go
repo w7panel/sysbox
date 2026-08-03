@@ -10,10 +10,9 @@ import (
 var ErrRootfsRwLayerNotConfigured = errors.New("rootfs rw-layer not configured")
 
 const (
-	AnnotationRootfsRwLayer           = "sysbox/rootfs-rw-layer"
-	AnnotationPersistentSpecialMounts = "sysbox/persistent-special-mounts"
-	SidecarMountPath                  = "/var/lib/sysbox/rootfs-rw-volume"
-	SidecarContainerName              = "sysbox-rootfs"
+	AnnotationRootfsRwLayer = "sysbox/rootfs-rw-layer"
+	SidecarMountPath        = "/var/lib/sysbox/rootfs-rw-volume"
+	SidecarContainerName    = "sysbox-rootfs"
 )
 
 type RootfsRwLayerRequest struct {
@@ -21,7 +20,6 @@ type RootfsRwLayerRequest struct {
 	PodUID                  string
 	ContainerName           string
 	RootfsRwLayerAnnotation string
-	PersistentSpecialMounts bool
 }
 
 type IdentityResolver interface {
@@ -41,10 +39,12 @@ type RootfsPreparer interface {
 }
 
 type RootfsRwLayerSpec struct {
-	VolumeName  string
-	Path        string
-	Sidecar     bool
-	sidecarSpec *runtimespec.Spec
+	VolumeName              string
+	Path                    string
+	PersistentSpecialMounts bool
+	SpecialPath             []string
+	Sidecar                 bool
+	sidecarSpec             *runtimespec.Spec
 }
 
 type PrepareRootfsRequest struct {
@@ -79,8 +79,10 @@ type Intent struct {
 }
 
 type IntentEntry struct {
-	ContainerName string `json:"containerName"`
-	VolumeName    string `json:"volumeName"`
-	Path          string `json:"path"`
-	PVCClaimName  string `json:"pvcClaimName"`
+	ContainerName           string   `json:"containerName"`
+	VolumeName              string   `json:"volumeName"`
+	Path                    string   `json:"path"`
+	PersistentSpecialMounts bool     `json:"persistentSpecialMounts,omitempty"`
+	SpecialPath             []string `json:"specialPath,omitempty"`
+	PVCClaimName            string   `json:"pvcClaimName"`
 }

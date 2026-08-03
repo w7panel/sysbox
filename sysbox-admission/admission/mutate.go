@@ -12,8 +12,7 @@ import (
 )
 
 const (
-	AnnotationRootfsRwLayer           = "sysbox/rootfs-rw-layer"
-	AnnotationPersistentSpecialMounts = "sysbox/persistent-special-mounts"
+	AnnotationRootfsRwLayer = "sysbox/rootfs-rw-layer"
 )
 
 type Config struct {
@@ -25,9 +24,11 @@ type Mutator struct {
 }
 
 type RootfsRwLayerEntry struct {
-	Name       string `json:"name"`
-	VolumeName string `json:"volumeName"`
-	Path       string `json:"path"`
+	Name                    string   `json:"name"`
+	VolumeName              string   `json:"volumeName"`
+	Path                    string   `json:"path"`
+	PersistentSpecialMounts bool     `json:"persistentSpecialMounts,omitempty"`
+	SpecialPath             []string `json:"specialPath,omitempty"`
 }
 
 func NewMutator(config Config) *Mutator {
@@ -109,7 +110,48 @@ func validateEntry(spec *corev1.PodSpec, entry RootfsRwLayerEntry) error {
 	if err := validateRelativePath(entry.Path); err != nil {
 		return fmt.Errorf("container %s path invalid: %w", entry.Name, err)
 	}
+	if len(entry.SpecialPath) > 0 && !entry.PersistentSpecialMounts {
+		return fmt.Errorf("container %s specialPath requires persistentSpecialMounts", entry.Name)
+	}
+	paths := append([]string(nil), builtinSpecialPaths...)
+	for _, path := range entry.SpecialPath {
+		cleaned, err := validateSpecialPath(path)
+		if err != nil {
+			return fmt.Errorf("container %s specialPath %q invalid: %w", entry.Name, path, err)
+		}
+		for _, existing := range paths {
+			if pathsOverlap(cleaned, existing) {
+				return fmt.Errorf("container %s specialPath %q overlaps %q", entry.Name, path, existing)
+			}
+		}
+		paths = append(paths, cleaned)
+	}
 	return nil
+}
+
+var builtinSpecialPaths = []string{
+	"/var/lib/docker",
+	"/var/lib/kubelet",
+	"/var/lib/k0s",
+	"/var/lib/rancher/k3s",
+	"/var/lib/rancher/rke2",
+	"/var/lib/buildkit",
+	"/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs",
+}
+
+func validateSpecialPath(path string) (string, error) {
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("path must be absolute")
+	}
+	cleaned := filepath.Clean(path)
+	if cleaned == string(filepath.Separator) {
+		return "", fmt.Errorf("path must not be root")
+	}
+	return cleaned, nil
+}
+
+func pathsOverlap(left, right string) bool {
+	return left == right || strings.HasPrefix(left, right+string(filepath.Separator)) || strings.HasPrefix(right, left+string(filepath.Separator))
 }
 
 func findContainer(spec *corev1.PodSpec, name string) (int, bool) {

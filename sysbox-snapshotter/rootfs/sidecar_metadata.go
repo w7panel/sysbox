@@ -47,23 +47,37 @@ func (r *SidecarMetadataResolver) ResolveRootfsRwLayer(ctx context.Context, requ
 			}
 			return RootfsRwLayerSpec{}, err
 		}
-		return RootfsRwLayerSpec{VolumeName: entry.VolumeName, Path: entry.Path, sidecarSpec: sidecarSpec}, nil
+		return RootfsRwLayerSpec{
+			VolumeName:              entry.VolumeName,
+			Path:                    entry.Path,
+			PersistentSpecialMounts: entry.PersistentSpecialMounts,
+			SpecialPath:             append([]string(nil), entry.SpecialPath...),
+			sidecarSpec:             sidecarSpec,
+		}, nil
 	}
 	return RootfsRwLayerSpec{}, ErrRootfsRwLayerNotConfigured
 }
 
 func parsePodAnnotationIntent(raw string) (Intent, error) {
 	var entries []struct {
-		Name       string `json:"name"`
-		VolumeName string `json:"volumeName"`
-		Path       string `json:"path"`
+		Name                    string   `json:"name"`
+		VolumeName              string   `json:"volumeName"`
+		Path                    string   `json:"path"`
+		PersistentSpecialMounts bool     `json:"persistentSpecialMounts,omitempty"`
+		SpecialPath             []string `json:"specialPath,omitempty"`
 	}
 	if err := json.Unmarshal([]byte(raw), &entries); err != nil {
 		return Intent{}, fmt.Errorf("decode rootfs rw-layer annotation: %w", err)
 	}
 	intent := Intent{Entries: make([]IntentEntry, 0, len(entries))}
 	for _, entry := range entries {
-		intent.Entries = append(intent.Entries, IntentEntry{ContainerName: entry.Name, VolumeName: entry.VolumeName, Path: entry.Path})
+		intent.Entries = append(intent.Entries, IntentEntry{
+			ContainerName:           entry.Name,
+			VolumeName:              entry.VolumeName,
+			Path:                    entry.Path,
+			PersistentSpecialMounts: entry.PersistentSpecialMounts,
+			SpecialPath:             entry.SpecialPath,
+		})
 	}
 	return intent, nil
 }

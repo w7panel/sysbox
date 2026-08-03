@@ -40,10 +40,9 @@ func TestMutator_injectsSidecar_whenAnnotationIsValid(t *testing.T) {
 	require.Empty(t, mutated.Spec.Containers[1].VolumeMounts)
 }
 
-func TestMutator_doesNotInjectSpecialMountsWithoutExplicitOptIn(t *testing.T) {
+func TestMutator_keepsSpecialMountConfigScopedToAnnotationEntry(t *testing.T) {
 	mutator := newTestMutator()
 	pod := validRootfsPod()
-	delete(pod.Annotations, admission.AnnotationPersistentSpecialMounts)
 
 	mutated, err := mutator.Mutate(context.Background(), pod)
 
@@ -52,6 +51,26 @@ func TestMutator_doesNotInjectSpecialMountsWithoutExplicitOptIn(t *testing.T) {
 	require.Equal(t, admission.SidecarContainerName, mutated.Spec.Containers[2].Name)
 	require.Empty(t, mutated.Spec.Containers[0].VolumeMounts)
 	require.Empty(t, mutated.Spec.Containers[1].VolumeMounts)
+}
+
+func TestMutator_rejectsSpecialPathWithoutOptIn(t *testing.T) {
+	mutator := newTestMutator()
+	pod := validRootfsPod()
+	pod.Annotations[admission.AnnotationRootfsRwLayer] = `[{"name":"c1","volumeName":"rootfs","path":"containers/c1","specialPath":["/srv/data"]}]`
+
+	_, err := mutator.Mutate(context.Background(), pod)
+
+	require.ErrorContains(t, err, "specialPath requires persistentSpecialMounts")
+}
+
+func TestMutator_rejectsOverlappingSpecialPath(t *testing.T) {
+	mutator := newTestMutator()
+	pod := validRootfsPod()
+	pod.Annotations[admission.AnnotationRootfsRwLayer] = `[{"name":"c1","volumeName":"rootfs","path":"containers/c1","persistentSpecialMounts":true,"specialPath":["/var/lib/rancher/k3s/server"]}]`
+
+	_, err := mutator.Mutate(context.Background(), pod)
+
+	require.ErrorContains(t, err, "overlaps")
 }
 
 func TestMutator_injectsSidecar_whenPodNameIsEmpty(t *testing.T) {
@@ -145,10 +164,9 @@ func validRootfsPod() *corev1.Pod {
 			UID:       "pod-uid-123",
 			Annotations: map[string]string{
 				admission.AnnotationRootfsRwLayer: `[
-					{"name":"c1","volumeName":"rootfs","path":"containers/c1"},
+					{"name":"c1","volumeName":"rootfs","path":"containers/c1","persistentSpecialMounts":true,"specialPath":["/srv/data"]},
 					{"name":"c2","volumeName":"rootfs","path":"containers/c2"}
 				]`,
-				admission.AnnotationPersistentSpecialMounts: "true",
 			},
 		},
 		Spec: corev1.PodSpec{

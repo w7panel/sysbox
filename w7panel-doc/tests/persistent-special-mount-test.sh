@@ -29,7 +29,7 @@ SPECIAL_MOUNTS=(
     "docker|/var/lib/docker"
     "kubelet|/var/lib/kubelet"
     "k0s|/var/lib/k0s"
-    "k3s-agent|/var/lib/rancher/k3s/agent"
+    "k3s|/var/lib/rancher/k3s"
     "rke2|/var/lib/rancher/rke2"
     "buildkit|/var/lib/buildkit"
     "containerd-overlay|/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs"
@@ -115,8 +115,8 @@ check_and_update_markers() {
             name="$1"
             path="$2"
             shift 2
-            line="$(grep -F " /rootfs/upper${path} ${path} " /proc/self/mountinfo | tail -1)"
-            [ -n "${line}" ] || { echo "missing PVC raw upper mount: ${path}" >&2; exit 1; }
+			line="$(grep -F " /rootfs/special${path} ${path} " /proc/self/mountinfo | tail -1)"
+			[ -n "${line}" ] || { echo "missing PVC special mount: ${path}" >&2; exit 1; }
             case "${line}" in *idmapped*) ;; *) echo "mount is not idmapped: ${path}" >&2; exit 1;; esac
             case "${line}" in *" - ext4 "*) ;; *) echo "mount is not ext4: ${path}" >&2; exit 1;; esac
             source="$(printf "%s\n" "${line}" | awk "{for (i=1; i<=NF; i++) if (\$i == \"-\") {print \$(i+2); exit}}")"

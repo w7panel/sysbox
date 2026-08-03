@@ -24,10 +24,11 @@ metadata:
         {
           "name": "c1",
           "volumeName": "rootfs",
-          "path": "containers/c1"
+          "path": "containers/c1",
+          "persistentSpecialMounts": true,
+          "specialPath": ["/srv/data"]
         }
       ]
-    sysbox/persistent-special-mounts: "true"
 spec:
   runtimeClassName: sysbox-runc
   containers:
@@ -46,6 +47,8 @@ Each annotation entry has this meaning:
 | `name` | Target app container name. It must exist in `spec.containers`. |
 | `volumeName` | Name of a PVC-backed `spec.volumes[]` entry. |
 | `path` | Persistent rootfs rw-layer directory inside that PVC. It must be relative and must not escape the PVC root. |
+| `persistentSpecialMounts` | Optional per-container switch for PVC-backed special directories. Defaults to `false`. |
+| `specialPath` | Optional extra absolute, non-root paths. Requires `persistentSpecialMounts: true` and must not overlap built-in or custom paths. |
 
 Validation is fail-closed. The webhook denies the request when the annotation is invalid, a referenced container is missing, a referenced volume is not a PVC volume, a PVC claim name is empty, a container is configured more than once, or `path` is absolute or escapes through `..`.
 
@@ -67,39 +70,41 @@ The sidecar does not carry rootfs rw-layer intent in environment variables. Root
 
 ```toml
 [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.sysbox-runc]
-  pod_annotations = ["sysbox/rootfs-rw-layer", "sysbox/persistent-special-mounts"]
+  pod_annotations = ["sysbox/rootfs-rw-layer"]
 ```
 
 `sysbox-snapshotter` reads that OCI annotation for container intent and reads the `sysbox-rootfs` sidecar OCI mounts only to resolve each PVC's node-side mount path.
 
 ## Persistent Special Directories
 
-When `sysbox/persistent-special-mounts` is exactly `"true"`, `sysbox-snapshotter` writes the resolved PVC source to a root-only handoff under:
+When the matching rootfs entry has `persistentSpecialMounts: true`, `sysbox-snapshotter` writes the resolved PVC source to a root-only handoff under:
 
 ```text
 /run/sysbox/rootfs-pvc-handoff/<container-id-hash>.json
 ```
 
-`sysbox-runc` validates the handoff against the container ID, Pod UID, container name, volume name, and kubelet volume path, resolves the configured rw-layer directory, and bind-mounts raw upper directories back onto the corresponding container paths. When a raw upper directory is first created, runc seeds it once from the matching directory in the merged image rootfs before installing the bind mount. The handoff is removed with the container snapshot and is never part of the Pod spec or container mount namespace.
+`sysbox-runc` validates the handoff against the container ID, Pod UID, container name, volume name, and kubelet volume path, resolves the configured rw-layer directory, and bind-mounts raw special directories back onto the corresponding container paths. When a special directory is first created, runc seeds it once from the matching directory in the merged image rootfs before installing the bind mount. The handoff is removed with the container snapshot and is never part of the Pod spec or container mount namespace.
 
-Without the explicit opt-in annotation, the sidecar still supports persistent rootfs `upper/work`, while Sysbox retains its legacy node-local special-directory behavior.
+Without per-entry opt-in, that container still supports persistent rootfs `upper/work`, while Sysbox retains its legacy node-local special-directory behavior. Another container or sidecar cannot inherit the setting.
 
 The resulting PVC layout is:
 
 ```text
 <PVC>/<path>/
 ├── upper/
-│   ├── var/lib/docker/
-│   ├── var/lib/kubelet/
-│   ├── var/lib/k0s/
-│   ├── var/lib/rancher/k3s/agent/
-│   ├── var/lib/rancher/rke2/
-│   ├── var/lib/buildkit/
-│   └── var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/
-└── work/
+├── work/
+└── special/
+    ├── var/lib/docker/
+    ├── var/lib/kubelet/
+    ├── var/lib/k0s/
+    ├── var/lib/rancher/k3s/
+    ├── var/lib/rancher/rke2/
+    ├── var/lib/buildkit/
+    ├── var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/
+    └── srv/data/
 ```
 
-There is no `special/` tree or `meta.json`. The raw upper directories are bind-mounted explicitly so inner Docker and K3s see the PVC's real filesystem rather than overlay-on-FUSE. A missing raw upper directory is initialized once from the image directory (or created empty if that image directory is absent), then atomically published. Once the directory exists, its PVC state is authoritative: restarts and image upgrades never merge, overwrite, or re-seed it.
+There is no `meta.json`. The `special/` directories are bind-mounted explicitly so inner Docker and K3s see the PVC's real filesystem rather than overlay-on-FUSE. A missing directory is initialized once from the image directory (or created empty if absent), then atomically published. Existing PVC ownership, ACLs, and xattrs are never rewritten. Persistent special mounts bypass `sysbox-mgr` recursive ownership shifting and require idmapped mounts; startup fails if the source filesystem cannot provide them.
 
 ## Webhook Server
 

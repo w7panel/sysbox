@@ -50,12 +50,11 @@ func TestApplyRootfsHookWritesPersistentSpecialHandoff(t *testing.T) {
 	store := &fakeHandoffStore{}
 	hooks := RootfsHooks{
 		IdentityResolver: fakeIdentityResolver{request: rootfs.RootfsRwLayerRequest{
-			SnapshotKey:             "container-id",
-			PodUID:                  "pod-uid",
-			ContainerName:           "app",
-			PersistentSpecialMounts: true,
+			SnapshotKey:   "container-id",
+			PodUID:        "pod-uid",
+			ContainerName: "app",
 		}},
-		MetadataResolver: fakeMetadataResolver{spec: rootfs.RootfsRwLayerSpec{VolumeName: "rootfs", Path: "containers/app"}},
+		MetadataResolver: fakeMetadataResolver{spec: rootfs.RootfsRwLayerSpec{VolumeName: "rootfs", Path: "containers/app", PersistentSpecialMounts: true}},
 		PVCResolver:      fakePVCResolver{path: "/pvc"},
 		Preparer:         fakePreparer{prepared: rootfs.PreparedRootfs{UpperDir: "/pvc/upper", WorkDir: "/pvc/work"}},
 		HandoffStore:     store,
@@ -83,8 +82,8 @@ func TestApplyRootfsHookWritesPersistentSpecialHandoff(t *testing.T) {
 
 func TestApplyRootfsHookFailsWithoutPersistentSpecialHandoffStore(t *testing.T) {
 	hooks := RootfsHooks{
-		IdentityResolver: fakeIdentityResolver{request: rootfs.RootfsRwLayerRequest{SnapshotKey: "container-id", PodUID: "pod-uid", ContainerName: "app", PersistentSpecialMounts: true}},
-		MetadataResolver: fakeMetadataResolver{spec: rootfs.RootfsRwLayerSpec{VolumeName: "rootfs", Path: "containers/app"}},
+		IdentityResolver: fakeIdentityResolver{request: rootfs.RootfsRwLayerRequest{SnapshotKey: "container-id", PodUID: "pod-uid", ContainerName: "app"}},
+		MetadataResolver: fakeMetadataResolver{spec: rootfs.RootfsRwLayerSpec{VolumeName: "rootfs", Path: "containers/app", PersistentSpecialMounts: true}},
 		PVCResolver:      fakePVCResolver{path: "/pvc"},
 		Preparer:         fakePreparer{prepared: rootfs.PreparedRootfs{UpperDir: "/pvc/upper", WorkDir: "/pvc/work"}},
 	}

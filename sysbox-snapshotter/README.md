@@ -23,7 +23,7 @@ All runtime paths are explicit. `--socket` must match the containerd proxy plugi
 
 This project is intended to apply only to the `sysbox-runc` runtime path. The global CRI image snapshotter remains the host default, for example `overlayfs`.
 
-Configure containerd so only the `sysbox-runc` runtime uses this snapshotter. Also configure CRI to forward `sysbox/rootfs-rw-layer` and `sysbox/persistent-special-mounts` from Pod annotations into each container OCI spec. The second annotation makes the snapshotter write a root-only PVC handoff under `/run/sysbox/rootfs-pvc-handoff`; `sysbox-runc` consumes it to configure PVC-backed special directories without adding a PVC mount to the application Pod.
+Configure containerd so only the `sysbox-runc` runtime uses this snapshotter. Also configure CRI to forward `sysbox/rootfs-rw-layer` into each container OCI spec. A matching annotation entry with `persistentSpecialMounts: true` makes the snapshotter write a root-only PVC handoff under `/run/sysbox/rootfs-pvc-handoff`; `sysbox-runc` consumes it to configure PVC-backed special directories without adding a PVC mount to the application Pod.
 
 ```toml
 [proxy_plugins."sysbox"]
@@ -34,7 +34,7 @@ Configure containerd so only the `sysbox-runc` runtime uses this snapshotter. Al
 [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.sysbox-runc]
   runtime_type = "io.containerd.runc.v2"
   snapshotter = "sysbox"
-  pod_annotations = ["sysbox/rootfs-rw-layer", "sysbox/persistent-special-mounts"]
+  pod_annotations = ["sysbox/rootfs-rw-layer"]
 ```
 
 ## Remap Contract
@@ -69,7 +69,9 @@ metadata:
         {
           "name": "c1",
           "volumeName": "rootfs",
-          "path": "containers/c1"
+          "path": "containers/c1",
+          "persistentSpecialMounts": true,
+          "specialPath": ["/srv/data"]
         }
       ]
 spec:
@@ -90,6 +92,8 @@ Each annotation entry has this meaning:
 | `name` | Target app container name. |
 | `volumeName` | Name of a PVC-backed `spec.volumes[]` entry. |
 | `path` | Persistent rootfs rw-layer directory inside that PVC. |
+| `persistentSpecialMounts` | Optional per-container switch for PVC-backed special directories. |
+| `specialPath` | Optional extra absolute paths; requires the switch and may not overlap other special paths. |
 
 At runtime, `sysbox-snapshotter` reads the current container OCI annotation `sysbox/rootfs-rw-layer` to find the matching container entry. It uses containerd labels to find the current Pod's `sysbox-rootfs` sidecar OCI spec, but only to read sidecar OCI mounts and resolve `volumeName` to the exact node-side PVC source path.
 
@@ -102,6 +106,7 @@ When an annotation entry exists, the snapshotter prepares this layout under the 
 ```text
 upper/
 work/
+special/
 ```
 
 Existing `upper/` and `work/` paths must be directories and must not be symlinks. Symlink path components are rejected before creating or reusing the layer.

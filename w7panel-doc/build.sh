@@ -95,7 +95,10 @@ build_local() {
     make -C "${ROOT_DIR}/sysbox-runc"
     make -C "${ROOT_DIR}/sysbox-snapshotter"
     make -C "${ROOT_DIR}/sysbox-admission"
-    make -C "${ROOT_DIR}/sysbox-fs"
+    # sysbox-fs does not infer TARGET_ARCH when invoked from its subdirectory.
+    # Without these values it writes build/sysbox-fs, while the debug image
+    # packages build/amd64/sysbox-fs and can silently reuse a stale binary.
+    make -C "${ROOT_DIR}/sysbox-fs" SYS_ARCH=amd64 TARGET_ARCH=amd64
     make -C "${ROOT_DIR}/sysbox-mgr"
 
     for binary in "${BINARIES[@]}"; do

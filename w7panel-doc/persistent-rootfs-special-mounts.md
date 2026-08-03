@@ -1,57 +1,58 @@
-# Sysbox 持久 rootfs 的 Raw Upper 特殊挂载方案
+# Sysbox 持久 rootfs 的 Special 特殊挂载方案
 
-> 2026-07-31 更新：当前实现不再建立独立 `special/`，七个特殊目录直接使用 PVC rootfs 的 raw `upper/<容器目标路径>`。PVC source 通过 snapshotter root-only handoff 交给 runc，不出现在业务 Pod YAML。本文后半部分保留的旧方案测试仅用于追溯。
+> 2026-08-03 更新：特殊目录位于和 `upper/work` 平级的 `special/<容器目标路径>`。开关融合到每个 `sysbox/rootfs-rw-layer` entry，并支持可选 `specialPath`。PVC source 通过 snapshotter root-only handoff 交给 runc，不出现在业务 Pod YAML。
 
 ## 当前结论
 
-同时启用以下两个 annotation 的业务容器使用如下 PVC 布局：
+匹配以下 rootfs entry 的业务容器使用如下 PVC 布局：
 
 ```yaml
-sysbox/rootfs-rw-layer: '[{"name":"system","volumeName":"rootfs","path":"rootfs"}]'
-sysbox/persistent-special-mounts: "true"
+sysbox/rootfs-rw-layer: '[{"name":"system","volumeName":"rootfs","path":"rootfs","persistentSpecialMounts":true,"specialPath":["/srv/data"]}]'
 ```
 
 ```text
 <PVC>/<annotation.path>/
 ├── upper/
-│   ├── var/lib/docker/
-│   ├── var/lib/kubelet/
-│   ├── var/lib/k0s/
-│   ├── var/lib/rancher/k3s/agent/
-│   ├── var/lib/rancher/rke2/
-│   ├── var/lib/buildkit/
-│   └── var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/
-└── work/
+├── work/
+└── special/
+    ├── var/lib/docker/
+    ├── var/lib/kubelet/
+    ├── var/lib/k0s/
+    ├── var/lib/rancher/k3s/
+    ├── var/lib/rancher/rke2/
+    ├── var/lib/buildkit/
+    ├── var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/
+    └── srv/data/
 ```
 
 `sysbox-snapshotter` 从 `sysbox-rootfs` sidecar 解析目标 PVC，在宿主机 `/run/sysbox/rootfs-pvc-handoff/` 写入 root-only handoff。业务容器的 Pod YAML 和 OCI mount 列表都不再注入整块 PVC。`sysbox-runc` 在创建容器时完成以下操作：
 
-1. 先确认 `sysbox/persistent-special-mounts` 精确为 `"true"`，再用容器名、Pod UID 和 `sysbox/rootfs-rw-layer` 匹配当前 entry。
+1. 用容器名匹配 `sysbox/rootfs-rw-layer` 当前 entry，并确认该 entry 的 `persistentSpecialMounts` 为 `true`；其他容器和 sidecar 不继承此能力。
 2. 按 container ID 读取 handoff，校验 Pod UID、容器名、volumeName 及 source 确实属于当前 Pod 的 kubelet volume 目录。
-3. 在 layer 文件锁内初始化七个 raw upper 目标目录：目录首次缺失时，先从 merged image rootfs 的对应目录一次性复制到同级 staging 目录，再原子发布；镜像目录不存在时发布空目录。不生成 metadata。
+3. 在 layer 文件锁内初始化内置和 `specialPath` 指定的目标目录：目录首次缺失时，先从 merged image rootfs 的对应目录一次性复制到同级 staging 目录，再原子发布；镜像目录不存在时发布空目录。不生成 metadata。
 4. 校验目标没有路径逃逸、symlink、普通文件或父子重叠。
-5. 把 raw upper 目录以 `rbind,rprivate` bind mount 回相同容器路径，使内层运行时直接看到 Longhorn ext4；handoff 不进入 Pod 或容器 mount namespace。
-6. 复用现有 `sysbox-mgr PrepMounts()` 完成 idmapped/ownership 准备，不再申请 `/var/lib/sysbox/<kind>/<container-id>` 节点本地 volume。
+5. 把 special 目录以 `rbind,rprivate` bind mount 回相同容器路径，使内层运行时直接看到 Longhorn ext4；handoff 不进入 Pod 或容器 mount namespace。
+6. 这些 mount 不进入 `sysbox-mgr PrepMounts()`，禁止递归 chown 底层 PVC；只允许 idmapped mount，不支持时启动失败。不同 Pod 的 UID/GID 映射只改变 mount 视图，不改变底层文件的 UID/GID、ACL 和 xattr。
 
-没有显式设置 `sysbox/persistent-special-mounts: "true"`、没有 rootfs annotation，或 rootfs entry 不匹配当前容器时，仍使用原来的节点本地 special volume。两个注解都匹配时，Docker、Kubelet、k0s、K3s agent、RKE2、BuildKit 和 standalone containerd overlay 全部直接使用同一 PVC 的 raw upper。
+没有为当前 entry 设置 `persistentSpecialMounts: true`、没有 rootfs annotation，或 entry 不匹配当前容器时，仍使用原来的节点本地 special volume。启用后 Docker、Kubelet、k0s、完整 K3s data-dir、RKE2、BuildKit、standalone containerd overlay 和 `specialPath` 全部直接使用同一 PVC 的 special 树。
 
 ### 为什么仍需要显式 bind
 
-数据虽然位于 `upper/var/lib/...`，但容器若只通过 outer merged rootfs 访问，看到的仍是 FUSE。runc 因此把 raw upper 真实目录 bind mount 到相同容器路径；这样数据属于 outer upper 的备份边界，同时内层 Docker/K3s 获得 Longhorn ext4，避免 overlay-on-FUSE。首次 bind 前已一次性复制镜像 lowerdir 的对应目录，避免 bind 遮盖预置内容；之后目录一旦存在就以 PVC 为准，重启或镜像升级都不会自动合并或覆盖。
+容器若只通过 outer merged rootfs 访问特殊目录，看到的仍是 FUSE。runc 因此把 `special/` 的真实目录 bind mount 到相同容器路径，使内层 Docker/K3s 获得 Longhorn ext4，避免 overlay-on-FUSE。首次 bind 前会一次性复制镜像 lowerdir 的对应目录，避免 bind 遮盖预置内容；之后目录一旦存在就以 PVC 为准，重启或镜像升级都不会自动合并或覆盖。
 
 ### K3s snapshotter 结论
 
-历史测试中 K3s 必须使用 `native`，是因为数据目录位于外层 FUSE merged rootfs，内层 kernel overlayfs 返回 `EINVAL`。新方案把 `upper/var/lib/rancher/k3s/agent` 的 raw ext4 目录直接 bind mount 到容器，K3s 可继续使用 `overlayfs`。
+历史测试中 K3s 必须使用 `native`，是因为数据目录位于外层 FUSE merged rootfs，内层 kernel overlayfs 返回 `EINVAL`。新方案把 `special/var/lib/rancher/k3s` 的 ext4 目录直接 bind mount 到容器，K3s 可继续使用 `overlayfs`。
 
 部署验证顺序为：
 
-1. 用 `findmnt -T /var/lib/rancher/k3s/agent` 确认 mount root 为 `/rootfs/upper/var/lib/rancher/k3s/agent`，FSTYPE 为 Longhorn ext4。
+1. 用 `findmnt -T /var/lib/rancher/k3s` 确认 mount root 为 `/rootfs/special/var/lib/rancher/k3s`，FSTYPE 为 Longhorn ext4，并带 `idmapped`。
 2. 使用 K3s `overlayfs`，创建全新 Pod 并验证镜像解包、容器启动和重建。
 3. 检查内层 containerd 的 lowerdir、upperdir 和 workdir 均位于 PVC raw upper 的 K3s agent 树。
 
 ### 上线迁移约束
 
-线上旧 CKM 来自 `dev-v1-k3k-deployment`，其 PVC 直接挂载在 `/var/lib/rancher/k3s`。模板升级必须先停止旧 Pod，再把 PVC 顶层 K3s 数据迁移到 `rootfs/upper/var/lib/rancher/k3s`，创建其余空 raw upper 目标目录，完成 manifest 校验后才能删除旧布局并启动新模板。此前开发阶段的 `special/meta.json` 布局不兼容，测试必须使用全新 PVC。
+线上旧 CKM 来自 `dev-v1-k3k-deployment`，其 PVC 直接挂载在 `/var/lib/rancher/k3s`。模板升级必须先停止旧 Pod，再把 PVC 顶层 K3s 数据迁移到 `rootfs/special/var/lib/rancher/k3s`，创建其余 special 目标目录，完成内容、权限与 xattr manifest 校验后才能删除旧布局并启动新模板。当前格式不使用 `meta.json`。
 
 ### 218 集成验证结果
 

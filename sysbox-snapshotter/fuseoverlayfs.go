@@ -577,7 +577,7 @@ func applyRootfsHook(ctx context.Context, hooks RootfsHooks, snapshotKey string,
 	if err != nil {
 		return nil, err
 	}
-	if request.PersistentSpecialMounts {
+	if spec.PersistentSpecialMounts {
 		if hooks.HandoffStore == nil {
 			return nil, fmt.Errorf("persistent special handoff store is not configured")
 		}
