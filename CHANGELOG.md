@@ -1,9 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## [Unreleased] - unreleased
 ### Added
-* sysbox-deploy-k8s: add support for Kubernetes v1.36; the deployment script previously rejected this version through its supported-version whitelist.
+  * sysbox-deploy-k8s: add support for Kubernetes v1.36; the deployment script previously rejected this version through its supported-version whitelist.
+  * Fix Debian release packaging by keeping the unreleased changelog header in the format required by the package converter.
 
 ## [0.7.1] - 2026-07-28
 ### Added
