@@ -20,6 +20,7 @@
 |---|---|
 | [rootfs-rw-layer-persistence.md](./rootfs-rw-layer-persistence.md) | PVC-backed rootfs 的组件契约和数据流 |
 | [persistent-rootfs-special-mounts.md](./persistent-rootfs-special-mounts.md) | 当前 PVC `special/` 方案；后半部分保留历史方案记录 |
+| [volume-init.md](./volume-init.md) | 空 PVC 自动复制镜像目录内容的使用、边界与验收 |
 | [sysbox-special-mounts-preload.svg](./sysbox-special-mounts-preload.svg) | 特殊目录、Pod 和 inner image preload 关系图 |
 | [sysbox-snapshotter-remap-ids-root-cause.md](./sysbox-snapshotter-remap-ids-root-cause.md) | snapshotter `remap-ids` 权限问题根因 |
 
@@ -57,6 +58,7 @@
 | [tests/swaps.sh](./tests/swaps.sh) | swap 配置、accounting 检查和验证 |
 | [tests/snapshot-test.sh](./tests/snapshot-test.sh) | rootfs rw-layer 端到端测试 |
 | [tests/persistent-special-mount-test.sh](./tests/persistent-special-mount-test.sh) | PVC special 目录两次快速重建测试 |
+| [tests/volume-init-test.sh](./tests/volume-init-test.sh) | 空 PVC 首次目录初始化与重建不覆盖测试 |
 | [tests/lxcfs-virtual.sh](./tests/lxcfs-virtual.sh) | 控制 LXCFS `/proc/loadavg` 虚拟化 |
 
 在交互终端直接运行 `build.sh` 或 `deploy.sh` 会显示模式菜单，并提示输入所选模式的必需参数。CI、管道和其他非交互环境必须显式传入子命令及必需环境变量。
