@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+### Added
+* sysbox-deploy-k8s: add support for Kubernetes v1.36; the deployment script previously rejected this version through its supported-version whitelist.
+
 ## [0.7.1] - 2026-07-28
 ### Added
 * Support Sysbox on Ubuntu 24.04 with kernel 6.8+ under containerd 2.x; fixes sysfs mount failures ("mount through procfd: operation not permitted") during container/pod creation (issue #1013).

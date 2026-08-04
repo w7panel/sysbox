@@ -60,6 +60,7 @@ Sysbox is supported on the following Kubernetes versions:
 -   Kubernetes v1.33.\*
 -   Kubernetes v1.34.\*
 -   Kubernetes v1.35.\*
+-   Kubernetes v1.36.\*
 
 For consistency purposes, we strive to match the official Kubernetes' release
 cadence as closely as possible. This translates into previously supported
