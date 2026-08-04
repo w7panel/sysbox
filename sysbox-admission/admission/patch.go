@@ -18,6 +18,13 @@ func patchForPod(original *corev1.Pod, mutated *corev1.Pod) ([]byte, error) {
 	if !reflect.DeepEqual(original.Spec.Containers, mutated.Spec.Containers) {
 		patches = append(patches, jsonPatch{Op: "replace", Path: "/spec/containers", Value: mutated.Spec.Containers})
 	}
+	if !reflect.DeepEqual(original.Annotations, mutated.Annotations) {
+		op := "add"
+		if original.Annotations != nil {
+			op = "replace"
+		}
+		patches = append(patches, jsonPatch{Op: op, Path: "/metadata/annotations", Value: mutated.Annotations})
+	}
 	if reflect.DeepEqual(original.Labels, mutated.Labels) {
 		return json.Marshal(patches)
 	}

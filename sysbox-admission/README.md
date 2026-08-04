@@ -1,12 +1,15 @@
 # sysbox-admission
 
-`sysbox-admission` is the Kubernetes mutating admission webhook for Sysbox rootfs rw-layer persistence. It validates the `sysbox/rootfs-rw-layer` Pod annotation and injects a canonical `sysbox-rootfs` sidecar so `sysbox-snapshotter` can resolve PVC-backed rootfs upper/work directories safely. Application containers never receive the PVC mount directly.
+`sysbox-admission` is the Kubernetes mutating admission webhook for Sysbox. It validates the `sysbox/rootfs-rw-layer` Pod annotation and injects a canonical `sysbox-rootfs` sidecar so `sysbox-snapshotter` can resolve PVC-backed rootfs upper/work directories safely. For every `sysbox-runc` Pod it also generates trusted `sysbox/volume-init` metadata for writable PVC mounts, allowing sysbox-runc to initialize an empty PVC from the container image without an init container. Application containers never receive the rootfs PVC mount directly.
 
-The webhook handles Pods that meet all of these conditions:
+`sysbox/volume-init` is generated from ordinary application containers in the Pod spec and must not be configured by users. The webhook replaces any user-provided value. Init containers, read-only PVC mounts, block devices, and non-PVC volumes are excluded; file mounts are passed through unchanged by runc. For an empty directory PVC (allowing `lost+found`), runc copies the matching image directory once before mounting it. Existing data is never overwritten; when application containers share an empty PVC, the first one to initialize it supplies the data.
+
+The webhook handles Pods that meet both of these conditions:
 
 - The request is a Pod `CREATE` admission request.
 - `spec.runtimeClassName` is `sysbox-runc`.
-- `metadata.annotations["sysbox/rootfs-rw-layer"]` exists and is non-empty.
+
+The PVC initialization metadata is generated without requiring `sysbox/rootfs-rw-layer`. The rootfs sidecar is injected only when that annotation exists and is non-empty.
 
 It does not mutate workload resources such as Deployments directly. Put the annotation on the Pod template for controllers.
 

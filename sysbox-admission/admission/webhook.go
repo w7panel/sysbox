@@ -9,7 +9,7 @@ import (
 
 const WebhookName = "sysbox-webhook-mutator"
 
-const RootfsMatchConditionExpression = `has(object.metadata.annotations) && "sysbox/rootfs-rw-layer" in object.metadata.annotations && object.metadata.annotations["sysbox/rootfs-rw-layer"] != ""`
+const SysboxPodMatchConditionExpression = `has(object.spec.runtimeClassName) && object.spec.runtimeClassName == "sysbox-runc"`
 
 type WebhookConfig struct {
 	Name        string
@@ -39,7 +39,7 @@ func BuildMutatingWebhookConfiguration(config WebhookConfig) (*admissionregistra
 		ObjectMeta: metav1ObjectMeta(config.Name),
 		Webhooks: []admissionregistrationv1.MutatingWebhook{
 			{
-				Name:                    "rootfs-rw-layer.sysbox.nestybox.com",
+				Name:                    "pod.sysbox.nestybox.com",
 				AdmissionReviewVersions: []string{"v1"},
 				ClientConfig: admissionregistrationv1.WebhookClientConfig{
 					Service: &admissionregistrationv1.ServiceReference{
@@ -65,7 +65,7 @@ func BuildMutatingWebhookConfiguration(config WebhookConfig) (*admissionregistra
 				SideEffects:        &sideEffects,
 				TimeoutSeconds:     &timeoutSeconds,
 				MatchConditions: []admissionregistrationv1.MatchCondition{
-					{Name: "has-rootfs-rw-layer", Expression: RootfsMatchConditionExpression},
+					{Name: "uses-sysbox-runtime", Expression: SysboxPodMatchConditionExpression},
 				},
 			},
 		},

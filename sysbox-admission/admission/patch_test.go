@@ -60,6 +60,18 @@ func TestPatchForPod_addsLabels_whenOriginalLabelsNil(t *testing.T) {
 	]`, string(patch))
 }
 
+func TestPatchForPod_addsGeneratedAnnotations(t *testing.T) {
+	original := testPatchPod()
+	original.Annotations = nil
+	mutated := original.DeepCopy()
+	mutated.Annotations = map[string]string{AnnotationVolumeInit: `[{"name":"app","volumeName":"data","mountPath":"/data"}]`}
+
+	patch, err := patchForPod(original, mutated)
+
+	require.NoError(t, err)
+	require.JSONEq(t, `[{"op":"add","path":"/metadata/annotations","value":{"sysbox/volume-init":"[{\"name\":\"app\",\"volumeName\":\"data\",\"mountPath\":\"/data\"}]"}}]`, string(patch))
+}
+
 func testPatchPod() *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{

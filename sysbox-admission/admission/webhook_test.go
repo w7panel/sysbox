@@ -49,7 +49,7 @@ func TestBuildMutatingWebhookConfiguration_setsExactRulesAndMatchCondition(t *te
 	// Then: the webhook rules and match condition match the rootfs rw-layer contract.
 	require.NoError(t, err)
 	entry := webhook.Webhooks[0]
-	require.Equal(t, "rootfs-rw-layer.sysbox.nestybox.com", entry.Name)
+	require.Equal(t, "pod.sysbox.nestybox.com", entry.Name)
 	require.Equal(t, []string{"v1"}, entry.AdmissionReviewVersions)
 	require.Equal(t, admissionv1.SideEffectClassNone, *entry.SideEffects)
 	require.Equal(t, admissionv1.Fail, *entry.FailurePolicy)
@@ -61,6 +61,6 @@ func TestBuildMutatingWebhookConfiguration_setsExactRulesAndMatchCondition(t *te
 	require.Equal(t, []string{"v1"}, entry.Rules[0].Rule.APIVersions)
 	require.Equal(t, []string{"pods"}, entry.Rules[0].Rule.Resources)
 	require.Len(t, entry.MatchConditions, 1)
-	require.Equal(t, "has-rootfs-rw-layer", entry.MatchConditions[0].Name)
-	require.Equal(t, `has(object.metadata.annotations) && "sysbox/rootfs-rw-layer" in object.metadata.annotations && object.metadata.annotations["sysbox/rootfs-rw-layer"] != ""`, entry.MatchConditions[0].Expression)
+	require.Equal(t, "uses-sysbox-runtime", entry.MatchConditions[0].Name)
+	require.Equal(t, `has(object.spec.runtimeClassName) && object.spec.runtimeClassName == "sysbox-runc"`, entry.MatchConditions[0].Expression)
 }

@@ -151,6 +151,51 @@ func TestMutator_leavesPodUnchanged_whenRuntimeClassIsNotSysbox(t *testing.T) {
 	require.Empty(t, mutated.Spec.Containers[0].VolumeMounts)
 }
 
+func TestMutator_generatesVolumeInitAnnotationForWritablePVCMounts(t *testing.T) {
+	mutator := newTestMutator()
+	runtimeClass := "sysbox-runc"
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{admission.AnnotationVolumeInit: `[{"name":"forged"}]`}},
+		Spec: corev1.PodSpec{
+			RuntimeClassName: &runtimeClass,
+			InitContainers:   []corev1.Container{{Name: "init", VolumeMounts: []corev1.VolumeMount{{Name: "data", MountPath: "/seed", SubPath: "initial"}}}},
+			Containers: []corev1.Container{{Name: "app", VolumeMounts: []corev1.VolumeMount{
+				{Name: "data", MountPath: "/data"},
+				{Name: "readonly", MountPath: "/readonly", ReadOnly: true},
+				{Name: "cache", MountPath: "/cache"},
+			}}},
+			Volumes: []corev1.Volume{
+				{Name: "data", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "data-pvc"}}},
+				{Name: "readonly", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "readonly-pvc"}}},
+				{Name: "cache", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+			},
+		},
+	}
+
+	mutated, err := mutator.Mutate(context.Background(), pod)
+
+	require.NoError(t, err)
+	require.JSONEq(t, `[
+		{"name":"app","volumeName":"data","mountPath":"/data"}
+	]`, mutated.Annotations[admission.AnnotationVolumeInit])
+	require.Len(t, mutated.Spec.Containers, 1)
+}
+
+func TestMutator_removesForgedVolumeInitAnnotationWithoutWritablePVC(t *testing.T) {
+	mutator := newTestMutator()
+	runtimeClass := "sysbox-runc"
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{admission.AnnotationVolumeInit: `[{"name":"forged"}]`}},
+		Spec:       corev1.PodSpec{RuntimeClassName: &runtimeClass, Containers: []corev1.Container{{Name: "app"}}},
+	}
+
+	mutated, err := mutator.Mutate(context.Background(), pod)
+
+	require.NoError(t, err)
+	_, found := mutated.Annotations[admission.AnnotationVolumeInit]
+	require.False(t, found)
+}
+
 func newTestMutator() *admission.Mutator {
 	return admission.NewMutator(admission.Config{SandboxImage: testSandboxImage})
 }
