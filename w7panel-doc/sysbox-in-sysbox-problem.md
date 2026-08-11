@@ -1,0 +1,296 @@
+# Sysbox Pod 内运行 Sysbox 的局限与问题分析
+
+> 上游 Sysbox 不支持 Sysbox nesting。本文分析的方案仅用于 218 实验性
+> PoC，不应作为生产能力或多租户隔离方案启用。
+
+## 结论
+
+Sysbox Pod 中再次运行 Sysbox，只能获得受限的嵌套容器能力，无法获得完整的
+“系统容器套系统容器”语义。主要障碍不是单个程序缺陷，而是 Linux user
+namespace、procfs/sysfs mount、cgroup、netfilter 和 seccomp 的权限都受
+namespace 层级约束。
+
+当前 PoC 为了让 inner Pod 启动并获得可用的 `/proc`，最终让
+`sysbox-runc-inner` 不再创建第三层 user namespace。这样虽然绕过了 procfs
+mount 的内核限制，但 inner root 与 outer Sysbox Pod root 位于同一个 user
+namespace，失去了普通 Sysbox 最重要的一层隔离。因此该方案只能作为专用、
+受限的 nested runtime，不能视为完整 Sysbox。
+
+## 运行层级
+
+```text
+宿主机
+└─ outer Sysbox Pod user namespace
+   ├─ inner K3s
+   ├─ sysbox-mgr / sysbox-fs
+   └─ inner Sysbox Pod
+```
+
+这里至少涉及三个权限视角：
+
+1. 宿主机初始 user namespace；
+2. outer Sysbox Pod 的 user namespace；
+3. 原计划由 inner Sysbox Pod 创建的第三层 user namespace。
+
+Linux capability 不是全局布尔值。即使进程在容器中显示为 UID 0，也只能管理
+其 capability 生效范围内的资源。sysfs、cgroup、netfilter、mount superblock
+等资源如果由更高层 user namespace 拥有，inner root 仍会得到 `EPERM`。
+创建新的 mount 或 network namespace 也不会自动获得这些资源的管理权。
+
+## 核心局限
+
+| 局限 | 根因 | PoC 处理 | 造成的损失 |
+| --- | --- | --- | --- |
+| 无法正常创建第三层 user namespace | 子 UID/GID mapping 必须完全落在父 mapping 内；outer 只暴露 `0..65535` | 专用 handler 不创建第三层 userns | inner root 与 outer Pod root 处于同一 userns，隔离弱于普通 Sysbox |
+| procfs mount 返回 `EPERM` 或 `EINVAL` | inner userns 无权完成 procfs mount；outer Sysbox-FS 进入错误 userns 代理时语义不匹配 | 复用 outer userns 后挂载 `/proc` | 无法同时保留独立 userns 和可用 procfs |
+| sysfs/cgroup 不可正常初始化 | `/sys` 与 controller 由更高层 namespace 拥有，inner capability 对其无效 | 跳过部分 sysfs、cgroup 操作 | systemd 无法完成完整启动和服务管理 |
+| overlay mount 失败 | overlayfs mount 需要当前层级没有的挂载权限 | Docker 测试使用 `vfs` | 性能、空间利用率和语义都不同于正常 DIND |
+| Docker iptables 失败 | inner Pod 无权管理外层拥有的 netfilter 表 | dockerd 关闭 iptables 和 bridge | 无 Docker bridge、端口映射及标准容器网络 |
+| sysctl、只读路径检查无法执行 | proc/sys 与 sysfs 路径不具备普通系统容器语义 | nested handler 跳过这些步骤 | 不能保证 OCI sysctl 和只读路径配置生效 |
+| 特殊目录无法按普通方式准备 | `/var/lib/docker` 等目录需要 UID shifting 和 chown，目标 ID 不在父 mapping 中 | 跳过隐式特殊目录 mount 和 rootfs shifting | 数据目录隔离、属主、持久化和性能语义不完整 |
+| seccomp notifier 层级冲突 | inner runc 与 outer Sysbox-FS 同时处理 mount，请求 capability 和代理 namespace 不匹配 | 专用模式绕过部分 seccomp 路径 | 安全模型弱于普通 Sysbox |
+| daemon 生命周期不完整 | inner mgr/fs 只是 outer Pod 内的后台命令，不是系统服务 | 启动脚本等待 Unix socket | 缺少标准重启、健康检查、升级及故障恢复 |
+
+## UID/GID mapping 问题
+
+普通 Sysbox 通常需要至少 65536 个连续 subuid/subgid。outer Sysbox user
+namespace 只向 K3s 容器暴露 `0..65535`，因此存在以下冲突：
+
+- `100000:65536`：这些 ID 在父 namespace 中不可见；
+- `0:65536`：inner root 再次使用父 ID 0 会破坏预期隔离，并被相关路径拒绝；
+- `1:65535`：可以覆盖剩余父 ID，但不足普通 Sysbox 的完整 65536-ID 模型。
+
+尝试使用父 namespace 无法表示的 ID 时，runc 在创建或处理 `exec.fifo`、
+rootfs 和特殊目录时会出现：
+
+```text
+chown ...: invalid argument
+```
+
+这不是普通文件权限不足，而是内核无法把目标 UID/GID 翻译到父 namespace。
+早期 PoC 将 mgr 与 runc 的专用范围同步为 `1:65535`；最终为了恢复 procfs，
+专用 handler 进一步取消第三层 user namespace、OCI UID/GID mappings 和
+rootfs UID shifting。
+
+## procfs mount 问题
+
+inner runc 创建第三层 user namespace 后执行：
+
+```text
+mount("proc", "/proc", "proc", ...)
+```
+
+会被内核以 `EPERM` 拒绝。该请求还可能被 outer `sysbox-fs` 的 seccomp
+notifier 截获：
+
+- 直接让 inner 进程执行：返回 `EPERM`；
+- 代理进入全部 child namespaces：userns 语义不匹配，返回 `EINVAL`；
+- 在通用 `CAP_SYS_ADMIN` 预检中处理：inner runc 的 capability 对目标资源
+  无效，请求在代理前就被拒绝。
+
+早期通过跳过 procfs 让 Pod 进入 Running，但 `/proc` 是空目录，导致：
+
+```text
+free -h
+top -b -n 1
+ps -ef
+```
+
+全部失败。这种 Running 不能算验收成功。最终专用 handler 不再创建第三层
+userns，才恢复可用 procfs。218 已验证 `/proc/meminfo` 和 PID 目录包含真实
+数据。
+
+## sysfs、cgroup 与 systemd
+
+systemd 镜像可以让 `/sbin/init` 成为 PID 1，但这不代表 systemd 已完成系统
+初始化。实测 Pod 状态为 `1/1 Running`、PID 1 为 systemd，同时：
+
+```text
+systemctl is-system-running
+offline
+```
+
+原因是 inner 环境没有完整、可写且归当前 user namespace 管理的 sysfs/cgroup
+层级。相关初始化可能出现：
+
+```text
+mkdir: cannot create directory 'cpu': Read-only file system
+System has not been booted with systemd as init system
+```
+
+因此当前结果只能证明 `/sbin/init` 进程可以执行，不能证明 service manager、
+unit、journald、cgroup delegation 或服务自动拉起可用。
+
+## Docker daemon 问题
+
+在正确使用 `runtimeClassName: sysbox-runc-inner` 的 systemd 测试 Pod 中，
+Docker daemon 不会自动启动。默认启动 dockerd 时实测出现：
+
+```text
+could not setup daemon root propagation: operation not permitted
+failed to mount overlay: operation not permitted
+iptables ... Permission denied (you must be root)
+failed to create NAT chain DOCKER
+```
+
+这些错误分别来自 mount propagation、overlayfs 和 netfilter 的 namespace
+权限边界。容器内显示为 root 并不能取得这些外层资源的管理能力。
+
+为了只验证 image pull，PoC 使用：
+
+```sh
+dockerd \
+  --storage-driver=vfs \
+  --iptables=false \
+  --bridge=none
+```
+
+该配置能启动 Docker API，但不具备标准 Docker-in-Docker 语义：
+
+- 没有 overlay2；
+- 没有 Docker bridge；
+- 没有 iptables NAT；
+- 没有端口映射；
+- 未验证启动 Docker workload container。
+
+因此成功执行 `docker pull` 只证明 registry 访问和 content store 的最小路径
+可用，不能证明 DIND 已通过。
+
+## inner CNI、DNS 与外网问题
+
+inner K3s 使用的测试 CNI 配置为 `ipMasq:false`。Pod 地址位于
+`10.244.0.0/16`，如果 outer K3s network namespace 没有对应 SNAT，外部网络
+无法返回该源地址的响应。
+
+systemd/Docker 测试中还观察到 inner Pod 的 `/etc/resolv.conf` 指向：
+
+```text
+nameserver 10.43.0.10
+```
+
+当 inner CoreDNS 未就绪时，registry DNS 查询会一直超时。218 的最终 pull
+测试临时进行了两项环境修正：
+
+1. 在一次性测试 Pod 中补充 registry hosts 解析；
+2. 在 outer K3s Pod network namespace 为 `10.244.0.0/16` 增加临时
+   MASQUERADE。
+
+修正后成功拉取：
+
+```text
+ccr.ccs.tencentyun.com/afan-public/nginx:latest
+sha256:29cf9892ca1103e0b8c97db86f819fac1d9457b176bc77dd4f18ed2da4dd159f
+```
+
+DNS、CNI SNAT 和 registry 可达性属于测试环境问题，应与 inner runc 创建失败
+分开判断。
+
+## `/proc noexec` 与 inner CNI
+
+outer Sysbox 默认将 `/proc` 挂为 `noexec`，inner CNI 创建 network namespace
+时需要执行 `/proc/self/exe`，因此会因外层 mount flag 失败。
+
+PoC 增加了严格 opt-in：
+
+```yaml
+metadata:
+  annotations:
+    sysbox/allow-proc-exec: "true"
+```
+
+containerd 必须把该 key 同时放入 `pod_annotations` 和
+`container_annotations`，否则注解可能只到达 sandbox，实际 K3s workload
+OCI spec 无法收到。该选项会降低 outer Pod 的 `/proc` 隔离，只能用于本 PoC。
+
+## 静态二进制与最小 K3s 镜像
+
+K3s 镜像缺少普通发行版中的动态加载器和部分共享库。即使目标文件存在，执行
+动态 ELF 时也可能得到：
+
+```text
+not found
+exit status 127
+```
+
+这通常表示 ELF interpreter 或共享库不存在，而不是文件没有复制成功。当前
+helper 必须提供静态构建的：
+
+- `sysbox-runc`；
+- `sysbox-fs`；
+- `rsync`；
+- `fusermount3`。
+
+此外，K3s `/etc/os-release` 可能没有 `ID`，Sysbox 选择发行版路径前还需写入
+generic distro ID。
+
+## exec FIFO 卡死
+
+早期 nested handler 为绕过缺失 procfs，不能再通过 `/proc/self/fd` 重新打开
+`O_PATH` exec FIFO，因此改用 `O_RDWR` FIFO。一次修改过早关闭 writer，导致：
+
+1. init 已写入启动握手字节；
+2. writer 在 `runc start` 打开 reader 前关闭；
+3. start 侧没有读到握手字节；
+4. Pod 永久停在 `ContainerCreating`。
+
+恢复 FIFO writer 的短暂保留后，pause Pod 才重新启动成功。这属于专用 nested
+实现回归，不是网络或镜像拉取问题。
+
+## 需要区分的环境与时序问题
+
+以下错误会干扰测试，但不直接说明 Sysbox runtime 逻辑失败：
+
+| 现象 | 分类 | 原因 |
+| --- | --- | --- |
+| `serviceaccount "default" not found` | inner K3s 启动时序 | outer Pod Running 不代表 inner API 和 controller 已初始化完成 |
+| `RuntimeClass "sysbox-runc" not found` | outer 集群环境 | cluster-scoped RuntimeClass 被删除或尚未创建 |
+| CoreDNS、基础组件拉取超时 | 外部 registry/network | Docker Hub 或 DNS 不可达 |
+| registry 域名解析超时 | inner DNS | inner CoreDNS Service 无可用响应 |
+| registry HTTPS 建连超时 | inner CNI | `ipMasq:false`，Pod 出站流量没有 SNAT |
+| binary `not found` | 镜像运行环境 | K3s 镜像缺少 ELF interpreter 或共享库 |
+
+测试记录必须同时保留 Pod phase、事件、runc/mgr/fs 日志和网络证据，不能将
+“构建成功”“outer Pod Running”或“镜像已拉取”单独作为 inner Sysbox 验收
+成功。
+
+## 当前已证明的能力
+
+- outer Sysbox Pod 内可以命令方式启动 `sysbox-mgr` 和 `sysbox-fs`；
+- inner K3s、containerd 和基础 CNI 可以启动；
+- 专用 `sysbox-runc-inner` 可以启动最小 pause Pod；
+- inner Pod 的 `/proc` 可供 `free`、`top`、`ps` 使用；
+- systemd 测试镜像可以让 `/sbin/init` 成为 PID 1；
+- 使用 `vfs + no iptables + no bridge` 的受限 dockerd 可以完成指定
+  `docker pull`。
+
+## 尚未证明或当前不成立的能力
+
+- 独立的第三层 user namespace；
+- 与普通 Sysbox 等价的 root 隔离；
+- 完整 systemd service manager；
+- cgroup delegation 和 controller 管理；
+- Docker overlay2；
+- Docker bridge、iptables、端口映射；
+- 标准 Sysbox sysctl、sysfs、只读路径和特殊目录语义；
+- 普通 Docker workload container 的创建与运行；
+- 多租户安全与生产可用性；
+- daemon 的标准生命周期、升级和故障恢复。
+
+## 生产判断
+
+当前实现本质上是运行在 outer Sysbox user namespace 中的专用 runc 模式：
+保留 pid、ipc、uts、mount、network、cgroup、time 等 namespace，但取消第三层
+user namespace，并跳过多项普通 Sysbox 初始化步骤。
+
+该模式适合验证特定技术路径，不适合作为生产系统容器 runtime。最大的结构性
+风险是 inner root 与 outer K3s 共享 user namespace；后续通过继续跳过 mount、
+seccomp、sysctl、cgroup 检查无法恢复普通 Sysbox 的安全边界。
+
+若目标只是让 CKM 内工作负载获得可用隔离，优先考虑直接使用宿主提供的
+Sysbox RuntimeClass，或重新设计 outer/inner runtime 边界，而不是继续扩展
+Sysbox-in-Sysbox 特例。
+
+## 相关文档
+
+- [sysbox-in-sysbot.md](./sysbox-in-sysbot.md)：218 PoC 实现和逐轮测试记录；
+- [README.md](./README.md)：w7panel 文档索引。
