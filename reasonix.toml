@@ -1,0 +1,2 @@
+[permissions]
+allow = ["Bash=cd /root/workspace/sysbox && git diff --stat && echo \"---SUB RUNC---\" && git -C sysbox-runc status --short | head -30 && echo \"---SUB MGR---\" && git -C sysbox-mgr status --short | head -20 && echo \"---SUB FS---\" && git -C sysbox-fs status --short | head -30", "Bash=cd /root/workspace/sysbox/sysbox-runc && sed -n '675,700p' libcontainer/init_linux.go && echo \"===std_init 280-345===\" && sed -n '280,345p' libcontainer/standard_init_linux.go"]

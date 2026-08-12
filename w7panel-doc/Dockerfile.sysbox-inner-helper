@@ -1,0 +1,4 @@
+ARG BASE_IMAGE=docker.cnb.cool/i0358/zpk/sysbox-inner-k3s-copyhelper:20260811-85
+FROM ${BASE_IMAGE}
+
+COPY --chmod=0755 sysbox-pkgr/k8s/scripts/sysbox-inner-k3s.sh /payload/scripts/sysbox-inner-k3s.sh

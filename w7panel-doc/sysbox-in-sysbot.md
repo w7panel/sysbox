@@ -1,5 +1,7 @@
 # CKM 内层 K3s 运行 Sysbox（实验性 PoC）
 
+> 2026-08-11 更新：`sysbox-runc-inner` 与 inner `sysbox-mgr` 已实现 `--mapping-mode nested-identity`、独立 child userns 和 `0 0 65536`。真实 L1 Docker 验证随后确认，继承 L0 Sysbox seccomp user-notify listener 的进程树无法再创建 L1 listener（内核返回 `EBUSY`），因此完整 L2 systemd/Docker/K3s 尚未通过。原 `SYSBOX_SKIP_SPECIAL_MOUNTS=true`、共享 outer userns 和 `1:65535` allocator 路径仅保留为历史 PoC。
+
 > 上游 Sysbox 不支持 Sysbox nesting。本方案仅用于 218 验证，不可作为生产功能启用。
 
 ## 目标与边界
@@ -133,6 +135,7 @@ pause PoC，未覆盖生产系统容器语义。
 | helper `20260811-84` 的 inner `nested-sysbox-hostusers` 持续 `ContainerCreating`，且无容器启动事件 | containerd 已创建 shim，`sysbox-runc-inner` 已走完 `rootfsReadyAck`、`procReady`、`procRun`，随后卡在 exec FIFO；清理时移除了 O_RDWR FIFO writer 的短暂保留，`runc start` 因此无法读到握手字节。inner 基础组件同时有 Docker Hub 拉取超时，但测试 pause 镜像已成功拉取，不能将其误判为本 Pod 根因。 | 恢复专用模式在 FIFO 写入后的 2 秒保留；作为一次回归单独记录，待以新 helper 复测后再判定通过。 |
 | 2026-08-11 14:33 HKT，helper `20260811-85`；`bash w7panel-doc/tests/sysbox-in-sysbox-218.sh`；`nested-sysbox-hostusers` `1/1 Running` | inner Node `nested-poc` Ready，default ServiceAccount 存在；事件为 Scheduled/Pulled/Created/Started，无失败事件；`free -h` 显示 Mem total 60.5G/free 46.8G，`top` 与 `ps -ef` 可见 PID 1 及 exec 进程 | 先恢复被环境误删的 outer `RuntimeClass/sysbox-runc`，再强制 rollout 使 deployment 实际使用 `20260811-85`；inner RuntimeClass 创建成功，pause Pod 及 procfs 工具验收通过。 |
 | 2026-08-11 14:55 HKT，helper `20260811-85`；inner image `docker.cnb.cool/i0358/docker-images-chrom/nestybox-ubuntu-bionic-systemd-docker`；PID 1 `/sbin/init`；执行 `docker pull ccr.ccs.tencentyun.com/afan-public/nginx:latest` | `nested-systemd-docker` 为 `1/1 Running`，实际 `runtimeClassName=sysbox-runc-inner`。专用 handler 下 systemd 为 `offline`，dockerd 不会自动启动；默认 dockerd 又因 overlay mount 与 iptables 权限失败。inner CoreDNS 无响应，且 CNI 使用 `ipMasq:false`，外网连接没有 SNAT。 | 以 `dockerd --iptables=false --storage-driver=vfs --bridge=none` 启动仅用于 pull 的 daemon；测试 Pod 临时写入 registry hosts 解析，outer K3s Pod 临时增加 `10.244.0.0/16` MASQUERADE。pull 成功，image ID `sha256:9a9a9fd723f1...c4c43`，registry digest `sha256:29cf9892ca11...159f`。这只证明受限配置下可 pull，不代表完整 systemd/Docker-in-Docker 语义已通过。 |
+| 2026-08-12；临时 L1 `sysbox-nested-l1-v3`，当前构建 `sysbox-runc/sysbox-fs/sysbox-mgr`；L2 `nested-l2-v3` | L2 未进入容器进程：`failed to pre-register with sysbox-fs`。L1 `sysbox-fs` 日志先报缺少 `fusermount3`，补齐后又报 `fuse device not found`；L2 保持 `Created`，无 procfs、systemd 或 Docker 验收结果。 | 已保存 L1 日志与 inspect 到 `/tmp/sysbox-nested-handoff-20260812`，停止临时容器，并恢复宿主 `/usr/bin/sysbox-fs` 为 `sysbox-fs.host-original`。该次为 FUSE 设备/工具环境失败，不作为 seccomp listener 或 namespace 逻辑结论。 |
 
 ## 2026-08-11 最终验收（helper `20260811-83`）
 
@@ -171,3 +174,159 @@ ps -ef: 可见 PID 1 与 exec 进程
 | `w7panel-doc/tests/sysbox-in-sysbox-218.sh` | 新增：固定选择 Running outer Pod，等待 inner K3s 就绪后创建 RuntimeClass/pause Pod 并断言 Running。 |
 | `w7panel-doc/Dockerfile.sysbox-inner-helper` | 从已验证 helper 最小替换 runc/fs，确保 218 PoC 使用当前嵌套修复二进制。 |
 | `CHANGELOG.md`、`sysbox-runc/CHANGELOG.md`、`sysbox-mgr/CHANGELOG.md` | 记录改动、触发条件和预期效果。 |
+
+## 交接说明（2026-08-12）
+
+### 当前代码状态
+
+本轮工作仍未提交、未推送；根仓库及多个子模块均存在用户已有的未提交改动，接手时不得使用 `git reset --hard`、`git checkout --` 或批量清理。当前重点改动包括：
+
+- `sysbox-runc/libcontainer/nsenter/nsexec.c`：加入 namespace 的顺序调整。加入 `pid/mnt/net/...` 后最后才进入目标 user namespace，避免进入 L2 userns 后再 `setns(pid)` 返回 `EPERM`；同时保留 nsexec log pipe，以便 EOF 时输出实际失败点。
+- `sysbox-fs/nsenter/event.go`：将 `_LIBCONTAINER_LOGPIPE` 接入 nsenter 子进程，bootstrap 失败会带出 `setns`/同步错误，而不是只报告 `Error receiving first-child pid: EOF`。
+- `sysbox-fs/seccomp/{syscall.go,mount.go,umount.go}`：为 nested 请求选择目标 namespace 路径，并记录 proc/sysfs helper 错误。nested 挂载必须进入 L2 的 mount/pid namespace；不能把 L1 的 `/proc` bind 到 L2。
+- `sysbox-runc/libcontainer/rootfs_linux.go`：nested 模式在 rootfs early 阶段跳过 proc/sysfs 直接 mount，延迟到 init 进程发出 mount syscall 后由 seccomp-notify 处理。
+- `sysbox-runc/utils_linux.go` 与 `libsysbox/syscont/spec.go`：nested 仍跳过 L1 的 Sysbox-FS 特殊 FUSE 注入和 L1 mgr `FsState`，但必须生成 mount/umount 的 seccomp-notify 规则。
+- `sysbox-runc/libcontainer/init_linux.go`：nested 不允许安装第二个 seccomp-notify listener；内核会返回 `EBUSY`，因此尝试复用继承的 listener。
+- `sysbox-runc/libsysbox/syscont/spec_test.go`：专用 wrapper 不再删除 user namespace；nested-identity 必须始终创建新的 child userns。
+
+### 最新测试结论
+
+记录交接时宿主上的 `sysbox-mgr`、`sysbox-fs`、Docker 均为 `active`，但 `/usr/bin/sysbox-fs` 仍是本轮临时测试构建（其 SHA-256 与 `/tmp/sysbox-nested-bin/sysbox-fs` 相同），尚未恢复 `/tmp/sysbox-nested-bin/sysbox-fs.host-original`。接手后已保存日志、停止临时容器，并恢复宿主二进制；使用当前构建的静态 `sysbox-runc`、`sysbox-fs`、`sysbox-mgr` 在临时 L1 中测试：
+
+1. L1 使用 `nestybox-ubuntu-bionic-systemd-docker` 和 `/sbin/init` 启动成功，L1 映射为 `0 165536 65536`。
+2. L1 内 `unshare -Urnm` 的独立 `sysfs` 与 `proc` 挂载均已成功，证明 L0 seccomp listener、nsenter 和 mount helper 的 namespace 顺序修复有效。
+3. L2 首次启动曾在 `rootfs_linux.go` 直接挂载 sysfs 处失败：`mount through procfd: operation not permitted`；已改为延迟 mount。
+4. 恢复 L2 mount/umount seccomp-notify 规则后，L2 尝试自行安装第二个 listener，内核明确返回：`error loading seccomp filter: device or resource busy`。这证明“L2 独立安装第二个 listener”不可行；最终实现必须让 L1/L2 共享或由 L0 统一管理 listener，并且还要确认 seccomp-notify fd 是否能跨 clone/userns 正确传递。
+5. `sysbox-nested-l1-v3` 内的 `nested-l2-v3` 已进入 `running`，但 `/proc` 是空目录，`/proc/self/uid_map` 与 `/proc/1/comm` 均不存在，`systemctl is-system-running` 为 `offline`。这只证明 create/start 握手和容器进程存活，不能记作 systemd、Docker 或独立 procfs 验收通过。
+
+### 接手后的首要任务
+
+优先检查 `sysbox-runc` 的 seccomp-notify fd 生命周期：`process_linux.go` 中 L2 init 是否继承 L1 已安装的 listener fd，`standard_init_linux.go` 是否在 nested 模式错误地把 `SeccompNotif` 清空，父进程是否仍把 listener fd 注册到正确的 L0/L1 `sysbox-fs` tracer。目标是让 L2 的 `mount("proc")`、`mount("sysfs")`、`umount2` 被已有 listener 捕获，并由 L0 `sysbox-fs` 在 L2 mount/pid/user namespace 坐标中完成。
+
+可重复的最小验证命令（在 L1 内）：
+
+```sh
+mkdir -p /tmp/sys /tmp/proc
+unshare -Urnm sh -c 'mount -t sysfs sysfs /tmp/sys'
+unshare -Urnm sh -c 'mount -t proc proc /tmp/proc'
+```
+
+完整 L2 验收必须同时检查：
+
+```sh
+cat /proc/self/uid_map          # nested-identity 目标为 0 0 65536
+cat /proc/1/comm                # 应为 systemd，而不是 L1 的 PID 1
+mount | grep -E ' on /(proc|sys) '
+systemctl is-system-running
+systemctl is-active docker
+docker pull ccr.ccs.tencentyun.com/afan-public/nginx:latest
+```
+
+### 构建、替换与恢复
+
+Go 缓存应放在 `/tmp`，避免写入只读的 `/root/go`。静态产物输出到 `/tmp/sysbox-nested-bin`，再挂入测试 L1。若临时替换宿主 `/usr/bin/sysbox-fs`，必须先备份并在测试结束恢复：
+
+```sh
+install -m 0755 /usr/bin/sysbox-fs /tmp/sysbox-nested-bin/sysbox-fs.host-original
+install -m 0755 /tmp/sysbox-nested-bin/sysbox-fs /usr/bin/sysbox-fs
+systemctl restart sysbox-fs
+
+# 测试结束
+install -m 0755 /tmp/sysbox-nested-bin/sysbox-fs.host-original /usr/bin/sysbox-fs
+systemctl restart sysbox-fs
+systemctl is-active sysbox-mgr sysbox-fs docker
+```
+
+临时容器命名通常使用 `sysbox-nested-l1-v3` 和 `nested-l2-v3`；清理前先确认状态和日志，避免在 sysbox-fs 正在处理 FUSE 请求时强制删除导致宿主服务卡住。所有测试记录需注明时间、helper 构建版本、L1 是否使用 `seccomp=unconfined`、L2 Pod/容器状态、关键错误和恢复动作。
+
+## 交接补充（2026-08-12 后续测试）
+
+### 本轮代码变更
+
+为解决 L2 rootfs 初始化阶段直接挂载 proc/sysfs 返回 `EPERM`，`sysbox-runc/libcontainer/standard_init_linux.go` 新增 `mountNestedSpecialFilesystems()`：在 L2 完成 rootfs 初始化并向父 runc 发送 `rootfsReady`、完成 sysbox-fs 注册后，按 OCI mount 配置主动发出 procfs/sysfs mount syscall。设计意图是让已有的 seccomp-notify listener 捕获这些 syscall，再由 sysbox-fs 在 L2 的 mount/pid namespace 中处理。
+
+同时保留以下约束：
+
+- nested rootfs early 阶段不直接 mount proc/sysfs；
+- nested 不注入 L1 的 Sysbox-FS 特殊 FUSE mount，也不读取 L1 mgr `FsState`；
+- nested 不安装第二个 seccomp-notify listener。内核实测第二次安装返回 `EBUSY`（`device or resource busy`）；
+- nested 必须创建 child user namespace，映射目标为 `0 0 65536`；
+- nsexec 加入 namespace 时最后进入 user namespace，避免进入 L2 userns 后再加入 PID/mount namespace 导致 `EPERM`。
+
+相关构建测试通过：
+
+```sh
+GOPATH=/tmp/sysbox-go-path \
+GOCACHE=/tmp/sysbox-go-build \
+GOMODCACHE=/tmp/sysbox-go-mod \
+go test -vet=off ./libcontainer/specconv ./libsysbox/syscont \
+  ./libcontainer/cgroups/fs2 ./libcontainer/cgroups/systemd
+```
+
+### 最新临时 L1/L2 测试结果
+
+当前临时容器为 `sysbox-nested-l1-v3`，其 L2 测试容器为 `nested-l2-v3`。L1 使用 `/sbin/init` 启动，inner `sysbox-mgr` 已能在安装 `rsync` 后创建 `/run/sysbox/sysmgr.sock`。但 L2 尚未进入 runc 挂载验证，最新失败发生在 inner sysbox-fs pre-registration：
+
+```text
+fusermount3: fuse device not found, try 'modprobe fuse' first
+Container pre-registration error: unable to initialize fuseServer
+```
+
+此前还出现过：
+
+```text
+fusermount: exec: "fusermount3": executable file not found in $PATH
+```
+
+因此这次失败属于测试镜像/运行环境依赖问题，不是 proc/sysfs 延迟挂载逻辑本身。L1 必须同时满足：
+
+```sh
+test -c /dev/fuse
+command -v fusermount3
+rsync --version
+```
+
+旧版 Ubuntu 镜像通常只有 `/bin/fusermount`；可在测试环境建立 `fusermount3 -> /bin/fusermount`，但仍必须确认 `/dev/fuse` 在 inner L1 内可用，并且 FUSE 设备/模块权限没有被外层 seccomp 或设备策略拦截。若 `fusermount3` 报 `fuse device not found`，应先检查：
+
+```sh
+ls -l /dev/fuse
+test -e /sys/module/fuse || modprobe fuse
+```
+
+不能把此状态记录为 L2 启动成功。
+
+### 继续测试顺序
+
+1. 在全新 L1 中确认 `/dev/fuse`、`fusermount3`、`rsync`，再启动 inner mgr/fs；不要在 Docker daemon 重启后假定手工启动的 inner 服务仍存在。
+2. 确认 `/run/sysbox/sysmgr.sock`、`/run/sysbox/sysfs.sock` 后，重新注册 `sysbox-runc-inner` runtime，再创建 L2。
+3. L2 成功启动后检查：
+
+   ```sh
+   ls -ld /proc /sys
+   cat /proc/self/uid_map
+   cat /proc/1/comm
+   mount | grep -E ' on /(proc|sys) '
+   systemctl is-system-running
+   ```
+
+4. 只有 `/proc` 有真实 PID、`/sys` 可读、PID 1 为 systemd 后，才继续启动 inner Docker。Docker 测试使用：
+
+   ```sh
+   dockerd --iptables=false --storage-driver=vfs --bridge=none \
+     --data-root /var/lib/docker
+   docker pull ccr.ccs.tencentyun.com/afan-public/nginx:latest
+   ```
+
+5. 每次失败都记录 helper 构建时间、L1 是否使用 `seccomp=unconfined`、inner mgr/fs 日志和容器状态；特别区分 `fusermount3`/`/dev/fuse` 环境错误与 seccomp listener、namespace、rootfs mount 逻辑错误。
+
+### 当前宿主恢复提示
+
+本轮测试曾临时替换宿主 `/usr/bin/sysbox-fs`。结束测试前必须恢复备份并重启服务：
+
+```sh
+install -m 0755 /tmp/sysbox-nested-bin/sysbox-fs.host-original /usr/bin/sysbox-fs
+systemctl restart sysbox-fs
+systemctl is-active sysbox-mgr sysbox-fs docker
+```
+
+临时 L1 已清理；后续如重启测试，清理前先保存 `/var/log/sysbox-inner/{mgr,fs,runc}.log`，避免直接强制删除导致 FUSE 请求残留。文档和代码均未提交、未推送。

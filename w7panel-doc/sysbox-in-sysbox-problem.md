@@ -1,5 +1,7 @@
 # Sysbox Pod 内运行 Sysbox 的局限与问题分析
 
+> 2026-08-11 更新：专用 inner runtime 已实现显式 `nested-identity`、child userns `0:0:65536`、NoShift 和二次 cgroup v2 delegation。但真实 L1 Docker 验证发现 seccomp user-notify listener 不能在继承 L0 listener 的进程树中再次创建（`EBUSY`），所以该方案尚不能启动完整 L2 systemd/Docker。旧的“取消第三层 userns”路径仅保留为历史 PoC；下文涉及共享 outer userns 的结论只描述旧 PoC。
+
 > 上游 Sysbox 不支持 Sysbox nesting。本文分析的方案仅用于 218 实验性
 > PoC，不应作为生产能力或多租户隔离方案启用。
 
@@ -9,6 +11,35 @@ Sysbox Pod 中再次运行 Sysbox，只能获得受限的嵌套容器能力，�
 “系统容器套系统容器”语义。主要障碍不是单个程序缺陷，而是 Linux user
 namespace、procfs/sysfs mount、cgroup、netfilter 和 seccomp 的权限都受
 namespace 层级约束。
+
+## 2026-08-11 nested-identity 实机结果
+
+在本机以 Sysbox 启动 L1 systemd/Docker 容器，再运行本地构建的 L1
+`sysbox-mgr`、`sysbox-fs` 与 `sysbox-runc`，已确认：
+
+- L1 映射为 `0 165536 65536`，L2 allocator 返回相对 L1 的
+  `0 0 65536`，且 `/etc/subuid`、`/etc/subgid` 哈希不变；
+- L1 获得完整 cgroup v2 controller delegation；
+- inner mgr/fs 可以在 L1 启动，`/dev/fuse` 和每容器 FUSE server 可用；
+- cgroup-device BPF 不能由非 initial userns 加载，L2 必须继承 L1 device
+  policy；CPU、内存、IO、PID controller 仍可按 L2 子树委托；
+- L2 创建到 rootfs 阶段后，`procfs`、`sysfs` mount 会与继承的 L0
+  Sysbox seccomp notifier 冲突；
+- 尝试在 L2 安装 L1 sysbox-fs 的第二个 seccomp user-notify listener 时，
+  内核明确返回 `device or resource busy (EBUSY)`。
+
+最后一项是当前方案的硬阻塞。seccomp filter 和 listener 会沿进程树继承，
+不能按“L0 sysbox-fs 一套、L1 sysbox-fs 再一套”的方式叠加。因此，仅修改
+L1 mgr/runc/fs 无法实现完整 Sysbox nesting。后续架构必须二选一：
+
+1. 由 L0 保留唯一 listener，并把 L2 注册、PID/userns 映射和请求路由到同一
+   sysbox-fs；
+2. L0 对专用 nested-host 容器不安装 notifier，再由 L1 接管，但这会失去 L1
+   自身依赖 notifier 的普通 Sysbox mount 语义，必须补充等价实现。
+
+在完成其中一种单 listener 架构前，不能把 systemd、Docker 或 K3s 验收标记
+为通过，也不能用跳过 `/proc`、共享 L1 userns 或 Docker `vfs` 降级冒充完整
+实现。
 
 当前 PoC 为了让 inner Pod 启动并获得可用的 `/proc`，最终让
 `sysbox-runc-inner` 不再创建第三层 user namespace。这样虽然绕过了 procfs

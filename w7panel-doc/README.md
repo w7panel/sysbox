@@ -21,6 +21,7 @@
 | [rootfs-rw-layer-persistence.md](./rootfs-rw-layer-persistence.md) | PVC-backed rootfs 的组件契约和数据流 |
 | [persistent-rootfs-special-mounts.md](./persistent-rootfs-special-mounts.md) | 当前 PVC `special/` 方案；后半部分保留历史方案记录 |
 | [volume-init.md](./volume-init.md) | 空 PVC 自动复制镜像目录内容的使用、边界与验收 |
+| [sysbox-in-sysbot.md](./sysbox-in-sysbot.md) | CKM 内层 K3s command 启动 Sysbox 的实验性验证、限制与当前阻断 |
 | [sysbox-special-mounts-preload.svg](./sysbox-special-mounts-preload.svg) | 特殊目录、Pod 和 inner image preload 关系图 |
 | [sysbox-snapshotter-remap-ids-root-cause.md](./sysbox-snapshotter-remap-ids-root-cause.md) | snapshotter `remap-ids` 权限问题根因 |
 
