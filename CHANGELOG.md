@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ### Added
   * sysbox-deploy-k8s: add support for Kubernetes v1.36; the deployment script previously rejected this version through its supported-version whitelist.
   * Fix Debian release packaging by keeping the unreleased changelog header in the format required by the package converter.
+  * Fix PVC subPath validation when kubelet uses a generated PVC directory name and CRI uses the logical volume name.
 
 ## [0.7.1] - 2026-07-28
 ### Added
