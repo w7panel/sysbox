@@ -6,7 +6,12 @@
 
 ## 目标与边界
 
-外层 CKM server Pod 使用 `runtimeClassName: sysbox-runc` 和 `hostUsers: false`；其内运行的 K3s 不含 systemd。目标是在不维护派生 K3s 镜像的前提下，在该 K3s 内启动 Sysbox runtime。
+外层 CKM server Pod 使用 `runtimeClassName: sysbox-runc` 和 `hostUsers: false`；其内运行的 K3s 不含 systemd。当前目标只验证：目标 Pod 创建容器时同时满足以下两个条件：
+
+1. 使用 `sysbox-runc` runtime；
+2. 使用独立 user namespace（Kubernetes 配置为 `hostUsers: false`，本文简称 `use-namespace`）。
+
+不再把“目标 Pod 内启动 systemd，再由 systemd 启动 Docker”作为测试路径。目标是在不维护派生 K3s 镜像的前提下，在该 K3s 内启动 Sysbox runtime，并由目标 Pod 直接承载普通容器工作负载。
 
 二进制由 initContainer 从 Sysbox deploy 镜像复制到 `emptyDir`，再挂载到 K3s 主容器的 `/opt/sysbox`。主容器必须额外挂载字符设备 `/dev/fuse`。
 
@@ -49,6 +54,34 @@ inner template 设置 `SystemdCgroup = false`，并禁用 idmapped mount 路径�
 | outer `/proc` opt-in | 成功：`rw,nosuid,nodev`，不含 `noexec` |
 | inner Sysbox Pod | 成功：`nested-sysbox-hostusers` 在 218 的 `nested-poc` 节点为 `1/1 Running` |
 
+### 当前验收条件
+
+目标 Pod 必须显式写出两个条件，缺一不可：
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sysbox-use-namespace
+spec:
+  runtimeClassName: sysbox-runc
+  hostUsers: false
+  containers:
+    - name: workload
+      image: docker.cnb.cool/i0358/zpk/nested-pause:20260810-1
+      command: ["/bin/sh", "-c", "sleep 3600"]
+```
+
+这里 `runtimeClassName: sysbox-runc` 决定 containerd 使用 Sysbox runtime；`hostUsers: false` 才会让 Pod 使用独立 user namespace。Kubernetes 没有名为 `use-namespace` 的标准 Pod 字段，因此 `use-namespace` 在本文中是验收条件名称，不是额外 YAML key。不得只检查 Pod 的 `Running` 状态，必须同时检查实际 Pod 配置和容器内的 user namespace：
+
+```sh
+kubectl get pod sysbox-use-namespace -o jsonpath='{.spec.runtimeClassName}{"\n"}{.spec.hostUsers}{"\n"}'
+kubectl exec sysbox-use-namespace -- cat /proc/self/uid_map
+kubectl exec sysbox-use-namespace -- readlink /proc/self/ns/user
+```
+
+预期结果为 `sysbox-runc`、`false`，以及非宿主初始 user namespace 的映射；若任一条件不满足，本次测试失败。
+
 ## 复测脚本
 
 `tests/sysbox-in-sysbox-218.sh` 在 218 的外层 PoC 已就绪后，创建 inner
@@ -62,12 +95,9 @@ inner 节点、Pod 与事件。脚本先等待 inner Node Ready 和 `default` Se
 | 镜像 | 启动方式 | 测试用途与结果 |
 | --- | --- | --- |
 | `docker.cnb.cool/i0358/zpk/nested-pause:20260810-1` | 镜像默认命令，`runtimeClassName: sysbox-runc-inner` | 最小 pause PoC；验证 inner Sysbox Pod Running、CNI、`kubectl exec` 以及 `free -h`、`top`、`ps -ef` 可读取真实 procfs 数据。 |
-| `docker.cnb.cool/i0358/docker-images-chrom/nestybox-ubuntu-bionic-systemd-docker:latest` | `/sbin/init`，`runtimeClassName: sysbox-runc-inner` | systemd/Docker 扩展测试；Pod `1/1 Running` 且 PID 1 为 systemd。专用 nested handler 下 systemd 为 `offline`，需以 `dockerd --iptables=false --storage-driver=vfs --bridge=none` 手动启动 daemon，并临时补齐 DNS 与 inner CNI SNAT；已成功拉取 `ccr.ccs.tencentyun.com/afan-public/nginx:latest`。 |
+| 普通非 systemd 工作负载 | 直接启动业务进程，`runtimeClassName: sysbox-runc-inner` | 当前目标；只验证 Sysbox runtime 与独立 user namespace 两个条件，不启动 systemd 或 Docker daemon。 |
 
-第二个镜像在 218 实测解析为
-`sha256:8e22c97c910cdab7cf7ccfbe1118060fdd4d3de2c1761033a17f19d2657837b7`；
-拉取的 nginx registry digest 为
-`sha256:29cf9892ca1103e0b8c97db86f819fac1d9457b176bc77dd4f18ed2da4dd159f`。
+历史 systemd/Docker 镜像测试结果不再作为当前验收依据；此前的镜像 digest 和手动 `dockerd` 拉取记录仅用于追溯，不要求复测。
 
 ## `/proc` 执行例外（仅 PoC）
 
@@ -136,6 +166,7 @@ pause PoC，未覆盖生产系统容器语义。
 | 2026-08-11 14:33 HKT，helper `20260811-85`；`bash w7panel-doc/tests/sysbox-in-sysbox-218.sh`；`nested-sysbox-hostusers` `1/1 Running` | inner Node `nested-poc` Ready，default ServiceAccount 存在；事件为 Scheduled/Pulled/Created/Started，无失败事件；`free -h` 显示 Mem total 60.5G/free 46.8G，`top` 与 `ps -ef` 可见 PID 1 及 exec 进程 | 先恢复被环境误删的 outer `RuntimeClass/sysbox-runc`，再强制 rollout 使 deployment 实际使用 `20260811-85`；inner RuntimeClass 创建成功，pause Pod 及 procfs 工具验收通过。 |
 | 2026-08-11 14:55 HKT，helper `20260811-85`；inner image `docker.cnb.cool/i0358/docker-images-chrom/nestybox-ubuntu-bionic-systemd-docker`；PID 1 `/sbin/init`；执行 `docker pull ccr.ccs.tencentyun.com/afan-public/nginx:latest` | `nested-systemd-docker` 为 `1/1 Running`，实际 `runtimeClassName=sysbox-runc-inner`。专用 handler 下 systemd 为 `offline`，dockerd 不会自动启动；默认 dockerd 又因 overlay mount 与 iptables 权限失败。inner CoreDNS 无响应，且 CNI 使用 `ipMasq:false`，外网连接没有 SNAT。 | 以 `dockerd --iptables=false --storage-driver=vfs --bridge=none` 启动仅用于 pull 的 daemon；测试 Pod 临时写入 registry hosts 解析，outer K3s Pod 临时增加 `10.244.0.0/16` MASQUERADE。pull 成功，image ID `sha256:9a9a9fd723f1...c4c43`，registry digest `sha256:29cf9892ca11...159f`。这只证明受限配置下可 pull，不代表完整 systemd/Docker-in-Docker 语义已通过。 |
 | 2026-08-12；临时 L1 `sysbox-nested-l1-v3`，当前构建 `sysbox-runc/sysbox-fs/sysbox-mgr`；L2 `nested-l2-v3` | L2 未进入容器进程：`failed to pre-register with sysbox-fs`。L1 `sysbox-fs` 日志先报缺少 `fusermount3`，补齐后又报 `fuse device not found`；L2 保持 `Created`，无 procfs、systemd 或 Docker 验收结果。 | 已保存 L1 日志与 inspect 到 `/tmp/sysbox-nested-handoff-20260812`，停止临时容器，并恢复宿主 `/usr/bin/sysbox-fs` 为 `sysbox-fs.host-original`。该次为 FUSE 设备/工具环境失败，不作为 seccomp listener 或 namespace 逻辑结论。 |
+| 2026-08-12；`bash w7panel-doc/tests/sysbox-in-sysbox-218.sh`；目标 Pod 使用 `sysbox-runc-inner`、`hostUsers: false` | Pod 持续 `ContainerCreating`；sandbox 事件为 `failed to create network namespace`，原因是 `fork/exec /proc/self/exe: operation not permitted`。检查 outer K3s 容器确认 `/proc` 仍为 `rw,nosuid,nodev,noexec`。 | 未进入目标容器，因此没有 `uid_map` 或 procfs 验收结果；判定为 outer Pod 的 `sysbox/allow-proc-exec` 未传递到实际 K3s 容器 OCI spec。inner K3s 模板已补充 `sysbox-runc-inner` 的 `pod_annotations` 与 `container_annotations`，但需要用包含该模板的新版 helper/重建 outer Pod 后复测。 |
 
 ## 2026-08-11 最终验收（helper `20260811-83`）
 
@@ -309,15 +340,7 @@ test -e /sys/module/fuse || modprobe fuse
    systemctl is-system-running
    ```
 
-4. 只有 `/proc` 有真实 PID、`/sys` 可读、PID 1 为 systemd 后，才继续启动 inner Docker。Docker 测试使用：
-
-   ```sh
-   dockerd --iptables=false --storage-driver=vfs --bridge=none \
-     --data-root /var/lib/docker
-   docker pull ccr.ccs.tencentyun.com/afan-public/nginx:latest
-   ```
-
-5. 每次失败都记录 helper 构建时间、L1 是否使用 `seccomp=unconfined`、inner mgr/fs 日志和容器状态；特别区分 `fusermount3`/`/dev/fuse` 环境错误与 seccomp listener、namespace、rootfs mount 逻辑错误。
+4. 每次失败都记录 helper 构建时间、L1 是否使用 `seccomp=unconfined`、inner mgr/fs 日志和容器状态；特别区分 `fusermount3`/`/dev/fuse` 环境错误与 seccomp listener、namespace、rootfs mount 逻辑错误。
 
 ### 当前宿主恢复提示
 
