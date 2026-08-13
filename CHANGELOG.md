@@ -27,6 +27,7 @@ All notable changes to this project will be documented in this file.
   * sysbox-deploy-k8s: add experimental inner-K3s command launchers for starting `sysbox-mgr` and `sysbox-fs` directly inside a non-systemd K3s container. The POSIX `sysbox-inner-k3s.sh` launcher is usable by K3s images without Bash, while `--inner-k3s-prepare` and `--inner-k3s-run` retain deploy-image compatibility. The deploy image now includes static `rsync`, which `sysbox-mgr` requires in a minimal K3s image. This lets CKM test an inner Sysbox runtime without installing Sysbox on the outer node.
   * sysbox-deploy-k8s: add support for Kubernetes v1.36; the deployment script previously rejected this version through its supported-version whitelist.
   * Fix Debian release packaging by keeping the unreleased changelog header in the format required by the package converter.
+  * Fix PVC subPath validation when kubelet uses a generated PVC directory name and CRI uses the logical volume name.
 
 ## [0.7.1] - 2026-07-28
 ### Added
