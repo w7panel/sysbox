@@ -26,6 +26,7 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
+      enableServiceLinks: false
       serviceAccountName: {{ include "w7panel-sysbox.serviceAccountName" . }}
       hostPID: true
       terminationGracePeriodSeconds: 30
@@ -50,6 +51,8 @@ spec:
               value: {{ .Values.nested.pauseImage | quote }}
             - name: SYSBOX_INNER_SNAPSHOTTER_SOCKET
               value: /run/sysbox/sysbox-snapshotter.sock
+            - name: SYSBOX_INNER_DATA_ROOT
+              value: /var/lib/rancher/k3s/sysbox-inner
           securityContext:
             privileged: true
           readinessProbe:

@@ -1,0 +1,66 @@
+spec:
+  strategy:
+    type: Recreate
+    rollingUpdate: null
+  template:
+    metadata:
+      annotations:
+        sysbox.nestybox.com/nested-chart-migration: "v0.7.1-8"
+        sysbox.nestybox.com/nested-chart-retry: "specialdirs4"
+    spec:
+      enableServiceLinks: false
+      initContainers:
+        - name: copy-sysbox
+          image: docker.cnb.cool/i0358/zpk/sysbox-inner-k3s-copyhelper:20260814-rootfs-test-3
+          imagePullPolicy: Always
+          command:
+            - /bin/sh
+            - -ec
+            - cp -a /payload/bin /payload/scripts /work/
+      containers:
+        - name: k3s
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              mount --make-rshared /
+              mount --bind /run /run
+              mount --make-rshared /run
+              mkdir -p /var/lib/sysbox-inner/bin
+              cp -a /opt/sysbox/bin/generic/. /var/lib/sysbox-inner/bin/
+              ls -l /var/lib/sysbox-inner/bin/sysbox-fs >/dev/termination-log
+              sha256sum /var/lib/sysbox-inner/bin/sysbox-fs >>/dev/termination-log
+              if ! /var/lib/sysbox-inner/bin/sysbox-fs --help >/dev/null 2>>/dev/termination-log; then
+                exit 1
+              fi
+              if ! SYSBOX_INNER_BIN_DIR=/var/lib/sysbox-inner/bin \
+                   SYSBOX_INNER_DATA_ROOT=/var/lib/rancher/k3s/sysbox-inner \
+                   SYSBOX_INNER_SNAPSHOTTER_SOCKET=/run/sysbox/sysbox-snapshotter.sock \
+                     /bin/sh /opt/sysbox/scripts/sysbox-inner-k3s.sh; then
+                cat /var/log/sysbox-mgr.log /var/log/sysbox-fs.log /var/log/sysbox-snapshotter.log \
+                  >>/dev/termination-log 2>&1 || true
+                exit 1
+              fi
+              mkdir -p /var/lib/rancher/k3s/agent/etc/cni/net.d
+              printf '%s\n' '{"cniVersion":"1.0.0","name":"nested-bridge","plugins":[{"type":"bridge","bridge":"cni0","isGateway":true,"ipMasq":true,"ipam":{"type":"host-local","subnet":"10.244.0.0/16","routes":[{"dst":"0.0.0.0/0"}]}},{"type":"portmap","capabilities":{"portMappings":true}}]}' > /var/lib/rancher/k3s/agent/etc/cni/net.d/10-nested-bridge.conflist
+              exec /bin/k3s server \
+                --cluster-init \
+                --cluster-cidr=10.244.0.0/16 \
+                --service-cidr=10.246.0.0/16 \
+                --cluster-dns=10.246.0.10 \
+                --flannel-backend=none \
+                --disable=traefik \
+                --disable=servicelb \
+                --disable-network-policy \
+                --kubelet-arg='eviction-hard=nodefs.available<1Gi,imagefs.available<1Gi' \
+                --pause-image="${K3S_PAUSE_IMAGE}" \
+                --node-name=nested-poc
+          volumeMounts:
+            - name: registries
+              mountPath: /etc/rancher/k3s/registries.yaml
+              subPath: registries.yaml
+              readOnly: true
+      volumes:
+        - name: registries
+          configMap:
+            name: sysbox-nested-registries

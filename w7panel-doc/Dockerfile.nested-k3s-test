@@ -1,0 +1,6 @@
+FROM rancher/k3s:v1.35.6-k3s1
+
+COPY --chmod=0755 w7panel-doc/tests/nested-k3s-entrypoint.sh /usr/local/bin/nested-k3s-entrypoint.sh
+COPY w7panel-doc/tests/registries.yaml /etc/rancher/k3s/registries.yaml
+
+ENTRYPOINT ["/usr/local/bin/nested-k3s-entrypoint.sh"]

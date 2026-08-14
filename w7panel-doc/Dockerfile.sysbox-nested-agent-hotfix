@@ -1,0 +1,11 @@
+FROM docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-4-nested1
+
+COPY --chmod=0755 sysbox-runc/build/amd64/sysbox-runc /opt/sysbox/bin/generic/sysbox-runc
+COPY --chmod=0755 sysbox-mgr/build/amd64/sysbox-mgr /opt/sysbox/bin/generic/sysbox-mgr
+COPY --chmod=0755 sysbox-fs/build/amd64/sysbox-fs /opt/sysbox/bin/generic/sysbox-fs
+RUN for binary in sysbox-runc sysbox-mgr sysbox-fs; do \
+      output="$(ldd "/opt/sysbox/bin/generic/${binary}" 2>&1 || true)"; \
+      echo "$output" | grep -q 'not a dynamic executable' || { echo "$output"; exit 1; }; \
+    done
+COPY --chmod=0755 sysbox-pkgr/k8s/scripts/sysbox-inner-k3s.sh /opt/sysbox/scripts/sysbox-inner-k3s.sh
+COPY --chmod=0755 sysbox-pkgr/k8s/scripts/sysbox-nested-agent.sh /opt/sysbox/scripts/sysbox-nested-agent.sh

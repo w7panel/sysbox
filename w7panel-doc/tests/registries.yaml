@@ -1,0 +1,32 @@
+mirrors:
+  registry.local.w7.cc: {}
+  docker.io:
+    endpoint:
+      - "https://registry.cdn.w7.cc"
+      - "https://docker.m.daocloud.io"
+      - "https://docker.1panel.live"
+      - "https://docker.1ms.run"
+      - "https://mirror.ccs.tencentyun.com"
+      - "https://registry.cn-hangzhou.aliyuncs.com"
+  dhi.io:
+    endpoint:
+      - "https://dhi.registry.cdn.w7.cc"
+  quay.io:
+    endpoint:
+      - "https://quay.registry.cdn.w7.cc"
+  gcr.io:
+    endpoint:
+      - "https://gcr.registry.cdn.w7.cc"
+  ghcr.io:
+    endpoint:
+      - "https://ghcr.registry.cdn.w7.cc"
+  registry.k8s.io:
+    endpoint:
+      - "https://k8s.registry.cdn.w7.cc"
+  mcr.microsoft.com:
+    endpoint:
+      - "https://mcr.registry.cdn.w7.cc"
+  nvcr.io:
+    endpoint:
+      - "https://nvcr.registry.cdn.w7.cc"
+  "*": {}

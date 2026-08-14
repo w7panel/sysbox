@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nested-docker-overlay
+  annotations:
+    sysbox/allow-proc-exec: "true"
+spec:
+  runtimeClassName: sysbox-runc
+  enableServiceLinks: false
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 0
+  containers:
+    - name: system
+      image: docker.cnb.cool/i0358/docker-images-chrom/nestybox-ubuntu-bionic-systemd-docker
+      imagePullPolicy: IfNotPresent
+      command:
+        - /sbin/init
+      volumeMounts:
+        - name: docker-data
+          mountPath: /var/lib/docker
+  volumes:
+    - name: docker-data
+      emptyDir:
+        medium: Memory
+        sizeLimit: 1Gi
