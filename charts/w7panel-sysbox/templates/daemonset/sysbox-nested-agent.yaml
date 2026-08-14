@@ -1,0 +1,119 @@
+{{- if eq .Values.installMode "nested" }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "w7panel-sysbox.nestedAgentName" . }}
+  namespace: {{ include "w7panel-sysbox.namespace" . }}
+  labels:
+    {{- include "w7panel-sysbox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nested-agent
+spec:
+  selector:
+    matchLabels:
+      {{- include "w7panel-sysbox.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: nested-agent
+  template:
+    metadata:
+      {{- with .Values.installer.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "w7panel-sysbox.labels" . | nindent 8 }}
+        app.kubernetes.io/component: nested-agent
+        {{- with .Values.installer.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "w7panel-sysbox.serviceAccountName" . }}
+      hostPID: true
+      terminationGracePeriodSeconds: 30
+      tolerations:
+        - operator: Exists
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: nested-agent
+          image: {{ printf "%s:%s" .Values.installer.image.repository (.Values.installer.image.tag | default (printf "v%s" .Chart.AppVersion)) | quote }}
+          imagePullPolicy: {{ .Values.installer.image.pullPolicy }}
+          command:
+            - /opt/sysbox/scripts/sysbox-nested-agent.sh
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: K3S_PAUSE_IMAGE
+              value: {{ .Values.nested.pauseImage | quote }}
+            - name: SYSBOX_INNER_SNAPSHOTTER_SOCKET
+              value: /run/sysbox/sysbox-snapshotter.sock
+          securityContext:
+            privileged: true
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - test -f /run/sysbox/nested-runtime-ready && test -S /run/sysbox/sysmgr.sock && test -S /run/sysbox/sysfs.sock && test -S /run/sysbox/sysbox-snapshotter.sock
+            periodSeconds: 5
+          volumeMounts:
+            - name: dev-fuse
+              mountPath: /dev/fuse
+            - name: host-k3s-run
+              mountPath: /run/k3s
+            - name: host-sysbox-run
+              mountPath: /run/sysbox
+            - name: host-k3s-data
+              mountPath: /var/lib/rancher/k3s
+              mountPropagation: Bidirectional
+            - name: host-sysbox-data
+              mountPath: /var/lib/sysbox-inner
+            - name: host-sysbox-fs
+              mountPath: /var/lib/sysboxfs-inner
+              mountPropagation: Bidirectional
+            - name: host-sysbox-logs
+              mountPath: /var/log
+            - name: host-modules
+              mountPath: /lib/modules
+              readOnly: true
+      volumes:
+        - name: dev-fuse
+          hostPath:
+            path: /dev/fuse
+            type: CharDevice
+        - name: host-k3s-run
+          hostPath:
+            path: /run/k3s
+            type: Directory
+        - name: host-sysbox-run
+          hostPath:
+            path: /run/sysbox
+            type: DirectoryOrCreate
+        - name: host-k3s-data
+          hostPath:
+            path: /var/lib/rancher/k3s
+            type: Directory
+        - name: host-sysbox-data
+          hostPath:
+            path: /var/lib/sysbox-inner
+            type: DirectoryOrCreate
+        - name: host-sysbox-fs
+          hostPath:
+            path: /var/lib/sysboxfs-inner
+            type: DirectoryOrCreate
+        - name: host-sysbox-logs
+          hostPath:
+            path: /var/log/sysbox-inner
+            type: DirectoryOrCreate
+        - name: host-modules
+          hostPath:
+            path: /lib/modules
+            type: Directory
+  updateStrategy:
+    rollingUpdate:
+      maxUnavailable: 1
+    type: RollingUpdate
+{{- end }}

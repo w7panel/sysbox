@@ -17,9 +17,11 @@ rules:
 - apiGroups: [""]
   resources: ["nodes"]
   verbs: ["get", "patch"]
+{{- if eq .Values.installMode "host" }}
 - apiGroups: [""]
   resources: ["pods"]
   verbs: ["list", "delete"]
+{{- end }}
 {{- if .Values.admission.enabled }}
 - apiGroups: ["admissionregistration.k8s.io"]
   resources: ["mutatingwebhookconfigurations"]

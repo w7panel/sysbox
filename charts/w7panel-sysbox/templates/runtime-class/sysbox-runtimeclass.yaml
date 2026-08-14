@@ -5,7 +5,11 @@ metadata:
   labels:
     {{- include "w7panel-sysbox.labels" . | nindent 4 }}
 handler: sysbox-runc
-{{- with .Values.nodeSelector }}
+{{- $nodeSelector := deepCopy .Values.nodeSelector }}
+{{- if eq .Values.installMode "nested" }}
+{{- $_ := set $nodeSelector "sysbox.w7panel.io/nested-runtime" "ready" }}
+{{- end }}
+{{- with $nodeSelector }}
 scheduling:
   nodeSelector:
     {{- toYaml . | nindent 4 }}

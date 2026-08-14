@@ -1,8 +1,13 @@
+# Required. Set this explicitly to either "host" (L0) or "nested" (L1).
+# The empty default intentionally makes Helm validation fail instead of
+# accidentally running the host installer in an inner K3s cluster.
+installMode: ""
+
 nodeSelector: {}
 
 installer:
   image:
-    repository: ghcr.registry.cdn.w7.cc/w7panel/sysbox-deploy-k3s
+    repository: docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s
     tag: ""
     pullPolicy: Always
   podLabels: {}
@@ -21,3 +26,6 @@ admission:
 
 snapshotter:
   enabled: false
+
+nested:
+  pauseImage: rancher/mirrored-pause:3.6

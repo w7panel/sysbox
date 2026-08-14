@@ -1,355 +1,502 @@
-# CKM 内层 K3s 运行 Sysbox（实验性 PoC）
+# Sysbox-in-Sysbox 218 验证记录
 
-> 2026-08-11 更新：`sysbox-runc-inner` 与 inner `sysbox-mgr` 已实现 `--mapping-mode nested-identity`、独立 child userns 和 `0 0 65536`。真实 L1 Docker 验证随后确认，继承 L0 Sysbox seccomp user-notify listener 的进程树无法再创建 L1 listener（内核返回 `EBUSY`），因此完整 L2 systemd/Docker/K3s 尚未通过。原 `SYSBOX_SKIP_SPECIAL_MOUNTS=true`、共享 outer userns 和 `1:65535` allocator 路径仅保留为历史 PoC。
+> 状态日期：2026-08-14。本文只描述 `w7panel-sysboxin` 当前实现和 218
+> 测试现场。Sysbox nesting 仍是实验性功能，不可据此视为生产可用。
 
-> 上游 Sysbox 不支持 Sysbox nesting。本方案仅用于 218 验证，不可作为生产功能启用。
+## 目标与层级
 
-## 目标与边界
+目标是在一个 Sysbox Pod 中再次启动 Sysbox Pod，并继续验证内层 K3s、Docker
+和普通业务 Pod：
 
-外层 CKM server Pod 使用 `runtimeClassName: sysbox-runc` 和 `hostUsers: false`；其内运行的 K3s 不含 systemd。当前目标只验证：目标 Pod 创建容器时同时满足以下两个条件：
+```text
+L0 Kubernetes 节点
+└─ L1 Sysbox Pod（runtimeClassName: sysbox-runc，hostUsers: false）
+   └─ L1 内 K3s/containerd
+      └─ L2 Sysbox Pod（runtimeClassName: sysbox-runc）
+         └─ L2 内 K3s/Docker
+            └─ L3 普通 Pod
+```
 
-1. 使用 `sysbox-runc` runtime；
-2. 使用独立 user namespace（Kubernetes 配置为 `hostUsers: false`，本文简称 `use-namespace`）。
+硬性约束：
 
-不再把“目标 Pod 内启动 systemd，再由 systemd 启动 Docker”作为测试路径。目标是在不维护派生 K3s 镜像的前提下，在该 K3s 内启动 Sysbox runtime，并由目标 Pod 直接承载普通容器工作负载。
+- L1 必须设置 `hostUsers: false`，运行在非 initial user namespace。
+- L2 必须创建新的 child user namespace，不允许直接复用 L1 user namespace。
+- L2 的 UID/GID 映射必须都是 `0 0 65536`。
+- `0` 是 L1 user namespace 坐标中的 root，不是 L0 宿主 initial-userns root。
+- L2 的 rootfs 和 bind mount 使用 `NoShift`，不得进行第二次 chown、shiftfs
+  或 idmapped mount。
 
-二进制由 initContainer 从 Sysbox deploy 镜像复制到 `emptyDir`，再挂载到 K3s 主容器的 `/opt/sysbox`。主容器必须额外挂载字符设备 `/dev/fuse`。
+历史 PoC 曾尝试共享 L1 user namespace、`1:65535` 映射、跳过 `/proc` 或设置
+`hostNetwork: true`。这些路径均不是当前设计，也不能作为验收通过的依据。
 
-## 启动器
+### 统一 chart、RuntimeClass 与重启边界
 
-`sysbox-pkgr/k8s/scripts/sysbox-inner-k3s.sh` 是 K3s 专用 POSIX `sh` 启动器：
+L0 和 L1 使用同一个 `w7panel-sysbox` chart，必须通过 `installMode` 显式选择安装
+目标；该值默认为空，遗漏时 Helm 会直接拒绝安装。chart 不根据当前 user namespace
+自动猜测；host installer 仍会强制检查 initial user namespace，在 L1 中即使误传
+`installMode=host` 也会在写文件或重启 K3s 前失败：
 
-1. 校验 `/dev/fuse`、`rsync`、`modprobe`、`iptables`；
-2. 为无 `ID` 的 K3s `os-release` 写入 generic distro ID；
-3. 写入 inner K3s 的 containerd `sysbox-runc` handler；
-4. 以非 systemd 方式启动 `sysbox-mgr` 与 `sysbox-fs`；
-5. 等待 `/run/sysbox/sysmgr.sock`、`sysfs.sock`。
+| 安装位置 | 参数 | 安装内容 | 对外 RuntimeClass/handler |
+| --- | --- | --- | --- |
+| L0 物理宿主集群 | `installMode=host` | 宿主 installer、systemd 服务和 containerd 配置 | `sysbox-runc` / `sysbox-runc` |
+| L1 内 K3s | `installMode=nested` | L1 内常驻 nested agent、独立 mgr/fs/snapshotter 和 containerd 配置 | `sysbox-runc` / `sysbox-runc` |
 
-启动器只注册 containerd handler；inner API 仍需创建一次 `RuntimeClass`：`handler: sysbox-runc`。
+当前发布镜像为：
 
-inner template 设置 `SystemdCgroup = false`，并禁用 idmapped mount 路径；否则 K3s 镜像无 systemd、嵌套 user namespace 也无法通过 idmapped-mount 预检。
+```text
+docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-2
+digest: sha256:e337c1346a53f35f84156d2761b3ccd22224d6630cfd7bb0a487ee8d52d67df4
+```
 
-外层 Sysbox 的 user namespace 只向 K3s 容器暴露 `0:65536`。启动器因此在启动 inner `sysbox-mgr` 前将 `sysbox` 的 subuid/subgid 固定为同一父 namespace 可见范围；不能使用常规的 `100000:65536`，否则内层 runc 在创建 `exec.fifo` 时尝试 `chown` 一个未映射 UID 并返回 `EINVAL`。
+外层集群安装：
 
-新版 runc 的默认 procfs/sysfs 挂载在嵌套场景均会被内核以 `EPERM` 拒绝。`sysbox/skip-special-mounts: "true"` 因而省略 inner Pod 的 procfs 与 sysfs mount；仅适用于不依赖它们的 PoC pause 工作负载。普通 Sysbox 容器仍保持默认路径。
+```sh
+helm upgrade --install w7panel-sysbox ./charts/w7panel-sysbox \
+  -n sysbox-system --create-namespace \
+  --set installMode=host \
+  --set installer.image.tag=v0.7.1-2
+```
 
-同一注解还会阻止 parent bind-mount helper 为进入 child PID namespace 而重新挂载 procfs；该操作在该 namespace 层级也会被拒绝。
+在 L1 内 K3s 安装：
 
-由于 `/sys` 已省略，注解还会跳过其下的 Sysbox-FS emulated-path overmount（例如 CPU online 文件）；此路径仅用于 pause PoC。
+```sh
+helm upgrade --install w7panel-sysbox ./charts/w7panel-sysbox \
+  -n sysbox-system --create-namespace \
+  --set installMode=nested \
+  --set installer.image.tag=v0.7.1-2
+```
 
-`sysbox-mgr` 强制依赖 `rsync`。deploy 镜像的 Dockerfile 通过构建阶段加入静态 `rsync`，initContainer 应复制它和 Sysbox 二进制。
+**内部 chart 安装不会重启 L0 物理宿主，也不会自行重启 L1 K3s。** nested agent
+只会写入 L1 K3s 的 containerd template、安装当前镜像内的二进制并启动独立服务。
+若这是把一个已经运行的旧 L1 首次迁移到 nested chart，containerd 不能动态重载新
+增的 runtime handler，因此 agent 会保持 NotReady。此时只需从 L0 控制器对该 L1
+K3s Pod 做一次受控滚动重建，让 K3s/containerd 随 Pod 重建读取新模板；不需要重启
+L0 宿主，也不要单独 kill 或 restart L1 containerd，否则会把整套 L1 K3s 一起带停。
 
-`sysbox-fs` 为每个 inner Pod 创建 FUSE server 时会执行 `fusermount3`。K3s 镜像没有动态加载器，因此 deploy 镜像编译静态 `fusermount3` 并放入 `generic` artifact，由 initContainer 一并复制。启动器会在启动 K3s 前检查它；缺失时应直接失败，而不是在 Pod pre-registration 阶段才报笼统的初始化错误。
+新建 L1 应在 K3s 首次启动前准备好 template，不需要这次迁移重建。后续发布若
+handler 名和 containerd 配置均未变化，只升级 runc/mgr/fs/snapshotter 二进制，也
+不需要重启 K3s；nested agent 滚动更新并重启自己管理的内层服务即可。安装或升级后
+检查：
 
-## 218 已验证结果
+```sh
+kubectl -n sysbox-system rollout status daemonset/w7panel-sysbox-nested-agent
+kubectl get node -l sysbox.w7panel.io/nested-runtime=ready
+kubectl get runtimeclass sysbox-runc
+```
 
-| 项目 | 结果 |
+### L1 启动前置
+
+nested agent 从部署镜像把静态 Sysbox 二进制和工具安装到
+`/var/lib/sysbox-inner/bin`，以 `nested-identity` 启动 inner `sysbox-mgr`、
+`sysbox-fs` 和 `sysbox-snapshotter`。启动前必须确认：
+
+```sh
+test -c /dev/fuse
+command -v rsync
+command -v fusermount3
+```
+
+K3s 镜像通常没有完整动态库，runc、fs、`fusermount3` 等使用部署镜像中的静态
+产物。inner containerd template 使用 `SystemdCgroup = false` 并禁用 idmapped
+mount。CNI 需要执行 `/proc/self/exe`，L1 的
+`sysbox/allow-proc-exec: "true"` 注解必须同时通过 containerd 的
+`pod_annotations` 和 `container_annotations` 传入 sandbox/workload；该例外只用于
+本 PoC，不应成为生产默认值。
+
+## 当前实现
+
+### sysbox-mgr
+
+- 能识别自身处于非 initial user namespace。
+- 普通 sub-ID 配置失败时，`auto` 模式可切换到 `nested-identity`；也可显式指定
+  `--mapping-mode nested-identity`。
+- `nested-identity` 分配固定的 `0:0:65536`，不修改或依赖 L1 的
+  `/etc/subuid`、`/etc/subgid`，允许多个 L2 容器复用同一映射。
+- 注册和更新请求显式携带 `MappingMode`，mgr 会校验一致性，不通过
+  `HostID == 0` 猜测模式。
+- netns 更新允许用迁移后的 inode 替换旧 inode；同一 Pod 的 workload 因此能复用
+  sandbox 的新 userns/netns。
+
+### sysbox-runc
+
+- 仅在 `nested-identity` 接受 `HostID=0`，并校验完整的
+  `0:0:65536` UID/GID mapping。
+- 对外 handler 始终是 `sysbox-runc`，并强制创建 child user namespace。实现内部
+  生成名为 `sysbox-runc-inner` 的 wrapper，仅用于给真实 `sysbox-runc` 传入
+  `--mapping-mode nested-identity`；它不是用户应创建或引用的 RuntimeClass。
+- nested rootfs 和 bind mount 选择 `NoShift`。
+- 对 CRI sandbox 的持久 CNI netns 实现了迁移：先进入 CNI 创建的旧 netns，创建
+  child userns 及其拥有的新 netns，再由 L1 权限的父 runc 迁移非 loopback 接口，
+  恢复地址、链路状态、直连路由及 gateway/default 路由，最后把
+  `/run/netns` 或 `/var/run/netns` 的 handle 重绑到新 netns。
+- 创建的新 netns 会显式启用 loopback。旧实现留下 `lo DOWN`，会导致 L2 K3s 对
+  `127.0.0.1:6443` 的 API 自连接超时；现场手工执行 `ip link set lo up` 后 K3s
+  立即恢复启动。修复位于 `libcontainer/nested_network_linux.go` 的
+  `enableNestedLoopback()`，已有回归测试并通过现有 `libcontainer` 单测。
+- 此迁移只触发于 `nested-identity`、CRI sandbox，以及受限的持久 CNI netns 路径；
+  不对任意宿主 netns 或路径开放。
+
+### sysbox-fs
+
+- L1 内使用 `/dev/fuse`，每个 L2 容器仍有独立 FUSE server。
+- 注册协议携带 mapping mode，并接受 nested identity 的 `Uid=0/Gid=0`。
+- nested identity 的 ownership 按 L1 user namespace 坐标解释，不再把 UID 0
+  等同于 L0 宿主 root。
+- seccomp notify、PID 查询和 namespace 进入仍限制到 L1 可见的 L2 进程。
+
+### cgroup
+
+- 设计是 L0 向 L1 委托 cgroup v2 子树，再由 L1 向 L2 委托自己的子树。
+- 当前 L2 已确认 cgroup2 可写且能看到 delegated controllers。
+- L2 不能因此修改 L1 的资源上限；systemd、Docker、K3s 在二次 delegation 下的
+  完整资源控制仍需继续验收。
+
+## 218 已解决并验证
+
+当前外层现场：
+
+```text
+kubeconfig: /root/.kube/218.config
+namespace:  k3k-console-164315
+deployment: sysbox-inner-k3s-command-poc
+L1 Pod:     sysbox-inner-k3s-command-poc-587779ddd9-rh9qn（记录时）
+L1 IP:      10.42.0.74
+```
+
+Pod 名会随部署变化，测试时应按 label 发现 Running Pod，不应固定使用上述后缀。
+
+| 项目 | 当前结论 |
 | --- | --- |
-| `/dev/fuse` 挂载 | 成功 |
-| `sysbox-mgr` command 启动 | 成功 |
-| `sysbox-fs` command 启动 | 成功 |
-| inner K3s / containerd 启动 | 成功 |
-| inner Sysbox RuntimeClass | 已注册 |
-| inner K3s CNI | 成功（template 补齐 `bin_dir=/var/lib/rancher/k3s/data/cni` 与 `conf_dir` 后节点 Ready） |
-| outer `/proc` opt-in | 成功：`rw,nosuid,nodev`，不含 `noexec` |
-| inner Sysbox Pod | 成功：`nested-sysbox-hostusers` 在 218 的 `nested-poc` 节点为 `1/1 Running` |
+| L1 `runtimeClassName=sysbox-runc`、`hostUsers=false` | 已通过 |
+| L1 内 `/dev/fuse`、inner mgr/fs、K3s/containerd、RuntimeClass | 已通过 |
+| L2 child userns | 已通过；实际 `uid_map` 为 `0 0 65536` |
+| L2 sandbox/workload namespace 共享 | 已通过；两者共享迁移后的 userns/netns，不复用 L1 userns |
+| nested CNI bridge/veth | 已通过；L2 内可创建、启用、加入并删除 bridge/veth |
+| L2 网络连通性 | 已通过；曾从 `10.244.0.18` ping `10.244.0.1` 和 L1 `10.42.0.74` |
+| CNI 持久 handle 重绑 | 已通过；handle 与 sandbox 进程 netns inode 一致 |
+| CNI 生命周期回收 | 已通过；删除 L2 后 handle、veth、IPAM 均释放，L1 `cni0` slave 数恢复 |
+| L2 cgroup v2 | 已确认可写且 controllers 已委托 |
+| 当前 `nested-l2-k3s` | Running；child userns/netns、bridge/veth probe 已通过，`/bin/k3s` 已补齐 |
+| nested loopback 修复 | 已通过；全新 `nested-final-check` 中 `lo` 自动为 `UP,LOWER_UP` |
+| L2 K3s | 已通过；K3s `v1.35.6`、containerd `2.2.5-k3s2`、native snapshotter、Node Ready |
+| L3 CNI | 已通过；bridge 网段 `10.245.0.0/16`，nginx Pod IP `10.245.0.30` |
+| 腾讯云 nginx | 已通过；`nginx-ccr` `1/1 Running`，L2 访问 HTTP 200，nginx `1.29.0` |
+| L3 生命周期回收 | 已通过；删除 Pod 后 veth、IPAM 文件和对应 NAT 规则消失 |
 
-### 当前验收条件
+一次完整网络验收的现场证据为：
 
-目标 Pod 必须显式写出两个条件，缺一不可：
+```text
+L2 Pod:       nested-sysbox-hostusers
+L2 IP:        10.244.0.18
+sandbox PID:  15709
+workload PID: 15931
+userns:       user:[4026538117]
+netns:        net:[4026538235]
+uid_map:      0 0 65536
+handle:       5:4026538235
+process:      5:4026538235
+```
+
+首版路由恢复曾因先添加 default route 而报
+`restore route on eth0: network is unreachable`；现已改为先恢复无 gateway 的直连路由，
+再恢复 gateway/default route，并完成上述实测。
+
+### L3 K3s/nginx 最终现场
+
+为 L1 临时增加 `10.244.0.0/16` MASQUERADE 后，L2 到腾讯云 registry 的 TLS
+连接成功。随后在 L2 启动：
+
+```text
+K3s:        v1.35.6
+containerd: 2.2.5-k3s2
+snapshotter: native
+L3 CNI:     bridge, 10.245.0.0/16
+Node:       Ready
+```
+
+极简 L2 测试镜像中还需补齐 containerd、containerd-shim、CNI plugins、iptables
+和 CA bundle。这些是测试镜像资产依赖，不是 nested CNI 实现缺陷。
+
+指定镜像已完成真实拉取和运行：
+
+```text
+image:    ccr.ccs.tencentyun.com/afan-public/nginx:latest
+image ID: sha256:9a9a9fd723f1d...
+size:     72.2 MB
+Pod:      nginx-ccr, 1/1 Running
+Pod IP:   10.245.0.30
+L2 link:  cni3 + veth48b8f6bc
+HTTP:     200, nginx/1.29.0
+```
+
+L2 同时生成了该 CNI 的 SNAT 规则。从 L2 执行 `wget` 访问 L3 nginx 返回 HTTP
+200。删除 `nginx-ccr` 后，`veth48b8f6bc` 消失、`10.245.0.30` 的 IPAM 文件释放、
+对应 NAT 规则消失；`cni3` bridge 保留是 bridge CNI 的正常持久状态。
+
+DNS **未验证**：本轮刻意禁用 CoreDNS，Pod 的 `resolv.conf` 指向
+`10.246.0.10`，不能把 DNS 记为通过。
+
+### loopback 修复端到端复测
+
+新 runc 先经 node-debugger 写入宿主的仅测试路径
+`/opt/sysbox-nested-build/sysbox-runc.new`，再安装到当前 L1 的
+`/opt/sysbox/bin/generic/sysbox-runc`；未修改宿主 `/usr/bin/sysbox-runc`。产物：
+
+```text
+SHA-256: 96b6e231ba7d81bc42d848a2f7536bd4eec66e3d8961bd6ac4795b351fb9111c
+```
+
+用该最终产物新建 L2 Pod `nested-final-check`，结果为 `1/1 Running`，IP
+`10.244.0.23`，`uid_map` 为 `0 0 65536`；`lo` 无需手工操作即为
+`UP,LOWER_UP`，`eth0` 及 default route 正常，并能通过自动 CNI SNAT ping
+`223.5.5.5`。这证明
+`enableNestedLoopback()` 已实际部署生效，而不仅是手工 `ip link set lo up` 的行为
+推断。Pod 已删除，资源正常回收。
+
+相关单元测试已通过：
+
+```sh
+cd sysbox-runc
+go test -vet=off ./libcontainer/specconv ./libcontainer
+
+cd ../sysbox-mgr
+go test ./...
+```
+
+`sysbox-mgr` 的既有 shiftfs 用例若因缺少 `/mnt/scratch` 失败，不属于本次 nested
+改动。`sysbox-fs` 的既有未提交修复曾通过：
+
+```sh
+cd sysbox-fs
+go test ./seccomp ./process ./nsenter
+```
+
+## 未解决或待验证
+
+### 1. 出口 SNAT 配置已验证，Deployment 待固化
+
+L1 bridge CNI 原配置为 `ipMasq:false`，L2 源网段 `10.244.0.0/16` 没有 SNAT。
+现场把当前 L1 的 CNI 配置改为 `ipMasq:true` 后，新 L2 `nested-egress-check`
+自动生成只匹配 `10.244.0.21/32` 的 CNI MASQUERADE 规则。删除此前人工添加的
+`10.244.0.0/16` 规则后，该 L2 仍能 ping `223.5.5.5`、通过该 DNS 解析腾讯云
+registry，并访问 registry `/v2/` 获得预期 HTTP 401。删除 Pod 后，其 IPAM 文件和
+对应 NAT 规则均已释放。
+
+因此 `ipMasq:true` 是已实测通过的配置方案。尚需把 218 Deployment 内联生成 CNI
+配置的 `ipMasq:false` 正式改为 `true`；当前不能为此直接 rollout L1，因为外层
+sysbox-fs seccomp 注册问题尚未闭环。
+
+### 2. 极简测试镜像资产待固化
+
+L2 K3s 现场通过 L1 `/proc/<pid>/root` 补齐了 K3s 及运行资产。正式 helper/镜像需
+预置并校验 containerd、containerd-shim、CNI plugins、iptables 和 CA bundle，避免
+依赖现场复制。这是镜像资产问题，不是 nested CNI 缺陷。
+
+### 3. DNS 尚未验证
+
+本轮刻意禁用 CoreDNS，L3 Pod 的 `resolv.conf` 指向 `10.246.0.10`。虽然 nginx
+镜像拉取、Pod IP 数据面和 HTTP 已通过，但 DNS 没有验收证据，仍需启用 CoreDNS
+后单独验证 service name 和外部域名解析。
+
+### 4. overlay-on-FUSE 尚未解决
+
+- `/`、`/var/lib/docker`、`/var/lib/rancher/k3s` 已确认是 shared mount。
+- ext4 特殊目录上 kernel overlay mount 成功。
+- FUSE rootfs（例如其 `/tmp`）上的 overlay mount 失败。
+
+所以缺少 `make-shared` 不是根因，重复执行 `mount --make-shared` 不会解决
+overlay-on-FUSE。L3 K3s 续测应先使用 `snapshotter=native`；Docker 可用 `vfs`
+隔离验证网络，但这只是规避方案，不表示 overlay 已解决。
+
+### 5. 外层 rollout 的 sysbox-fs seccomp 注册问题
+
+重建 L1 Deployment 时，新 Pod 曾卡在：
+
+```text
+Rejected seccomp session for unregistered container ...
+Unable to receive expected seccomp-notif-ack
+```
+
+已执行 rollout undo，当前 L1 继续可用。该问题是旧 218 Deployment 的历史现场，
+尚未闭环；网络/L3 验证期间不要把普通复测和首次 chart 迁移混在一起随意 rollout。
+首次迁移确需加载新增 handler 时，应保存日志并从 L0 控制器受控滚动重建 L1 K3s
+Pod；handler 不变的后续二进制升级只滚动 nested agent，不重启 K3s。
+
+### 6. systemd、Docker 和完整二次 cgroup delegation
+
+- 早期曾以 `dockerd --iptables=false --storage-driver=vfs --bridge=none` 成功拉取
+  腾讯云 nginx 镜像；这只证明受限 daemon 可拉取，不是完整 Docker-in-Docker
+  验收。
+- systemd、默认 Docker bridge/iptables、K3s service/cgroup 上限隔离及压力回收仍待
+  验证。
+- CoreDNS 镜像拉取失败必须与 runtime/CNI 故障分开记录。
+
+## 快速回归测试
+
+### 1. 运行现有 L2 pause 回归脚本
+
+该脚本会发现 Running 的 L1 Pod，等待 inner Node 和 default ServiceAccount，创建
+`sysbox-runc` RuntimeClass 及 pause Pod，并检查 runtime、uid map 和 procfs：
+
+```sh
+cd /root/workspace/sysbox
+KUBECONFIG_218=/root/.kube/218.config \
+NAMESPACE=k3k-console-164315 \
+DEPLOYMENT=sysbox-inner-k3s-command-poc \
+bash w7panel-doc/tests/sysbox-in-sysbox-218.sh
+```
+
+脚本已使用 `awk` 对 `/proc/self/uid_map` 做数值比较，不受列对齐空格影响。也可用
+下面的命令独立复核：
+
+```sh
+KUBECONFIG_218=/root/.kube/218.config
+NS=k3k-console-164315
+DEPLOY=sysbox-inner-k3s-command-poc
+L1_POD="$(kubectl --kubeconfig "$KUBECONFIG_218" -n "$NS" get pod \
+  -l "app=$DEPLOY" --field-selector=status.phase=Running \
+  -o jsonpath='{.items[0].metadata.name}')"
+
+kubectl --kubeconfig "$KUBECONFIG_218" -n "$NS" exec "$L1_POD" -c k3s -- \
+  /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml -n default exec \
+  nested-sysbox-hostusers -- cat /proc/self/uid_map | \
+  awk 'NF == 3 && $1 == 0 && $2 == 0 && $3 == 65536 { ok=1 }
+       END { exit !ok }'
+```
+
+
+### 2. 核对 L1 与 L2 namespace
+
+```sh
+kubectl --kubeconfig "$KUBECONFIG_218" -n "$NS" get pod "$L1_POD" \
+  -o jsonpath='{.spec.runtimeClassName}{" "}{.spec.hostUsers}{"\n"}'
+
+kubectl --kubeconfig "$KUBECONFIG_218" -n "$NS" exec "$L1_POD" -c k3s -- \
+  /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml -n default exec \
+  nested-l2-k3s -- sh -c '
+    cat /proc/self/uid_map
+    readlink /proc/self/ns/user
+    readlink /proc/self/ns/net
+    ip -o link show lo
+    ip -o link show lo | grep -q "<LOOPBACK,UP"
+    mount | grep cgroup2
+    cat /sys/fs/cgroup/cgroup.controllers
+  '
+```
+
+预期第一条输出 `sysbox-runc false`；L2 映射必须为 `0 0 65536`，user/net namespace
+不得与 L1 相同，`lo` 必须为 UP，cgroup2 可写且 controllers 非空。
+`nested-final-check` 已用包含 `enableNestedLoopback()` 的最终 runc 完成过该端到端验证；
+后续回归仍应保留此断言。
+
+### 3. 快速 bridge/veth probe
+
+在 `nested-l2-k3s` 内执行一次可回收探测：
+
+```sh
+kubectl --kubeconfig "$KUBECONFIG_218" -n "$NS" exec "$L1_POD" -c k3s -- \
+  /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml -n default exec \
+  nested-l2-k3s -- sh -c '
+    set -eu
+    trap "ip link del nested-veth-a 2>/dev/null || true; ip link del cni3 2>/dev/null || true" EXIT
+    ip link add cni3 type bridge
+    ip link set cni3 up
+    ip link add nested-veth-a type veth peer name nested-veth-b
+    ip link set nested-veth-a master cni3
+    ip link set nested-veth-a up
+    ip link set nested-veth-b up
+    ip -d link show cni3
+    ip -d link show nested-veth-a
+  '
+```
+
+成功只证明 L2 child userns 拥有自己的 netns 并具备 bridge/veth 管理能力。删除 L2
+Pod 后还应检查持久 netns handle、L1 `cni0` slave 和 host-local IPAM 是否恢复，才算
+生命周期验收完成。
+
+### 4. 快速验证 L2 出口
+
+L1 bridge CNI 必须为 `10.244.0.0/16` 提供受控 MASQUERADE。验证 L1 公网、DNS
+和 L2 出口：
+
+```sh
+# L1 视角
+kubectl --kubeconfig "$KUBECONFIG_218" -n "$NS" exec "$L1_POD" -c k3s -- \
+  sh -c 'ping -c 1 -W 2 223.5.5.5; nslookup ccr.ccs.tencentyun.com 10.43.0.10'
+
+# L2 视角
+kubectl --kubeconfig "$KUBECONFIG_218" -n "$NS" exec "$L1_POD" -c k3s -- \
+  /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml -n default exec \
+  nested-l2-k3s -- sh -c '
+    ping -c 1 -W 2 10.244.0.1
+    ping -c 1 -W 2 10.42.0.74
+    ping -c 1 -W 2 223.5.5.5
+  '
+```
+
+若最后一条失败，检查 L1 bridge CNI 的 `ipMasq` 和 `10.244.0.0/16` 对应的
+masquerade 规则。成功条件是 L2 能访问公网并建立到
+`ccr.ccs.tencentyun.com` 的 TLS 连接；只改 `/etc/resolv.conf` 而未恢复出口不算
+解决。
+
+## L3 K3s/nginx 快速复测
+
+先确认 L2 的 `10.244.0.0/16` 已有 SNAT/出口，再按已通过配置启动 K3s；不要用
+Docker Hub 镜像判断 CNI：
+
+- K3s `v1.35.6`；
+- `snapshotter=native`；
+- `flannel-backend=none`；
+- bridge CNI 使用独立 `10.245.0.0/16` 网段；
+- 初次隔离验证可关闭 kube-proxy 和 network-policy。
+
+确认 L2 能访问腾讯云 registry 后，向 L2 K3s 提交：
 
 ```yaml
 apiVersion: v1
 kind: Pod
 metadata:
-  name: sysbox-use-namespace
+  name: nginx-ccr
+  namespace: default
 spec:
-  runtimeClassName: sysbox-runc
-  hostUsers: false
   containers:
-    - name: workload
-      image: docker.cnb.cool/i0358/zpk/nested-pause:20260810-1
-      command: ["/bin/sh", "-c", "sleep 3600"]
+    - name: nginx
+      image: ccr.ccs.tencentyun.com/afan-public/nginx:latest
+      imagePullPolicy: IfNotPresent
 ```
 
-这里 `runtimeClassName: sysbox-runc` 决定 containerd 使用 Sysbox runtime；`hostUsers: false` 才会让 Pod 使用独立 user namespace。Kubernetes 没有名为 `use-namespace` 的标准 Pod 字段，因此 `use-namespace` 在本文中是验收条件名称，不是额外 YAML key。不得只检查 Pod 的 `Running` 状态，必须同时检查实际 Pod 配置和容器内的 user namespace：
-
-```sh
-kubectl get pod sysbox-use-namespace -o jsonpath='{.spec.runtimeClassName}{"\n"}{.spec.hostUsers}{"\n"}'
-kubectl exec sysbox-use-namespace -- cat /proc/self/uid_map
-kubectl exec sysbox-use-namespace -- readlink /proc/self/ns/user
-```
-
-预期结果为 `sysbox-runc`、`false`，以及非宿主初始 user namespace 的映射；若任一条件不满足，本次测试失败。
-
-## 复测脚本
-
-`tests/sysbox-in-sysbox-218.sh` 在 218 的外层 PoC 已就绪后，创建 inner
-`RuntimeClass`（`sysbox-runc-inner`）和 pause Pod，并输出
-inner 节点、Pod 与事件。脚本先等待 inner Node Ready 和 `default` ServiceAccount，
-避免刚重建 K3s 时创建 Pod 报 `serviceaccount "default" not found`。默认使用 `~/.kube/218.config`；可通过 `NAMESPACE`、
-`DEPLOYMENT`、`KUBECONFIG_218` 覆盖。
-
-## 测试镜像
-
-| 镜像 | 启动方式 | 测试用途与结果 |
-| --- | --- | --- |
-| `docker.cnb.cool/i0358/zpk/nested-pause:20260810-1` | 镜像默认命令，`runtimeClassName: sysbox-runc-inner` | 最小 pause PoC；验证 inner Sysbox Pod Running、CNI、`kubectl exec` 以及 `free -h`、`top`、`ps -ef` 可读取真实 procfs 数据。 |
-| 普通非 systemd 工作负载 | 直接启动业务进程，`runtimeClassName: sysbox-runc-inner` | 当前目标；只验证 Sysbox runtime 与独立 user namespace 两个条件，不启动 systemd 或 Docker daemon。 |
-
-历史 systemd/Docker 镜像测试结果不再作为当前验收依据；此前的镜像 digest 和手动 `dockerd` 拉取记录仅用于追溯，不要求复测。
-
-## `/proc` 执行例外（仅 PoC）
-
-inner CNI 创建 network namespace 时需执行 `/proc/self/exe`。外层 Sysbox 默认将 `/proc` 挂为 `noexec`，因此新增严格 opt-in 注解：
-
-```yaml
-metadata:
-  annotations:
-    sysbox/allow-proc-exec: "true"
-```
-
-仅小写字符串 `"true"` 生效；缺失、`false`、`TRUE` 都保留默认 `noexec,nosuid,nodev`。containerd 必须同时将该 key 配到 `pod_annotations` 与 `container_annotations`：前者保存 sandbox 元数据，后者才会传到实际 K3s 容器的 OCI spec。runtime 仅移除该 outer Pod `/proc` 的 `noexec`。它降低了容器隔离边界，仅限本 PoC，不能作为生产默认配置。
-
-inner command-mode 使用专用 `sysbox-runc-inner` handler，而不是依赖 Pod 注解。wrapper 在 runc 父进程设置标志，`initConfig` 再可靠地传递到各 init helper。该模式跳过不可在 nested user namespace 创建的 proc/sys mount、Sysbox-FS emulated-source bind mount、sysctl 与只读挂载检查；因此仅适合最小 pause PoC，不能作为生产系统容器语义。
-
-## 内层 procfs 修复
-
-`sysbox-runc-inner` 恢复挂载 `/proc` 时，该 `mount("proc", "/proc", ...)` 会被**外层** `sysbox-fs` 的 seccomp notifier 捕获。旧路径通过外层的 nsenter helper 代理挂载；代理进入外层 user namespace 后，不再拥有内层 user namespace 所需的语义，内核返回 `EINVAL`，结果是 Pod 虽能运行但 `/proc` 为空，`free`、`top`、`ps` 均失败。
-
-修复位于 `sysbox-fs/seccomp/mount.go`：当请求进程的 user-namespace inode 与外层容器 init 进程不同时，仍由 Sysbox-FS 代理 procfs mount，但 nsenter 改为进入目标的 mount/pid/network 等命名空间而**不进入** child user namespace。这样保留外层的挂载能力。直接让内核执行会因 child user namespace 返回 `EPERM`；进入全部 namespace 会返回 `EINVAL`。相同 user namespace 的常规 Sysbox procfs 挂载仍走原有 `AllNSs` 路径。
-
-该请求还会在 tracer 的通用 `CAP_SYS_ADMIN` 检查前被识别：inner runc 在 child user namespace 中不具备该 capability，若照常拒绝则 nsenter helper 根本不会执行。例外仅限 `proc` 且 user-namespace inode 与外层 init 不同的请求；其他挂载仍必须通过原有 capability 检查。
-
-218 复测时需使用 `Dockerfile.sysbox-inner-helper` 构建的新 helper；它以已验证的 `copyhelper:20260811-66` 为基础，只替换本次构建的 `sysbox-runc` 和 `sysbox-fs`，其余静态工具与脚本不变。
-
-## 后续风险
-
-1. 用 `hostNetwork: true` 绕过 CNI 不可行：Sysbox 必须使用 user namespace，拒绝与 host 共享 network/uts namespace。
-2. 即使 CNI 成功，外层 user namespace 只有一个 65536-ID 映射；inner Sysbox 的 subuid 分配是否可用仍需单独验证。这是上游明确不支持 nesting 的核心风险。
-
-因此，当前 PoC 已证明“无 systemd K3s 内可 command 启动 Sysbox daemon”和“inner K3s 的普通 CNI 可用”。应用此例外后继续验证 inner Sysbox Pod；若仍失败，优先检查 user namespace 映射。
-
-## 2026-08-10 复测结论
-
-218 上 outer Pod 加注解并重建后，`/proc` 挂载从 `rw,nosuid,nodev,noexec` 变为 `rw,nosuid,nodev`。containerd 的 `pod_annotations` 只会出现在 pause sandbox；补上 `container_annotations` 后，实际 K3s workload OCI spec 才收到注解。
-
-## 2026-08-11 验收结论
-
-218 已验证 `nested-sysbox-hostusers` 为 `1/1 Running`。专用 handler 采用
-`1:65535` 子 ID 范围：外层映射仅有 `0..65535`，且 ID 0 不能再映射给内层
-root。`sysbox-mgr` 与 `sysbox-runc` 必须同步使用此范围；同时专用模式跳过
-隐式特殊目录卷，否则其 parent-namespace `chown` 会失败。该结论仍只覆盖
-pause PoC，未覆盖生产系统容器语义。
-
-## 2026-08-11 测试问题记录
-
-| 现象 | 已确认原因 | 处理与结果 |
-| --- | --- | --- |
-| inner K3s 刚启动时创建 Pod 报 `serviceaccount "default" not found` | outer Pod Ready 不等于 inner API 初始化完成 | 测试脚本等待 inner Node Ready 与 default ServiceAccount 后再创建 Pod。 |
-| helper 中 `sysbox-runc`、`sysbox-fs` 返回 `127` 或 `not found` | K3s 镜像没有动态加载器和 `libseccomp` | inner helper 必须使用 `make static` 产物；Dockerfile 只替换 runc/fs，保留已验证的静态工具。 |
-| inner Pod 可 Running 但 `/proc` 为空，`free/top/ps` 失败 | 早期专用模式为绕过 mount 权限跳过 procfs | 已将 procfs 恢复为测试目标，不再以空 `/proc` 作为成功判据。 |
-| inner runc 直接 `mount proc` 返回 `EPERM` | 第三层 user namespace 在 outer Sysbox 边界内无法完成 procfs mount；清空 inner RuntimeDefault seccomp 后仍复现 | 已排除 K3s seccomp 是根因；outer K3s 自身可 mount procfs。正在验证专用 handler 不创建第三层 user namespace 的路径。 |
-| 以 `/proc/1/ns/user` 加入 outer user namespace时 runc 返回 `EOF` | nsexec 不能用该路径加入同一 user namespace | 改为专用模式不请求 `NEWUSER`，仍保留其他隔离 namespace；同时跳过 OCI UID/GID mappings 与 rootfs UID shifting。 |
-| no-third-userns helper 启动时返回 `exit status 2` | 已确认 OCI UID/GID mappings 不能与缺失 `NEWUSER` 并存；首轮跳过 mappings 后仍有未记录的 runc 参数/验证错误 | 正在从 containerd task shim 日志读取准确错误；未将该路径记为成功。 |
-| parent rootfs helper 挂 procfs 返回 `EPERM` | helper 保留 outer user namespace，仍不是 inner mount namespace owner | 不作为最终路径；保留该结果以说明为什么需要消除第三层 user namespace。 |
-
-每次后续 218 复测均应在本节追加一行：记录 helper tag、命令、Pod phase、`kubectl exec` 输出或失败事件，避免将构建成功误记为验收成功。
-
-### 测试记录规则
-
-后续每次测试，无论通过或失败，均必须在本节记录：测试时间、helper 镜像 tag、执行命令、Pod phase、关键日志/事件、原因判断、采取的处理以及复测结论。网络、镜像拉取等环境问题也需记录，并与产品逻辑问题明确区分。
-
-| 现象 | 已确认原因 | 处理与结果 |
-| --- | --- | --- |
-| helper `20260811-84` 的 inner `nested-sysbox-hostusers` 持续 `ContainerCreating`，且无容器启动事件 | containerd 已创建 shim，`sysbox-runc-inner` 已走完 `rootfsReadyAck`、`procReady`、`procRun`，随后卡在 exec FIFO；清理时移除了 O_RDWR FIFO writer 的短暂保留，`runc start` 因此无法读到握手字节。inner 基础组件同时有 Docker Hub 拉取超时，但测试 pause 镜像已成功拉取，不能将其误判为本 Pod 根因。 | 恢复专用模式在 FIFO 写入后的 2 秒保留；作为一次回归单独记录，待以新 helper 复测后再判定通过。 |
-| 2026-08-11 14:33 HKT，helper `20260811-85`；`bash w7panel-doc/tests/sysbox-in-sysbox-218.sh`；`nested-sysbox-hostusers` `1/1 Running` | inner Node `nested-poc` Ready，default ServiceAccount 存在；事件为 Scheduled/Pulled/Created/Started，无失败事件；`free -h` 显示 Mem total 60.5G/free 46.8G，`top` 与 `ps -ef` 可见 PID 1 及 exec 进程 | 先恢复被环境误删的 outer `RuntimeClass/sysbox-runc`，再强制 rollout 使 deployment 实际使用 `20260811-85`；inner RuntimeClass 创建成功，pause Pod 及 procfs 工具验收通过。 |
-| 2026-08-11 14:55 HKT，helper `20260811-85`；inner image `docker.cnb.cool/i0358/docker-images-chrom/nestybox-ubuntu-bionic-systemd-docker`；PID 1 `/sbin/init`；执行 `docker pull ccr.ccs.tencentyun.com/afan-public/nginx:latest` | `nested-systemd-docker` 为 `1/1 Running`，实际 `runtimeClassName=sysbox-runc-inner`。专用 handler 下 systemd 为 `offline`，dockerd 不会自动启动；默认 dockerd 又因 overlay mount 与 iptables 权限失败。inner CoreDNS 无响应，且 CNI 使用 `ipMasq:false`，外网连接没有 SNAT。 | 以 `dockerd --iptables=false --storage-driver=vfs --bridge=none` 启动仅用于 pull 的 daemon；测试 Pod 临时写入 registry hosts 解析，outer K3s Pod 临时增加 `10.244.0.0/16` MASQUERADE。pull 成功，image ID `sha256:9a9a9fd723f1...c4c43`，registry digest `sha256:29cf9892ca11...159f`。这只证明受限配置下可 pull，不代表完整 systemd/Docker-in-Docker 语义已通过。 |
-| 2026-08-12；临时 L1 `sysbox-nested-l1-v3`，当前构建 `sysbox-runc/sysbox-fs/sysbox-mgr`；L2 `nested-l2-v3` | L2 未进入容器进程：`failed to pre-register with sysbox-fs`。L1 `sysbox-fs` 日志先报缺少 `fusermount3`，补齐后又报 `fuse device not found`；L2 保持 `Created`，无 procfs、systemd 或 Docker 验收结果。 | 已保存 L1 日志与 inspect 到 `/tmp/sysbox-nested-handoff-20260812`，停止临时容器，并恢复宿主 `/usr/bin/sysbox-fs` 为 `sysbox-fs.host-original`。该次为 FUSE 设备/工具环境失败，不作为 seccomp listener 或 namespace 逻辑结论。 |
-| 2026-08-12；`bash w7panel-doc/tests/sysbox-in-sysbox-218.sh`；目标 Pod 使用 `sysbox-runc-inner`、`hostUsers: false` | Pod 持续 `ContainerCreating`；sandbox 事件为 `failed to create network namespace`，原因是 `fork/exec /proc/self/exe: operation not permitted`。检查 outer K3s 容器确认 `/proc` 仍为 `rw,nosuid,nodev,noexec`。 | 未进入目标容器，因此没有 `uid_map` 或 procfs 验收结果；判定为 outer Pod 的 `sysbox/allow-proc-exec` 未传递到实际 K3s 容器 OCI spec。inner K3s 模板已补充 `sysbox-runc-inner` 的 `pod_annotations` 与 `container_annotations`，但需要用包含该模板的新版 helper/重建 outer Pod 后复测。 |
-
-## 2026-08-11 最终验收（helper `20260811-83`）
-
-专用 `sysbox-runc-inner` 不创建第三层 user namespace，并相应跳过 UID/GID mapping、rootfs UID shifting；inner Pod 仍有独立 pid/ipc/uts/mount/network/cgroup/time namespace，运行于 outer Sysbox 的 user namespace。此限制是当前内核/外层 Sysbox 边界下让 procfs 可用的必要条件。
-
-218 证据：`k3k-console-164315/sysbox-inner-k3s-command-poc-f785bbf54-kjksq` 内的 inner Pod `default/nested-sysbox-hostusers` 为 `1/1 Running`。通过 outer → inner K3s 的 `kubectl exec` 实际执行：
-
-```text
-free -h: Mem total 60.5G, free 46.7G
-top -b -n 1: 可见 PID 1、top、head
-ps -ef: 可见 PID 1 与 exec 进程
-```
-
-这证明 `/proc/meminfo` 和进程目录均为真实可读数据，而非空目录。`tests/sysbox-in-sysbox-218.sh` 已将三条命令纳入成功条件后的输出，后续复测会同时覆盖 Pod Running 与 procfs 工具。
-
-## 本次文件改动说明
-
-| 文件 | 修改目的 |
-| --- | --- |
-| `sysbox-runc/libcontainer/configs/config.go` | 增加专用 nested command-mode 配置标记。 |
-| `sysbox-runc/libcontainer/specconv/spec_linux.go` | 从 `sysbox-runc-inner` wrapper 环境生成该标记，避开 CRI 注解丢失。 |
-| `sysbox-runc/libcontainer/{container_linux.go,standard_init_linux.go}` | 为无 `/proc` 的子进程保留 exec FIFO 启动握手，避免 `ContainerCreating` 卡住。 |
-| `sysbox-runc/libcontainer/{init_linux.go,rootfs_init_linux.go,rootfs_linux.go}` | 专用模式跳过不适用的 sysfs 与 Sysbox-FS overmount；procfs 在复用 outer user namespace 后由 inner init 正常挂载，`init_linux.go` 同时保证 `kubectl exec` 可用。 |
-| `sysbox-runc/libsysbox/syscont/spec.go` | 专用模式不创建第三层 user namespace，并跳过其 UID/GID mapping、rootfs UID shifting。 |
-| `sysbox-runc/libcontainer/process_linux.go` | 无 UID/GID mapping 时以零值注册 Sysbox-FS，修复 registration panic。 |
-| `sysbox-runc/libcontainer/process_linux.go` | 调整专用模式父子同步、FD 生命周期与诊断轨迹。 |
-| `sysbox-runc/libsysbox/syscont/spec.go` | 专用模式跳过隐式特殊目录卷，并将 inner 映射降为 `1:65535`。 |
-| `sysbox-runc/libsysbox/syscont/spec_test.go` | 覆盖特殊目录和映射相关的行为。 |
-| `sysbox-mgr/utils.go` | 启动 mgr 时保留专用模式的 `1:65535` subuid/subgid，而不重写成默认 65536 块。 |
-| `sysbox-mgr/subidAlloc/subidAllocSimple.go` | 允许专用模式分配 65535-ID 范围。 |
-| `sysbox-fs/seccomp/mount.go` | 对 child user namespace 的内层 procfs mount 让内核原地执行，避免外层 nsenter 代理导致 `EINVAL`。 |
-| `sysbox-fs/seccomp/tracer.go` | 仅放行 child user namespace 的 procfs 请求通过 capability 预检，让受控 nsenter 代理实际执行挂载。 |
-| `sysbox-pkgr/k8s/Dockerfile.sysbox-k3s` | 向部署镜像加入 nested command-mode 所需静态工具。 |
-| `sysbox-pkgr/k8s/scripts/sysbox-deploy-k8s.sh` | 支持部署命令模式的内层 Sysbox。 |
-| `sysbox-pkgr/k8s/scripts/sysbox-inner-k3s.sh` | 新增：在无 systemd K3s 容器内直接启动 mgr、fs、containerd handler，并把 nested 环境传给 mgr。 |
-| `w7panel-doc/tests/sysbox-in-sysbox-218.sh` | 新增：固定选择 Running outer Pod，等待 inner K3s 就绪后创建 RuntimeClass/pause Pod 并断言 Running。 |
-| `w7panel-doc/Dockerfile.sysbox-inner-helper` | 从已验证 helper 最小替换 runc/fs，确保 218 PoC 使用当前嵌套修复二进制。 |
-| `CHANGELOG.md`、`sysbox-runc/CHANGELOG.md`、`sysbox-mgr/CHANGELOG.md` | 记录改动、触发条件和预期效果。 |
-
-## 交接说明（2026-08-12）
-
-### 当前代码状态
-
-本轮工作仍未提交、未推送；根仓库及多个子模块均存在用户已有的未提交改动，接手时不得使用 `git reset --hard`、`git checkout --` 或批量清理。当前重点改动包括：
-
-- `sysbox-runc/libcontainer/nsenter/nsexec.c`：加入 namespace 的顺序调整。加入 `pid/mnt/net/...` 后最后才进入目标 user namespace，避免进入 L2 userns 后再 `setns(pid)` 返回 `EPERM`；同时保留 nsexec log pipe，以便 EOF 时输出实际失败点。
-- `sysbox-fs/nsenter/event.go`：将 `_LIBCONTAINER_LOGPIPE` 接入 nsenter 子进程，bootstrap 失败会带出 `setns`/同步错误，而不是只报告 `Error receiving first-child pid: EOF`。
-- `sysbox-fs/seccomp/{syscall.go,mount.go,umount.go}`：为 nested 请求选择目标 namespace 路径，并记录 proc/sysfs helper 错误。nested 挂载必须进入 L2 的 mount/pid namespace；不能把 L1 的 `/proc` bind 到 L2。
-- `sysbox-runc/libcontainer/rootfs_linux.go`：nested 模式在 rootfs early 阶段跳过 proc/sysfs 直接 mount，延迟到 init 进程发出 mount syscall 后由 seccomp-notify 处理。
-- `sysbox-runc/utils_linux.go` 与 `libsysbox/syscont/spec.go`：nested 仍跳过 L1 的 Sysbox-FS 特殊 FUSE 注入和 L1 mgr `FsState`，但必须生成 mount/umount 的 seccomp-notify 规则。
-- `sysbox-runc/libcontainer/init_linux.go`：nested 不允许安装第二个 seccomp-notify listener；内核会返回 `EBUSY`，因此尝试复用继承的 listener。
-- `sysbox-runc/libsysbox/syscont/spec_test.go`：专用 wrapper 不再删除 user namespace；nested-identity 必须始终创建新的 child userns。
-
-### 最新测试结论
-
-记录交接时宿主上的 `sysbox-mgr`、`sysbox-fs`、Docker 均为 `active`，但 `/usr/bin/sysbox-fs` 仍是本轮临时测试构建（其 SHA-256 与 `/tmp/sysbox-nested-bin/sysbox-fs` 相同），尚未恢复 `/tmp/sysbox-nested-bin/sysbox-fs.host-original`。接手后已保存日志、停止临时容器，并恢复宿主二进制；使用当前构建的静态 `sysbox-runc`、`sysbox-fs`、`sysbox-mgr` 在临时 L1 中测试：
-
-1. L1 使用 `nestybox-ubuntu-bionic-systemd-docker` 和 `/sbin/init` 启动成功，L1 映射为 `0 165536 65536`。
-2. L1 内 `unshare -Urnm` 的独立 `sysfs` 与 `proc` 挂载均已成功，证明 L0 seccomp listener、nsenter 和 mount helper 的 namespace 顺序修复有效。
-3. L2 首次启动曾在 `rootfs_linux.go` 直接挂载 sysfs 处失败：`mount through procfd: operation not permitted`；已改为延迟 mount。
-4. 恢复 L2 mount/umount seccomp-notify 规则后，L2 尝试自行安装第二个 listener，内核明确返回：`error loading seccomp filter: device or resource busy`。这证明“L2 独立安装第二个 listener”不可行；最终实现必须让 L1/L2 共享或由 L0 统一管理 listener，并且还要确认 seccomp-notify fd 是否能跨 clone/userns 正确传递。
-5. `sysbox-nested-l1-v3` 内的 `nested-l2-v3` 已进入 `running`，但 `/proc` 是空目录，`/proc/self/uid_map` 与 `/proc/1/comm` 均不存在，`systemctl is-system-running` 为 `offline`。这只证明 create/start 握手和容器进程存活，不能记作 systemd、Docker 或独立 procfs 验收通过。
-
-### 接手后的首要任务
-
-优先检查 `sysbox-runc` 的 seccomp-notify fd 生命周期：`process_linux.go` 中 L2 init 是否继承 L1 已安装的 listener fd，`standard_init_linux.go` 是否在 nested 模式错误地把 `SeccompNotif` 清空，父进程是否仍把 listener fd 注册到正确的 L0/L1 `sysbox-fs` tracer。目标是让 L2 的 `mount("proc")`、`mount("sysfs")`、`umount2` 被已有 listener 捕获，并由 L0 `sysbox-fs` 在 L2 mount/pid/user namespace 坐标中完成。
-
-可重复的最小验证命令（在 L1 内）：
-
-```sh
-mkdir -p /tmp/sys /tmp/proc
-unshare -Urnm sh -c 'mount -t sysfs sysfs /tmp/sys'
-unshare -Urnm sh -c 'mount -t proc proc /tmp/proc'
-```
-
-完整 L2 验收必须同时检查：
-
-```sh
-cat /proc/self/uid_map          # nested-identity 目标为 0 0 65536
-cat /proc/1/comm                # 应为 systemd，而不是 L1 的 PID 1
-mount | grep -E ' on /(proc|sys) '
-systemctl is-system-running
-systemctl is-active docker
-docker pull ccr.ccs.tencentyun.com/afan-public/nginx:latest
-```
-
-### 构建、替换与恢复
-
-Go 缓存应放在 `/tmp`，避免写入只读的 `/root/go`。静态产物输出到 `/tmp/sysbox-nested-bin`，再挂入测试 L1。若临时替换宿主 `/usr/bin/sysbox-fs`，必须先备份并在测试结束恢复：
-
-```sh
-install -m 0755 /usr/bin/sysbox-fs /tmp/sysbox-nested-bin/sysbox-fs.host-original
-install -m 0755 /tmp/sysbox-nested-bin/sysbox-fs /usr/bin/sysbox-fs
-systemctl restart sysbox-fs
-
-# 测试结束
-install -m 0755 /tmp/sysbox-nested-bin/sysbox-fs.host-original /usr/bin/sysbox-fs
-systemctl restart sysbox-fs
-systemctl is-active sysbox-mgr sysbox-fs docker
-```
-
-临时容器命名通常使用 `sysbox-nested-l1-v3` 和 `nested-l2-v3`；清理前先确认状态和日志，避免在 sysbox-fs 正在处理 FUSE 请求时强制删除导致宿主服务卡住。所有测试记录需注明时间、helper 构建版本、L1 是否使用 `seccomp=unconfined`、L2 Pod/容器状态、关键错误和恢复动作。
-
-## 交接补充（2026-08-12 后续测试）
-
-### 本轮代码变更
-
-为解决 L2 rootfs 初始化阶段直接挂载 proc/sysfs 返回 `EPERM`，`sysbox-runc/libcontainer/standard_init_linux.go` 新增 `mountNestedSpecialFilesystems()`：在 L2 完成 rootfs 初始化并向父 runc 发送 `rootfsReady`、完成 sysbox-fs 注册后，按 OCI mount 配置主动发出 procfs/sysfs mount syscall。设计意图是让已有的 seccomp-notify listener 捕获这些 syscall，再由 sysbox-fs 在 L2 的 mount/pid namespace 中处理。
-
-同时保留以下约束：
-
-- nested rootfs early 阶段不直接 mount proc/sysfs；
-- nested 不注入 L1 的 Sysbox-FS 特殊 FUSE mount，也不读取 L1 mgr `FsState`；
-- nested 不安装第二个 seccomp-notify listener。内核实测第二次安装返回 `EBUSY`（`device or resource busy`）；
-- nested 必须创建 child user namespace，映射目标为 `0 0 65536`；
-- nsexec 加入 namespace 时最后进入 user namespace，避免进入 L2 userns 后再加入 PID/mount namespace 导致 `EPERM`。
-
-相关构建测试通过：
-
-```sh
-GOPATH=/tmp/sysbox-go-path \
-GOCACHE=/tmp/sysbox-go-build \
-GOMODCACHE=/tmp/sysbox-go-mod \
-go test -vet=off ./libcontainer/specconv ./libsysbox/syscont \
-  ./libcontainer/cgroups/fs2 ./libcontainer/cgroups/systemd
-```
-
-### 最新临时 L1/L2 测试结果
-
-当前临时容器为 `sysbox-nested-l1-v3`，其 L2 测试容器为 `nested-l2-v3`。L1 使用 `/sbin/init` 启动，inner `sysbox-mgr` 已能在安装 `rsync` 后创建 `/run/sysbox/sysmgr.sock`。但 L2 尚未进入 runc 挂载验证，最新失败发生在 inner sysbox-fs pre-registration：
-
-```text
-fusermount3: fuse device not found, try 'modprobe fuse' first
-Container pre-registration error: unable to initialize fuseServer
-```
-
-此前还出现过：
-
-```text
-fusermount: exec: "fusermount3": executable file not found in $PATH
-```
-
-因此这次失败属于测试镜像/运行环境依赖问题，不是 proc/sysfs 延迟挂载逻辑本身。L1 必须同时满足：
-
-```sh
-test -c /dev/fuse
-command -v fusermount3
-rsync --version
-```
-
-旧版 Ubuntu 镜像通常只有 `/bin/fusermount`；可在测试环境建立 `fusermount3 -> /bin/fusermount`，但仍必须确认 `/dev/fuse` 在 inner L1 内可用，并且 FUSE 设备/模块权限没有被外层 seccomp 或设备策略拦截。若 `fusermount3` 报 `fuse device not found`，应先检查：
-
-```sh
-ls -l /dev/fuse
-test -e /sys/module/fuse || modprobe fuse
-```
-
-不能把此状态记录为 L2 启动成功。
-
-### 继续测试顺序
-
-1. 在全新 L1 中确认 `/dev/fuse`、`fusermount3`、`rsync`，再启动 inner mgr/fs；不要在 Docker daemon 重启后假定手工启动的 inner 服务仍存在。
-2. 确认 `/run/sysbox/sysmgr.sock`、`/run/sysbox/sysfs.sock` 后，重新注册 `sysbox-runc-inner` runtime，再创建 L2。
-3. L2 成功启动后检查：
-
-   ```sh
-   ls -ld /proc /sys
-   cat /proc/self/uid_map
-   cat /proc/1/comm
-   mount | grep -E ' on /(proc|sys) '
-   systemctl is-system-running
-   ```
-
-4. 每次失败都记录 helper 构建时间、L1 是否使用 `seccomp=unconfined`、inner mgr/fs 日志和容器状态；特别区分 `fusermount3`/`/dev/fuse` 环境错误与 seccomp listener、namespace、rootfs mount 逻辑错误。
-
-### 当前宿主恢复提示
-
-本轮测试曾临时替换宿主 `/usr/bin/sysbox-fs`。结束测试前必须恢复备份并重启服务：
-
-```sh
-install -m 0755 /tmp/sysbox-nested-bin/sysbox-fs.host-original /usr/bin/sysbox-fs
-systemctl restart sysbox-fs
-systemctl is-active sysbox-mgr sysbox-fs docker
-```
-
-临时 L1 已清理；后续如重启测试，清理前先保存 `/var/log/sysbox-inner/{mgr,fs,runc}.log`，避免直接强制删除导致 FUSE 请求残留。文档和代码均未提交、未推送。
+复测必须同时记录：
+
+1. L2 K3s node `Ready`；
+2. nginx Pod `Running` 且获得 `10.245.x.x`，不是 `hostNetwork`；
+3. L2 出现对应 `cni3`/veth；
+4. L2 访问 nginx Pod HTTP 返回 200；
+5. 镜像确由指定腾讯云地址拉取并记录 image ID；
+6. DNS 是独立待测项；启用 CoreDNS 后才可记录为通过；
+7. 删除 Pod 后对应 veth、IPAM 文件和 NAT 规则消失；`cni3` 保留属正常。
+
+## 部署与安全注意事项
+
+- 正式部署使用
+  `docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-2`（digest
+  `sha256:e337c1346a53f35f84156d2761b3ccd22224d6630cfd7bb0a487ee8d52d67df4`）。
+  不要把此前 `/opt/sysbox-nested-build` 或 `/opt/sysbox/bin/generic` 的现场测试文件
+  当作发布安装路径。
+- nested agent 将内层二进制安装到 `/var/lib/sysbox-inner/bin`。内部
+  `sysbox-runc-inner` wrapper 只是固定注入 `nested-identity` 的实现细节；Pod YAML、
+  RuntimeClass 名和 handler 均统一使用 `sysbox-runc`。
+- inner mgr 启动时 `PATH` 必须包含内层二进制目录；当前 agent 已负责设置：
+
+  ```sh
+  PATH=/var/lib/sysbox-inner/bin:$PATH
+  ```
+
+  否则会误报 `rsync is not installed on host`。
+- **内部 chart 安装不要求也不会触发 L0 宿主重启。**不要为了内层网络复测替换或
+  重启 L0 的 `sysbox-runc`、sysbox-mgr；只有首次迁移旧 L1、需要让 containerd 加载
+  新 handler 时，才从 L0 控制器滚动重建对应 L1 K3s Pod。
+- 临时资源删除前先保存 inner mgr/fs/runc 和 K3s 日志；删除后检查 netns、veth、
+  IPAM 和 cgroup 回收。
+- 每次复测记录时间、二进制或 helper 版本、L1/L2/L3 phase、uid map、namespace
+  inode、关键事件、错误归类及清理结果。构建成功、Pod `Running` 和完整功能验收是
+  三个不同状态，不得混写。

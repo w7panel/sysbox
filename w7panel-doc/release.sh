@@ -249,8 +249,16 @@ package_chart() {
     [[ -d "${CHART_DIR}" ]] || die "chart directory not found: ${CHART_DIR}"
     need_cmd "${HELM}"
 
-    info "Lint Helm chart ${CHART_DIR}"
-    "${HELM}" lint "${CHART_DIR}"
+    info "Verify Helm chart rejects an omitted installMode"
+    if "${HELM}" lint "${CHART_DIR}" >/dev/null 2>&1; then
+        die "chart unexpectedly accepts an omitted installMode"
+    fi
+
+    info "Lint Helm chart ${CHART_DIR} in host mode"
+    "${HELM}" lint "${CHART_DIR}" --set installMode=host
+
+    info "Lint Helm chart ${CHART_DIR} in nested mode"
+    "${HELM}" lint "${CHART_DIR}" --set installMode=nested
 
     info "Package Helm chart ${CHART_DIR}"
     "${HELM}" package "${CHART_DIR}" \

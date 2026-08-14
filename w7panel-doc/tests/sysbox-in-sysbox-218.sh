@@ -32,13 +32,13 @@ done
 [ "$service_account" = serviceaccount/default ] || { echo "inner default service account was not created" >&2; exit 1; }
 inner_kubectl get nodes
 outer_kubectl -n "$namespace" exec "$outer_pod" -c k3s -- \
-  /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml delete runtimeclass sysbox-runc-inner --ignore-not-found
+  /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml delete runtimeclass sysbox-runc --ignore-not-found
 outer_kubectl -n "$namespace" exec "$outer_pod" -c k3s -- /bin/sh -c \
-  'printf "%s" "{\"apiVersion\":\"node.k8s.io/v1\",\"kind\":\"RuntimeClass\",\"metadata\":{\"name\":\"sysbox-runc-inner\"},\"handler\":\"sysbox-runc-inner\"}" | /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml apply -f -'
+  'printf "%s" "{\"apiVersion\":\"node.k8s.io/v1\",\"kind\":\"RuntimeClass\",\"metadata\":{\"name\":\"sysbox-runc\"},\"handler\":\"sysbox-runc\"}" | /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml apply -f -'
 inner_kubectl -n default delete pod "$pod" --ignore-not-found
 inner_kubectl -n default run "$pod" \
   --image=docker.cnb.cool/i0358/zpk/nested-pause:20260810-1 --restart=Never \
-  --overrides='{"metadata":{"annotations":{"sysbox/allow-proc-exec":"true"}},"spec":{"runtimeClassName":"sysbox-runc-inner"}}'
+  --overrides='{"metadata":{"annotations":{"sysbox/allow-proc-exec":"true"}},"spec":{"runtimeClassName":"sysbox-runc"}}'
 for _ in $(seq 1 12); do
   phase="$(inner_kubectl -n default get pod "$pod" -o jsonpath='{.status.phase}')"
   [ "$phase" = Running ] && break
@@ -49,14 +49,17 @@ inner_kubectl -n default get events --sort-by=.lastTimestamp | tail -20
 phase="$(inner_kubectl -n default get pod "$pod" -o jsonpath='{.status.phase}')"
 [ "$phase" = Running ]
 runtime_class="$(inner_kubectl -n default get pod "$pod" -o jsonpath='{.spec.runtimeClassName}')"
-[ "$runtime_class" = sysbox-runc-inner ] || {
+[ "$runtime_class" = sysbox-runc ] || {
   echo "unexpected runtimeClassName: $runtime_class" >&2
   exit 1
 }
 uid_map="$(inner_kubectl -n default exec "$pod" -- cat /proc/self/uid_map)"
 printf '%s\n' "$uid_map"
-case "$uid_map" in
-  *" 0 0 65536"*) ;;
-  *) echo "unexpected user namespace mapping: $uid_map" >&2; exit 1 ;;
-esac
+printf '%s\n' "$uid_map" | awk '
+  NF == 3 && $1 == 0 && $2 == 0 && $3 == 65536 { valid = 1 }
+  END { exit !valid }
+' || {
+  echo "unexpected user namespace mapping: $uid_map" >&2
+  exit 1
+}
 inner_kubectl -n default exec "$pod" -- /bin/sh -c 'free -h; top -b -n 1 | head -12; ps -ef'

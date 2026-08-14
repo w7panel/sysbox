@@ -1,7 +1,16 @@
-Sysbox installer manifests have been installed.
+Sysbox {{ .Values.installMode }} manifests have been installed.
 
+{{- if eq .Values.installMode "host" }}
 Check installer pods:
   kubectl get pods -n {{ include "w7panel-sysbox.namespace" . }} -l app.kubernetes.io/name={{ include "w7panel-sysbox.name" . }},app.kubernetes.io/instance={{ .Release.Name }}
+{{- else }}
+Check nested-agent readiness:
+  kubectl rollout status daemonset/{{ include "w7panel-sysbox.nestedAgentName" . }} -n {{ include "w7panel-sysbox.namespace" . }}
+
+This chart never restarts K3s or the physical host. For first-time migration of
+an existing L1, roll-recreate only its K3s Pod from L0 after the agent writes the
+containerd template. Do not kill containerd by itself.
+{{- end }}
 
 Check RuntimeClass:
   kubectl get runtimeclass {{ include "w7panel-sysbox.runtimeClassName" . }}

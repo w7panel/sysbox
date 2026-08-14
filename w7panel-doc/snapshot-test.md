@@ -83,6 +83,7 @@ helm upgrade --install w7panel-sysbox ./charts/w7panel-sysbox \
   --kubeconfig "$KUBECONFIG" \
   --namespace kube-system \
   --create-namespace \
+  --set installMode=host \
   --set nodeSelector.sysbox-runtime=running \
   --set snapshotter.enabled=true \
   --set installer.image.repository=docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s \

@@ -1,13 +1,16 @@
 # Changelog
 
-## Unreleased
-
-- 记录 2026-08-12 嵌套 L2 复测：因 L1 缺少可用 `fusermount3`/`/dev/fuse`，容器在 sysbox-fs 预注册阶段失败；已保存日志、清理临时容器并恢复宿主 sysbox-fs，避免将环境故障误判为嵌套 seccomp 或 namespace 回归。
-- 修复 nested-identity 专用 PoC 在 `SkipSpecialMounts` 已启用时仍强制挂载 proc/sysfs 导致 L2 以 `EPERM` 启动失败；该模式恢复跳过特殊挂载，以便先验证 L2 user namespace 与容器启动链。
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Added
+	* 新增单 chart 双层安装模式：`installMode=host` 保留 L0 宿主 installer，`installMode=nested` 在 L1 K3s 运行常驻 agent、安装当前镜像二进制并以 `nested-identity` 启动独立服务；两种模式统一暴露 `RuntimeClass/sysbox-runc`。nested agent 仅在 containerd 已加载 handler 后标记节点 ready，chart 本身不执行重启；迁移已运行的 L1 时仅需从 L0 滚动重建对应 K3s Pod，不重启物理宿主，避免直接终止 containerd 导致整套 K3s 退出。
+	* 将 chart 的 `installMode` 改为无默认目标的必填参数；遗漏时 Helm 校验失败，防止在 L1 内安装时误用 `host` 模式并执行 `systemctl restart k3s`。
+	* host installer 增加 initial-userns fail-closed 检查；即使错误显式选择 `installMode=host`，在 L1 Sysbox 容器内也会在写宿主文件或重启 K3s 前退出。
+	* 修复 K3s deploy 镜像仍使用已下线的 CentOS 7 mirrorlist、不可访问的 HTTP vault 和不稳定的 Alpine CDN，导致本地 release 构建返回 403 或长期停滞；基础包、EPEL 7 与 Alpine builder 改用可访问的 archive/mirror，并安装 nested agent 所需的 fuse-overlayfs 与 iptables。
+	* 修复 nested-identity CRI sandbox 的 CNI network namespace 由 L1 user namespace 持有，导致 L2 即使具备 `CAP_NET_ADMIN` 仍无法创建 bridge/veth：sysbox-runc 在 child user namespace 中创建工作 netns，启用 loopback，迁移并恢复 CNI 接口、地址与路由后重绑定持久 netns handle；sysbox-mgr 同步更新 netns inode，使后续 workload container 继续复用 sandbox 的 userns 与 netns。
+	* 记录 2026-08-12 嵌套 L2 复测：因 L1 缺少可用 `fusermount3`/`/dev/fuse`，容器在 sysbox-fs 预注册阶段失败；已保存日志、清理临时容器并恢复宿主 sysbox-fs，避免将环境故障误判为嵌套 seccomp 或 namespace 回归。
+	* 修复 nested-identity 专用 PoC 在 `SkipSpecialMounts` 已启用时仍强制挂载 proc/sysfs 导致 L2 以 `EPERM` 启动失败；该模式恢复跳过特殊挂载，以便先验证 L2 user namespace 与容器启动链。
 	* nested Sysbox identity mapping: add an explicit, fail-closed `STANDARD_SUBID` / `NESTED_IDENTITY` contract across sysbox-runc, sysbox-mgr, and sysbox-fs. The dedicated inner runtime now creates a separate child user namespace with `0:0:65536`, uses NoShift without touching L1 `/etc/subuid` or `/etc/subgid`, keeps mount helpers in the L1 user namespace, binds seccomp sessions to registered container processes, and delegates cgroup v2 through a hidden limit parent plus `sysbox.delegate`. This replaces the no-third-userns workaround while preserving standard Sysbox's rejection of host ID 0.
 	* nested Sysbox cgroup devices: do not load an L2 cgroup-device BPF program from the non-initial user namespace; the kernel does not delegate this operation, so L2 inherits L1's device policy while CPU, memory, IO, and PID limits remain on the hidden L2 limit cgroup. Real L1 Docker testing also confirmed that a second Sysbox seccomp user-notification listener fails with `EBUSY` when the L1 process tree already inherited L0's listener; full nested sysbox-fs syscall proxying therefore requires a single-listener routing design and is not yet complete.
 	* sysbox-inner-k3s: start the real `sysbox-snapshotter` before inner K3s and bind the dedicated `sysbox-runc-inner` handler to it, including rootfs rw-layer annotation forwarding. Minimal K3s images now receive a local `mount.fuse3` adapter for their existing `fuse-overlayfs`, allowing nested integration tests to exercise the PVC-backed snapshot path instead of silently remaining on containerd's default overlayfs snapshotter.

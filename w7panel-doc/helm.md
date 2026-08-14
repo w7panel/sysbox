@@ -47,6 +47,7 @@ helm upgrade --install w7panel-sysbox "$CHART" \
   --namespace kube-system \
   --create-namespace \
   --kubeconfig "$KUBECONFIG" \
+  --set installMode=host \
   --set snapshotter.enabled=true \
   --set admission.enabled=true \
   --set nodeSelector.sysbox-runtime=running \
@@ -175,6 +176,7 @@ helm upgrade --install w7panel-sysbox "$CHART" \
   --namespace kube-system \
   --create-namespace \
   --kubeconfig "$KUBECONFIG" \
+  --set installMode=host \
   --set snapshotter.enabled=true \
   --set admission.enabled=true \
   --set nodeSelector.sysbox-runtime=running \

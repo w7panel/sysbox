@@ -63,6 +63,13 @@ Installer DaemonSet name.
 {{- end }}
 
 {{/*
+Nested agent DaemonSet name.
+*/}}
+{{- define "w7panel-sysbox.nestedAgentName" -}}
+{{- printf "%s-nested-agent" (include "w7panel-sysbox.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
 ClusterRole name.
 */}}
 {{- define "w7panel-sysbox.clusterRoleName" -}}
