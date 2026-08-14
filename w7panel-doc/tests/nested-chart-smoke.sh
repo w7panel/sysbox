@@ -5,12 +5,13 @@ set -euo pipefail
 # container. This script deliberately never rolls or restarts the L1 workload.
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-kubeconfig="${KUBECONFIG_218:-/home/.kubeconfig}"
+kubeconfig="${KUBECONFIG_218:-/root/.kube/218.config}"
 outer_namespace="${NAMESPACE:-k3k-console-164315}"
 l1_deployment="${DEPLOYMENT:-sysbox-inner-k3s-command-poc}"
 inner_namespace="${INNER_NAMESPACE:-sysbox-system}"
 chart="${CHART:-$root_dir/charts/w7panel-sysbox}"
-image_tag="${IMAGE_TAG:-v0.7.1-8-nested-specialdirs4}"
+image_tag="${IMAGE_TAG:-v0.7.1-9-nested-rootfs-flat2}"
+admission_enabled="${ADMISSION_ENABLED:-true}"
 test_image="${TEST_IMAGE:-ccr.ccs.tencentyun.com/afan-public/nginx:latest}"
 test_pod="${TEST_POD:-nested-chart-nginx}"
 
@@ -79,10 +80,11 @@ log "L1 K3s identity before chart apply: $before_identity"
 inner_kubectl get namespace "$inner_namespace" >/dev/null 2>&1 ||
 	inner_kubectl create namespace "$inner_namespace" >/dev/null
 
-log 'rendering and applying installMode=nested (this does not restart K3s)'
+log "rendering and applying installMode=nested admission.enabled=$admission_enabled (this does not restart K3s)"
 helm template w7panel-sysbox "$chart" \
 	--namespace "$inner_namespace" \
 	--set installMode=nested \
+	--set admission.enabled="$admission_enabled" \
 	--set-string installer.image.tag="$image_tag" |
 	outer_kubectl -n "$outer_namespace" exec -i "$l1_pod" -c k3s -- \
 		/bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml apply -f -

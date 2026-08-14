@@ -28,6 +28,37 @@ func TestLocalPreparerCreatesUpperAndWorkWithoutMeta(t *testing.T) {
 	}
 }
 
+func TestKubeletPathThroughInitRoot(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "pod volume",
+			path: "/var/lib/kubelet/pods/pod-uid/volumes/kubernetes.io~local-volume/pvc-id",
+			want: "/proc/1/root/var/lib/kubelet/pods/pod-uid/volumes/kubernetes.io~local-volume/pvc-id",
+		},
+		{
+			name: "kubelet sibling",
+			path: "/var/lib/kubelet/plugins/example",
+			want: "/var/lib/kubelet/plugins/example",
+		},
+		{
+			name: "unrelated absolute path",
+			path: "/var/lib/rancher/k3s/storage/pvc-id",
+			want: "/var/lib/rancher/k3s/storage/pvc-id",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := kubeletPathThroughInitRoot(tt.path, "/proc/1/root"); got != tt.want {
+				t.Fatalf("path = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLocalPreparerRejectsUnsafePaths(t *testing.T) {
 	_, err := NewLocalPreparer().PrepareRootfsRwLayer(context.Background(), PrepareRootfsRequest{
 		PVCMountPath: t.TempDir(),

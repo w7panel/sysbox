@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nested-docker-rootfs-persistence
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nested-docker-rootfs-persistence
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: nested-docker-rootfs-persistence
+  template:
+    metadata:
+      labels:
+        app: nested-docker-rootfs-persistence
+      annotations:
+        sysbox/rootfs-rw-layer: '[{"name":"system","volumeName":"rootfs","path":"system"}]'
+        sysbox/allow-proc-exec: "true"
+    spec:
+      runtimeClassName: sysbox-runc
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 0
+      containers:
+        - name: system
+          image: docker.cnb.cool/i0358/docker-images-chrom/nestybox-ubuntu-bionic-systemd-docker
+          imagePullPolicy: IfNotPresent
+          command:
+            - /sbin/init
+      volumes:
+        - name: rootfs
+          persistentVolumeClaim:
+            claimName: nested-docker-rootfs-persistence

@@ -24,11 +24,16 @@ func (p *LocalPreparer) PrepareRootfsRwLayer(ctx context.Context, request Prepar
 	if err != nil {
 		return PreparedRootfs{}, err
 	}
-	if err := rejectSymlink(request.PVCMountPath, layerRoot); err != nil {
+	accessMountPath := localAccessPath(request.PVCMountPath)
+	accessLayerRoot, err := safeJoin(accessMountPath, request.Path)
+	if err != nil {
 		return PreparedRootfs{}, err
 	}
-	upper := filepath.Join(layerRoot, "upper")
-	work := filepath.Join(layerRoot, "work")
+	if err := rejectSymlink(accessMountPath, accessLayerRoot); err != nil {
+		return PreparedRootfs{}, err
+	}
+	upper := filepath.Join(accessLayerRoot, "upper")
+	work := filepath.Join(accessLayerRoot, "work")
 	for _, path := range []string{upper, work} {
 		if info, err := os.Lstat(path); err == nil && (info.Mode()&os.ModeSymlink != 0 || !info.IsDir()) {
 			return PreparedRootfs{}, ErrUnmanagedRootfsLayer
@@ -49,7 +54,38 @@ func (p *LocalPreparer) PrepareRootfsRwLayer(ctx context.Context, request Prepar
 			return PreparedRootfs{}, ErrUnmanagedRootfsLayer
 		}
 	}
-	return PreparedRootfs{UpperDir: upper, WorkDir: work}, nil
+	// The mount options are consumed by runc in the L1 kubelet mount
+	// namespace, so return the original kubelet-visible paths rather than the
+	// /proc/1/root access paths used by a hostPID agent with a private mount
+	// namespace.
+	return PreparedRootfs{
+		UpperDir: filepath.Join(layerRoot, "upper"),
+		WorkDir:  filepath.Join(layerRoot, "work"),
+	}, nil
+}
+
+// localAccessPath translates only kubelet-managed Pod volume paths through
+// the L1 init root when the snapshotter shares the L1 PID namespace but not
+// its mount namespace. This is the layout used by the nested-agent. Keeping
+// the fallback restricted to kubelet Pod volumes prevents arbitrary OCI mount
+// sources from being resolved through the L1 root.
+func localAccessPath(path string) string {
+	selfMountNS, selfErr := os.Stat("/proc/self/ns/mnt")
+	initMountNS, initErr := os.Stat("/proc/1/ns/mnt")
+	if selfErr != nil || initErr != nil || os.SameFile(selfMountNS, initMountNS) {
+		return path
+	}
+	return kubeletPathThroughInitRoot(path, "/proc/1/root")
+}
+
+func kubeletPathThroughInitRoot(path, initRoot string) string {
+	clean := filepath.Clean(path)
+	kubeletPods := filepath.Clean("/var/lib/kubelet/pods")
+	rel, err := filepath.Rel(kubeletPods, clean)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return path
+	}
+	return filepath.Clean(initRoot) + clean
 }
 
 func rejectSymlink(root, path string) error {

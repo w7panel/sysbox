@@ -1,0 +1,18 @@
+ARG BASE_IMAGE=docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-8-nested-specialdirs4
+FROM ${BASE_IMAGE} AS patched
+
+COPY --chmod=0755 sysbox-snapshotter/build/amd64/sysbox-snapshotter /opt/sysbox/bin/generic/sysbox-snapshotter
+COPY --chmod=0755 sysbox-pkgr/k8s/scripts/sysbox-inner-k3s.sh /opt/sysbox/scripts/sysbox-inner-k3s.sh
+
+# The nested node runs overlayfs on an ext4 special backing. Flatten the
+# installer rootfs so container creation does not depend on the base image's
+# long lowerdir chain, which intermittently fails with EIO in nested overlay.
+FROM scratch
+COPY --from=patched / /
+
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    container=docker \
+    SYS_ARCH=amd64 \
+    SYSBOX_VERSION=v0.7.1-2
+
+CMD ["/usr/sbin/init"]

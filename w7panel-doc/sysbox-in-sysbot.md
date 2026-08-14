@@ -44,9 +44,12 @@ L0 和 L1 使用同一个 `w7panel-sysbox` chart，必须通过 `installMode` �
 当前 218 nested 验证镜像为：
 
 ```text
-docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-8-nested-specialdirs4
-digest: sha256:4e5119f01dc66e8c2c29a230bcaab5c19c5ea209fcf79596aacbdfb9c681947a
+docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-9-nested-rootfs-flat2
+digest: sha256:d36c92171b39afe8b99d47688e233dee54b05bf7aba212b67d4cc0a08fe312fe
 ```
+
+该镜像已扁平化为单层，避免复用旧 inner containerd overlay lower chain；正式
+nested-agent DaemonSet 已成功滚动到该版本。
 
 该验证镜像中的 runc、mgr、fs 均为静态链接。不得把本机较新 glibc 上直接生成的
 动态二进制覆盖进 CentOS 7 deploy 镜像；218 已实际捕获过 `GLIBC_2.32` 和
@@ -71,7 +74,7 @@ digest: sha256:f22ed40d625e550a9517ed661159fe18d6eb3eae97941276481b2a630dec0b76
 helm upgrade --install w7panel-sysbox ./charts/w7panel-sysbox \
   -n sysbox-system --create-namespace \
   --set installMode=host \
-  --set installer.image.tag=v0.7.1-8-nested-specialdirs4
+  --set installer.image.tag=v0.7.1-9-nested-rootfs-flat2
 ```
 
 在 L1 内 K3s 安装：
@@ -80,8 +83,13 @@ helm upgrade --install w7panel-sysbox ./charts/w7panel-sysbox \
 helm upgrade --install w7panel-sysbox ./charts/w7panel-sysbox \
   -n sysbox-system --create-namespace \
   --set installMode=nested \
-  --set installer.image.tag=v0.7.1-8-nested-specialdirs4
+  --set installer.image.tag=v0.7.1-9-nested-rootfs-flat2 \
+  --set admission.enabled=true
 ```
+
+218 的正式 smoke 使用 `admission.enabled=true`；admission Deployment、Service 和
+Webhook 必须先 Ready，`sysbox/rootfs-rw-layer` 工作负载才具备自动校验与 sidecar
+注入前置。该 admission 安装已实测不会重启 L1 K3s。
 
 **内部 chart 安装不会重启 L0 物理宿主，也不会自行重启 L1 K3s。** nested agent
 只会写入 L1 K3s 的 containerd template、安装当前镜像内的二进制并启动独立服务。
@@ -172,6 +180,17 @@ mount。CNI 需要执行 `/proc/self/exe`，L1 的
 - 预注册 CNI netns 时与 mgr 使用同样的受限 L1-root 解析；每个 L2 仍创建独立 FUSE
   server，不共享任意 L0 路径。
 
+### sysbox-snapshotter
+
+- `LocalPreparer` 会比较自身与 PID 1 的 mount namespace。两者不同时，仅对
+  `/var/lib/kubelet/pods` 下已解析出的 PVC access path，通过 `/proc/1/root` 进入
+  L1 K3s 可见的真实路径创建 rootfs `upper`/`work`。
+- 返回给 runc 的 overlay mount option 仍保留原始 L1 kubelet path，不带
+  `/proc/1/root` 前缀；该前缀只用于 snapshotter 本地 prepare I/O，避免把 agent
+  私有 mount namespace 的路径泄漏到后续 runtime mount。
+- 非 PVC kubelet 路径、标准模式以及 self/PID 1 mount namespace 相同的场景保持
+  原逻辑。相关 `sysbox-snapshotter/rootfs` 单测已通过。
+
 ### cgroup
 
 - 设计是 L0 向 L1 委托 cgroup v2 子树，再由 L1 向 L2 委托自己的子树。
@@ -181,19 +200,18 @@ mount。CNI 需要执行 `/proc/self/exe`，L1 的
 
 ## 218 已解决并验证
 
-当前外层现场：
+当前访问入口与最新 smoke 现场：
 
 ```text
 kubeconfig: /root/.kube/218.config
 namespace:  k3k-console-164315
 deployment: sysbox-inner-k3s-command-poc
-L1 Pod:     sysbox-inner-k3s-command-poc-8b49c9fcf-kr9fc（记录时）
-L1 UID:     8cc2eec7-a1ad-4f9d-ba22-2d0c79370c8d
-L1 IP:      10.42.0.66
-L1 K3s PID: 268
+L1 Pod:     按 Deployment label 动态发现
+L1 K3s:     PID:starttime=1:12（flat2 chart smoke 前后保持）
 ```
 
-Pod 名会随部署变化，测试时应按 label 发现 Running Pod，不应固定使用上述后缀。
+宿主重启后 Pod 名、UID、IP 和 inner 集群身份均已变化，测试时必须按 label 发现
+Running Pod，不应复用重启前记录。
 
 | 项目 | 当前结论 |
 | --- | --- |
@@ -206,7 +224,7 @@ Pod 名会随部署变化，测试时应按 label 发现 Running Pod，不应固
 | CNI 持久 handle 重绑 | 已通过；handle 与 sandbox 进程 netns inode 一致 |
 | CNI 生命周期回收 | 已通过；删除 L2 后 handle、veth、IPAM 均释放，L1 `cni0` slave 数恢复 |
 | L2 cgroup v2 | 已确认可写且 controllers 已委托 |
-| 当前 `nested-l2-k3s` | Running；child userns/netns、bridge/veth probe 已通过，`/bin/k3s` 已补齐 |
+| 固化镜像 `nested-l2-k3s` | 重启前曾通过 child userns/netns 与 bridge/veth probe；PoC inner 集群已在宿主重启后重建，当前需重新做完整组合回归 |
 | nested loopback 修复 | 已通过；全新 `nested-final-check` 中 `lo` 自动为 `UP,LOWER_UP` |
 | L2 K3s | 已通过；K3s `v1.35.6`、containerd `2.2.5-k3s2`、native snapshotter、Node Ready |
 | L3 CNI | 已通过；bridge 网段 `10.245.0.0/16`，nginx Pod IP `10.245.0.30` |
@@ -214,10 +232,14 @@ Pod 名会随部署变化，测试时应按 label 发现 Running Pod，不应固
 | L3 生命周期回收 | 已通过；删除 Pod 后 veth、IPAM 文件和对应 NAT 规则消失 |
 | L1 CNI Service/外网 | 已通过；CoreDNS、ClusterIP、跨 Pod HTTP、外网 HTTPS 以及 CNI DEL/ADD 后重新分配 IP 均正常 |
 | ServiceLinks 隔离 | 已通过；L1 Deployment 和 nested agent 均为 `enableServiceLinks:false`，L2 无冲突的 `SYSBOX_*` 环境变量 |
-| rootfs rw layer 持久化 | 已通过；多轮 Pod 重建及 inner daemon 切换后 marker inode/mtime/content/owner 未变 |
+| flat2 DaemonSet 正式滚动 | 已通过；单层镜像滚动无 `EIO`，L1 K3s PID/starttime 不变，mgr/fs/snapshotter 与三个 socket 均 live |
+| admission | 已通过；`admission.enabled=true` 安装成功、Webhook Ready，L1 K3s 未重启 |
+| nested chart 从零 smoke | 已通过；本地 chart、flat2、`installMode=nested`，L2 腾讯云 nginx、child userns、HTTP 和 CNI 回收均通过 |
+| rootfs rw layer 首次初始化与重建持久化 | 已通过；代码修复、热验证及 flat2 正式滚动后普通 PVC 重建均保持 marker；宿主重启后的全新 PVC 回归待补 |
 | L2 systemd/Docker | 已通过；systemd `running`，dockerd 使用 systemd cgroup driver、Docker bridge/iptables 和端口映射正常 |
 | Docker overlay2 | 已通过；不加 tmpfs 的 `/var/lib/docker` 自动使用 ext4-backed 现有 special mount，dockerd 自动选择 `overlay2` |
 | 腾讯云 Docker nginx | 已通过；实际 pull digest `sha256:29cf9892...dd159f`，容器 `172.17.0.2`，`-p 18080:80` 返回 HTTP 200 |
+| Docker 与 rootfs rw layer 组合 | flat2 下 systemd、dockerd、overlay2/systemd、ext4 及旧 marker 已通过；腾讯云 pull 被外部正常宿主重启中断，未判失败，重启后需完整重跑 |
 | 固化 L2 K3s 测试镜像 | 镜像已构建推送；本地 K3s 8 秒 Ready、CRI NetworkReady、腾讯云 nginx、HTTP 200 和 CNI 回收通过；仍需用当前最终 runtime 镜像做一次完整组合回归 |
 
 一次完整网络验收的现场证据为：
@@ -314,14 +336,107 @@ overlay snapshotter 的 upper/work 子目录使用现有 `MntVarLibContainerdOvf
 Docker 默认 bridge 为 `172.17.0.0/16`，腾讯云 nginx 容器 IP `172.17.0.2`，
 `-p 18080:80` 返回 HTTP 200。
 
-`sysbox/rootfs-rw-layer` 的独立持久化也未受影响。inner daemon 完整切换后，重建的
-Pod 仍读取到：
+`sysbox/rootfs-rw-layer` 在 PVC upper/work 已正确准备后的重建持久化也未受影响。
+inner daemon 完整切换后，重建的 Pod 仍读取到：
 
 ```text
 path=/rootfs-persistence-marker
 inode=21379250 mtime=1786691954 size=35 owner=0:0
 content=nested-rootfs-marker-20260814-0719
 ```
+
+### nested Docker 与 rootfs rw layer 组合复测
+
+218 使用 `w7panel-doc/tests/nested-docker-rootfs-persistence.yaml` 创建同名
+`nested-docker-rootfs-persistence` Deployment 和 2 Gi `local-path` PVC。Deployment
+采用 `Recreate`，业务容器名为 `system`，并设置：
+
+```yaml
+sysbox/rootfs-rw-layer: '[{"name":"system","volumeName":"rootfs","path":"system"}]'
+```
+
+首次成功运行的 Pod UID 前缀为 `03610...`。L2 的 UID/GID mapping 均为
+`0 0 65536`，`systemctl is-system-running` 返回 `running`，
+`systemctl is-active docker` 返回 `active`；`docker info` 显示 storage driver 为
+`overlay2`、cgroup driver 为 `systemd`，`/var/lib/docker` 的 backing filesystem 为
+ext4。随后从腾讯云拉取 nginx，容器地址为 `172.17.0.2`，通过
+`-p 18080:80` 暴露后 HTTP 返回 200。
+
+在 `/root/docker-rootfs-marker` 写入标记并记录 inode、mtime、owner 和 content，
+再重建 Deployment。新 Pod UID 前缀为 `703fd...`，四项数据全部与旧 Pod 一致，
+证明 PVC-backed rootfs writable layer 跨 Pod 重建保持完整。
+
+持久化边界也已实测确认：重建后 `/var/lib/docker` 对应的 Sysbox special backing
+路径发生变化，先前拉取的 nginx image 和已创建 container 均不存在。这不是
+rootfs-rw-layer 数据丢失；当前 annotation 没有启用
+`persistentSpecialMounts:true`，因此只持久化容器 rootfs upper/work，
+`/var/lib/docker` 仍是 Pod 生命周期内的独立 ext4 special backing。若产品要求同时
+保留 Docker image/container，需另行启用并验收 persistent special mounts，不能把
+本轮 rootfs marker 结果外推为 Docker data-root 持久化。
+
+### 全新 PVC 自动初始化热验证
+
+修复后的 `sysbox-snapshotter` 已在 218 以热替换方式验证。新建此前从未使用过的
+`nested-docker-rootfs-auto` PVC 和同名 Deployment，未在 sidecar 或 PVC 中手工创建
+任何目录，Pod 直接达到 `2/2 Running`。首次 Pod UID 前缀为 `53ceb100...`，业务
+容器的 UID/GID mapping 均为 `0 0 65536`，Docker 为 `overlay2` storage driver 和
+`systemd` cgroup driver。
+
+写入 marker 后重建 Deployment，新 Pod UID 前缀为 `6408bb2a...`，复核结果为：
+
+```text
+inode=20636721
+mtime=1786698388
+size=19
+owner=0:0
+content=<与重建前一致>
+```
+
+inode、mtime、size、owner 和 content 全部保持，且新 Pod 仍为 `2/2 Running`、
+`overlay2/systemd`、UID/GID mapping `0 0 65536`。这证明
+`LocalPreparer` 的 `/proc/1/root` prepare 路径修复消除了首次新 PVC 必须由 sidecar
+手工创建 `upper`/`work` 的代码缺口；它不改变返回给 runc 的原始 kubelet mount
+option，也不依赖 Docker special backing。
+
+### flat2 正式滚动与从零 smoke
+
+最终镜像 `v0.7.1-9-nested-rootfs-flat2` 为单层镜像。nested-agent DaemonSet 已正式
+滚动成功，期间没有再出现 path1 轮次的 inner containerd overlay lower-chain
+`EIO`；滚动前后 L1 K3s 的 PID/starttime 保持不变。新 Pod 内 mgr、fs、snapshotter
+进程以及 sysmgr、sysfs、snapshotter 三个 socket 均 live，运行中的 snapshotter
+SHA-256 为 `5cfe...bce0`。
+
+flat2 下普通 rootfs PVC Pod 再次完成重建，marker 保持为：
+
+```text
+inode=21379250 mtime=1786691954 size=35 owner=0:0
+content=<与重建前一致>
+```
+
+Docker 与 rootfs-rw-layer 组合也确认 systemd `running`、dockerd `active`、
+`overlay2/systemd`、`/var/lib/docker` ext4 和旧 marker 正常。随后执行腾讯云 nginx
+pull 时，L0 宿主被外部流程执行正常 systemd reboot，测试因此中断；这不是 pull、
+Docker 或 runtime 失败，不能记录为失败，也不能记录为完成。
+
+宿主恢复后又从零使用本地 chart、`installMode=nested`、flat2 和
+`admission.enabled=true` 完成 smoke。安装前后 L1 K3s `PID:starttime=1:12` 保持，
+证明 chart 未重启 K3s；admission/Webhook Ready。L2 从腾讯云拉取 nginx，digest
+为 `sha256:29cf...159f`，`uid_map` 为 `0 0 65536`，user namespace 是 L1 的 child，
+Pod IP 为 `10.244.0.6`，HTTP 与删除后的 CNI/IPAM/NAT 回收均通过。
+
+### 宿主重启、磁盘回收与 PoC data-dir 边界
+
+本次宿主事件是 systemd 正常 reboot，不是 Sysbox、Docker 或 chart 触发的异常重启。
+重启并清理后宿主根盘使用量从约 852 GiB 降到 217 GiB（25%），释放约 635 GiB。
+此前 runaway 的根因是 `ckm-old4` CrashLoop：每个新 container 都触发约 16.7 GiB
+rsync，多个实例并发吞吐约 70 MiB/s。`ckm-old4` 已 pause，相关 BuildImage CR、Job
+和 CRD 已删除。
+
+当前 PoC L1 的 `/var/lib/rancher/k3s` 没有持久化。宿主重启后 L1 内 K3s 形成了新
+集群，重启前的 inner Kubernetes 资源和 PVC 均不存在。因此无法在重启后继续读取
+旧 PVC marker；这是 PoC K3s data-dir 的生命周期边界，不是已经验证过的 PVC marker
+发生数据丢失。持久化结论仅覆盖重启前的 Pod 重建；宿主重启后的全新 PVC 正式
+rootfs/Docker 回归仍需重新创建资源完成。
 
 相关单元测试已通过：
 
@@ -332,6 +447,9 @@ go test -vet=off ./libcontainer
 
 cd ../sysbox-mgr
 go test ./...
+
+cd ../sysbox-snapshotter
+go test ./rootfs
 ```
 
 `sysbox-mgr` 的既有 shiftfs 用例若因缺少 `/mnt/scratch` 失败，不属于本次 nested
@@ -352,10 +470,18 @@ go test ./...
 containerd `2.2.5-k3s2`、CRI NetworkReady、bridge CNI、`ipMasq:true`、腾讯云
 nginx HTTP 200，以及删除后的 veth/IPAM/NAT 回收。该验证证明镜像资产和内置配置
 完整；此前也已在 218 分步通过 L2 K3s、CoreDNS、L3 CNI 和 nginx。仍需用当前最终
-runtime 镜像 `v0.7.1-8-nested-specialdirs4` 与该固化镜像再跑一次从创建到回收的
+runtime 镜像 `v0.7.1-9-nested-rootfs-flat2` 与该固化镜像再跑一次从创建到回收的
 完整组合回归，避免把跨版本的分步证据当作单次发布验收。
 
-### 2. 外层 rollout 的 sysbox-fs seccomp 注册问题
+### 2. 宿主重启后的 rootfs 与 Docker 正式回归
+
+flat2 的正式 DaemonSet 滚动、重启前普通 rootfs PVC 重建以及 Docker 基础状态均已
+通过；但宿主正常 reboot 后，PoC L1 因 K3s data-dir 未持久化而成为新集群，旧资源
+和 PVC 不存在。仍需在恢复后的新 inner 集群创建全新 PVC，完整验证首次 rootfs
+启动、marker 重建保持，以及 Docker pull/run/recreate。重启前被中断的腾讯云 pull
+不作为失败证据。
+
+### 3. 外层 rollout 的 sysbox-fs seccomp 注册问题
 
 重建 L1 Deployment 时，新 Pod 曾卡在：
 
@@ -369,12 +495,19 @@ Unable to receive expected seccomp-notif-ack
 首次迁移确需加载新增 handler 时，应保存日志并从 L0 控制器受控滚动重建 L1 K3s
 Pod；handler 不变的后续二进制升级只滚动 nested agent，不重启 K3s。
 
-### 3. 完整二次 cgroup delegation 资源边界
+### 4. 完整二次 cgroup delegation 资源边界
 
 systemd、默认 Docker bridge/iptables、端口映射、systemd cgroup driver 和 cgroup v2
 均已通过。尚待验证的是资源边界而非基本启动：L0 给 L1 设置 CPU/内存上限后，L1
 再向 L2 委托子树，需用 Docker 与 K3s 压力负载确认 L2 只能修改自身子树，不能提高
 或绕过 L1 的上限，并验证 OOM、CPU throttling 和 Pod 删除后的 cgroup 回收。
+
+### 5. mgr 大目录 rsync 生命周期控制
+
+`ckm-old4` CrashLoop 已证明每个新 container 都可能触发约 16.7 GiB rsync，并在重启
+风暴中形成约 70 MiB/s 的并发写入。当前仅通过 pause 工作负载和删除相关
+BuildImage 资源停止 runaway；mgr 对同一目标的 rsync single-flight、container
+取消时的中止，以及 orphan 临时目录/进程回收尚未实现或完成压力验证。
 
 ## 快速回归测试
 
@@ -579,17 +712,25 @@ docker build -f w7panel-doc/Dockerfile.nested-k3s-test \
 
 ### nested chart 一键 smoke
 
-集群恢复后执行以下脚本。它会记录 Chart 安装前后 L1 K3s PID/starttime，断言没有
-重启，等待 nested agent Ready，然后用腾讯云 nginx 验证 L2 child userns、
+脚本默认使用 flat2，并要求 `admission.enabled=true`；先等待 admission Deployment 和
+Webhook Ready，再创建需要 admission 的工作负载。脚本会记录 Chart 安装前后 L1
+K3s PID/starttime，断言没有重启，等待 nested agent Ready，然后用腾讯云 nginx
+验证 L2 child userns、
 `0 0 65536` 映射、CNI、HTTP 和删除后的 IPAM/NAT 回收：
 
 ```sh
 cd /root/workspace/sysbox
-KUBECONFIG_218=/home/.kubeconfig \
+KUBECONFIG_218=/root/.kube/218.config \
 NAMESPACE=k3k-console-164315 \
 DEPLOYMENT=sysbox-inner-k3s-command-poc \
+IMAGE_TAG=v0.7.1-9-nested-rootfs-flat2 \
+ADMISSION_ENABLED=true \
 bash w7panel-doc/tests/nested-chart-smoke.sh
 ```
+
+该命令已在重启后的新 inner 集群从零执行并 PASS：L1 K3s
+`PID:starttime=1:12` 保持，Webhook Ready，L2 nginx digest
+`sha256:29cf...159f`、Pod IP `10.244.0.6`、child userns、HTTP 和 CNI cleanup 均通过。
 
 脚本不会执行 `rollout restart`、`systemctl` 或重启 K3s。首次迁移旧 L1 时若
 containerd 尚未加载新 handler，脚本会保存 agent 状态并失败退出，由 L0 管理员决定
@@ -597,11 +738,13 @@ containerd 尚未加载新 handler，脚本会保存 agent 状态并失败退出
 
 ## 部署与安全注意事项
 
-- 当前 218 nested 验证使用
-  `docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-8-nested-specialdirs4`（digest
-  `sha256:4e5119f01dc66e8c2c29a230bcaab5c19c5ea209fcf79596aacbdfb9c681947a`）。
-  不要把此前 `/opt/sysbox-nested-build` 或 `/opt/sysbox/bin/generic` 的现场测试文件
-  当作发布安装路径。
+- 当前 218 nested-agent DaemonSet 已正式使用单层镜像
+  `docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-9-nested-rootfs-flat2`
+  （digest
+  `sha256:d36c92171b39afe8b99d47688e233dee54b05bf7aba212b67d4cc0a08fe312fe`）。
+  launcher 正常运行，不再存在 test-only `SIGSTOP` 或 hotfix 二进制状态。
+- path1 的热替换、`SIGSTOP`、旧 DaemonSet tag 和 lower-chain `EIO` 只属于历史排障
+  现场；flat2 正式滚动已无 `EIO`，不得再把这些状态描述为当前状态。
 - nested agent 将内层二进制安装到 `/var/lib/sysbox-inner/bin`。内部
   `sysbox-runc-inner` wrapper 只是固定注入 `nested-identity` 的实现细节；Pod YAML、
   RuntimeClass 名和 handler 均统一使用 `sysbox-runc`。
