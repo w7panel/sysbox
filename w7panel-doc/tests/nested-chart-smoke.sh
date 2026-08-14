@@ -37,8 +37,18 @@ k3s_identity() {
 	# The checks are intentionally expanded by the remote /bin/sh.
 	# shellcheck disable=SC2016
 	outer_kubectl -n "$outer_namespace" exec "$l1_pod" -c k3s -- /bin/sh -ec '
-		[ "$(cat /proc/1/comm)" = k3s ]
-		awk "{print \$1 \":\" \$22}" /proc/1/stat
+		for proc_dir in /proc/[0-9]*; do
+			[ -r "$proc_dir/comm" ] && [ -r "$proc_dir/cmdline" ] || continue
+			[ "$(cat "$proc_dir/comm")" = k3s ] || continue
+			cmdline="$(tr "\000" " " <"$proc_dir/cmdline")"
+			case "$cmdline" in
+				*"/k3s server"*)
+					awk "{print \$1 \":\" \$22}" "$proc_dir/stat"
+					exit 0
+					;;
+			esac
+		done
+		exit 1
 	'
 }
 
@@ -102,6 +112,17 @@ if ! inner_kubectl -n "$inner_namespace" rollout status \
 	inner_kubectl -n "$inner_namespace" logs daemonset/w7panel-sysbox-nested-agent \
 		--tail=100 || true
 	die 'nested agent is not Ready; if this is the first handler migration, perform one controlled L1 Pod rollout from L0'
+fi
+
+if [ "$admission_enabled" = true ]; then
+	log 'waiting for the inner admission webhook endpoint'
+	if ! inner_kubectl -n "$inner_namespace" rollout status \
+		deployment/w7panel-sysbox-admission --timeout=120s; then
+		inner_kubectl -n "$inner_namespace" get deployment,pods,endpoints -o wide || true
+		inner_kubectl -n "$inner_namespace" logs deployment/w7panel-sysbox-admission \
+			--tail=100 || true
+		die 'inner admission webhook is not Ready'
+	fi
 fi
 
 after_ready_identity="$(k3s_identity)" || die 'L1 K3s disappeared after nested agent became Ready'
