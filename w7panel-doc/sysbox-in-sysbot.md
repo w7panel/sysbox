@@ -45,7 +45,7 @@ L0 和 L1 使用同一个 `w7panel-sysbox` chart，必须通过 `installMode` �
 
 ```text
 docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-2
-digest: sha256:e337c1346a53f35f84156d2761b3ccd22224d6630cfd7bb0a487ee8d52d67df4
+digest: sha256:76a4db0bdd2c2d0a90c6d4061019f8c29502a9a9f7fae587aa679427628a473d
 ```
 
 外层集群安装：
@@ -479,7 +479,7 @@ spec:
 
 - 正式部署使用
   `docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-2`（digest
-  `sha256:e337c1346a53f35f84156d2761b3ccd22224d6630cfd7bb0a487ee8d52d67df4`）。
+  `sha256:76a4db0bdd2c2d0a90c6d4061019f8c29502a9a9f7fae587aa679427628a473d`）。
   不要把此前 `/opt/sysbox-nested-build` 或 `/opt/sysbox/bin/generic` 的现场测试文件
   当作发布安装路径。
 - nested agent 将内层二进制安装到 `/var/lib/sysbox-inner/bin`。内部
