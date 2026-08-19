@@ -47,10 +47,9 @@ VERIFY_IMAGE="${VERIFY_IMAGE:-true}"
 USE_BUILDX="${USE_BUILDX:-false}"
 PACKAGE_CHART="${PACKAGE_CHART:-true}"
 CHART_VERSION="${CHART_VERSION:-${SYSBOX_VERSION_FULL}}"
-K3S_BASE_IMAGE="${K3S_BASE_IMAGE:-ghcr.io/nestybox/centos7/systemd}"
+K3S_BASE_IMAGE="${K3S_BASE_IMAGE:-docker.cnb.cool/i0358/docker-images-chrom/centos-centos:stream9}"
 
 # China mirror alternatives:
-# K3S_BASE_IMAGE=docker.cnb.cool/i0358/docker-images-chrom/nestybox-centos7-systemd
 # UBUNTU_MIRROR=http://mirrors.aliyun.com/ubuntu
 # DOCKER_APT_MIRROR=https://mirrors.aliyun.com/docker-ce/linux/ubuntu
 # GOPROXY=https://goproxy.cn,direct

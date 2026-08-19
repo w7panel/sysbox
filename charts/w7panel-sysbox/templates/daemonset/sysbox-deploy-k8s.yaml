@@ -22,6 +22,7 @@ spec:
           {{- toYaml . | nindent 10 }}
           {{- end }}
     spec:
+      hostPID: true
       serviceAccountName: {{ include "w7panel-sysbox.serviceAccountName" . }}
       tolerations:
       - key: sysbox-runtime
@@ -42,6 +43,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
+        - name: DBUS_SYSTEM_BUS_ADDRESS
+          value: unix:path=/run/dbus/system_bus_socket
         securityContext:
           privileged: true
         volumeMounts:
@@ -51,6 +54,8 @@ spec:
           mountPath: /mnt/host/os-release
         - name: host-dbus
           mountPath: /var/run/dbus
+        - name: host-dbus
+          mountPath: /run/dbus
         - name: host-run-systemd
           mountPath: /run/systemd
         - name: host-lib-systemd
@@ -63,6 +68,8 @@ spec:
           mountPath: /mnt/host/opt/lib/sysctl.d
         - name: host-usr-bin
           mountPath: /mnt/host/usr/bin
+        - name: host-bin
+          mountPath: /mnt/host/bin
         - name: host-opt-bin
           mountPath: /mnt/host/opt/bin
         - name: host-usr-local-bin
@@ -105,6 +112,9 @@ spec:
         - name: host-usr-bin
           hostPath:
             path: /usr/bin/
+        - name: host-bin
+          hostPath:
+            path: /bin/
         - name: host-opt-bin
           hostPath:
             path: /opt/bin/

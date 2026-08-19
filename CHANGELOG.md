@@ -3,6 +3,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Added
+  * sysbox-deploy-k8s: support installation on CentOS Stream 9 hosts; the deploy script now normalizes the quoted `ID=centos` value to recognize `centos-9`, uses the generic Sysbox artifacts, and builds the K3s installer from a CentOS Stream 9 base instead of the retired CentOS 7 base.
+  * sysbox-deploy-k8s: mount the host DBus socket at both `/var/run/dbus` and `/run/dbus` so systemd control commands work inside CentOS Stream 9 installer containers.
+  * sysbox-deploy-k8s: set the DBus system bus address explicitly for CentOS Stream 9 installer containers.
+  * sysbox-deploy-k8s: execute systemd service operations in the host namespace on CentOS Stream 9 because container-local systemctl cannot connect to the host bus.
+  * sysbox-deploy-k8s: mount the host `/bin` directory for chrooted systemctl execution on CentOS Stream 9.
+  * sysbox-deploy-k8s: run installer Pods with the host PID namespace so CentOS Stream 9 service operations target host PID 1.
+  * sysbox-installer-helper: use DNF rather than Debian package commands when provisioning dependencies on CentOS Stream 9.
+  * sysbox-installer-helper: skip Ubuntu-specific Shiftfs DKMS installation on CentOS Stream 9, whose repositories do not provide DKMS.
+  * sysbox-deploy-k3s: install `procps-ng` in the CentOS Stream 9 installer image so host sysctl configuration succeeds.
+  * sysbox-deploy-k8s: continue sysctl configuration when a distro omits an optional kernel sysctl entry.
+  * sysbox-runc: skip proc pressure bind mounts only on CentOS Stream 9 hosts, where legacy Ubuntu Bionic rootfses lack `/proc/pressure`; preserve the three virtualized PSI paths on Ubuntu and other hosts.
+  * sysbox-runc: tolerate K3s writing its `net.ipv4.ip_unprivileged_port_start` sandbox sysctl when it is read-only inside a Sysbox container namespace.
   * sysbox-deploy-k8s: add support for Kubernetes v1.36; the deployment script previously rejected this version through its supported-version whitelist.
   * Fix Debian release packaging by keeping the unreleased changelog header in the format required by the package converter.
   * Fix PVC subPath validation when kubelet uses a generated PVC directory name and CRI uses the logical volume name.

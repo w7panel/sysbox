@@ -19,7 +19,7 @@ env:
   PUSH_IMAGE: "true"
   VERIFY_IMAGE: "true"
   PACKAGE_CHART: "true"
-  K3S_BASE_IMAGE: ghcr.io/nestybox/centos7/systemd
+  K3S_BASE_IMAGE: docker.cnb.cool/i0358/docker-images-chrom/centos-centos:stream9
   UBUNTU_MIRROR: http://archive.ubuntu.com/ubuntu
   DOCKER_APT_MIRROR: https://download.docker.com/linux/ubuntu
   GOPROXY: https://proxy.golang.org,direct

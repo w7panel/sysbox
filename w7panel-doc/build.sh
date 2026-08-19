@@ -170,7 +170,7 @@ build_release() {
     info "run release build with China-accessible defaults"
     env \
         IMAGE_REPO="${IMAGE_REPO:-docker.cnb.cool/i0358/docker-images-chrom/sysbox-deploy-k3s}" \
-        K3S_BASE_IMAGE="${K3S_BASE_IMAGE:-docker.cnb.cool/i0358/docker-images-chrom/nestybox-centos7-systemd}" \
+        K3S_BASE_IMAGE="${K3S_BASE_IMAGE:-docker.cnb.cool/i0358/docker-images-chrom/centos-centos:stream9}" \
         UBUNTU_MIRROR="${UBUNTU_MIRROR:-http://mirrors.aliyun.com/ubuntu}" \
         DOCKER_APT_MIRROR="${DOCKER_APT_MIRROR:-https://mirrors.aliyun.com/docker-ce/linux/ubuntu}" \
         GOPROXY="${GOPROXY:-https://goproxy.cn}" \
