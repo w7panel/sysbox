@@ -97,7 +97,9 @@ kubectl --kubeconfig /home/afan/.kube/114.config \
 
 已测试将内层 K3s snapshotter 从 `overlayfs` 切换为 `native`：配置文件确认 `snapshotter = "native"`，但 CoreDNS、metrics-server、local-path-provisioner 仍以相同的 `/proc` 挂载 `ENOENT` 失败。因此该问题不是内层 overlayfs snapshotter 单独造成的，`native` 不能作为此场景的规避方案。
 
-Ubuntu 可用而当前 CentOS Stream 9 失败仍是待验证差异。高概率关联点是当前外层根目录为 `fuse-overlayfs`，影响内层 runc 对 rootfs 挂载点的解析和 mount propagation；需要在相同 PVC/rootfs 与 K3s 版本下完成 Ubuntu/CentOS 对照，或直接修复 runc/FUSE rootfs 的基础 `/proc` 挂载兼容性。pressure 兼容修改不能解决此问题。
+进一步用普通 `mount -t proc proc <空目录>` 绕过 K3s、containerd 和 runc 后仍可复现。最终定位为 sysbox-fs 的 procfs syscall 代理仍无条件复制 `/proc/pressure/{io,cpu,memory}` 子挂载：CentOS Stream 9 内核没有这些路径，第一个 bind mount 返回 `ENOENT` 后，sysbox-fs 回滚整个新 procfs；Ubuntu 内核存在这些路径，因此可以正常启动内层 Pod。
+
+解决方案：sysbox-fs 创建嵌套 procfs 时，只复制当前 Sysbox 容器中实际存在的 proc 子挂载。Ubuntu 继续保留三个 PSI 文件，CentOS Stream 9 自动跳过缺失路径。
 
 ## 最终验证
 
@@ -111,6 +113,7 @@ Ubuntu 可用而当前 CentOS Stream 9 失败仍是待验证差异。高概率�
 - Pod 注解包含 `io.kubernetes.cri-o.userns-mode: auto:size=65536`
 - Pod PID 1：`systemd /sbin/init`
 - Pod 内可见 `sysboxfs` 挂载
+- 重建 K3K Server Pod 后达到 `2/2 Running`，新事件无 `/proc` 或 `/proc/pressure` 挂载错误；内层 K3s 使用 `overlayfs` 验证通过。
 
 测试 Pod 清理命令：
 

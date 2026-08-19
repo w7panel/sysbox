@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
   * sysbox-runc: skip proc pressure bind mounts only on CentOS Stream 9 hosts, where legacy Ubuntu Bionic rootfses lack `/proc/pressure`; preserve the three virtualized PSI paths on Ubuntu and other hosts.
   * sysbox-runc: tolerate K3s writing its `net.ipv4.ip_unprivileged_port_start` sandbox sysctl when it is read-only inside a Sysbox container namespace.
   * Document the nested K3s sandbox failure seen with a PVC-backed `fuse-overlayfs` Sysbox rootfs on CentOS Stream 9, distinguishing the base `/proc` mount failure from proc-pressure virtualization; testing confirmed the inner K3s `native` snapshotter does not avoid it.
+  * sysbox-fs: when proxying nested procfs mounts, bind only proc submounts that exist in the Sysbox container; this prevents missing CentOS Stream 9 PSI paths from rolling back the entire inner `/proc` mount while preserving them on Ubuntu.
   * sysbox-deploy-k8s: add support for Kubernetes v1.36; the deployment script previously rejected this version through its supported-version whitelist.
   * Fix Debian release packaging by keeping the unreleased changelog header in the format required by the package converter.
   * Fix PVC subPath validation when kubelet uses a generated PVC directory name and CRI uses the logical volume name.
