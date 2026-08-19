@@ -66,7 +66,38 @@ net.ipv4.ip_unprivileged_port_start
 net.ipv4.ping_group_range
 ```
 
-解决方案：在 Sysbox runtime 中仅对这两个键的 `EPERM` 忽略，其他 sysctl 写入错误仍返回失败；同时移除旧 Ubuntu rootfs 不兼容的 `/proc/pressure/{io,cpu,memory}` bind mount。
+解决方案：在 Sysbox runtime 中仅对这两个键的 `EPERM` 忽略，其他 sysctl 写入错误仍返回失败；仅在 CentOS Stream 9 宿主跳过旧 Ubuntu rootfs 不兼容的 `/proc/pressure/{io,cpu,memory}` bind mount，Ubuntu 等宿主仍保留原有 PSI 虚拟化。
+
+### 7. Sysbox Pod 内的嵌套 K3s 无法创建 Pod sandbox
+
+外层 Pod `k3k-admin/k3k-ckm-6hsjh-server-5b896f9fd4-lhgrx` 使用 `sysbox-runc` 正常启动，但其内部 K3s 集群的 CoreDNS、metrics-server、local-path-provisioner 和业务 Pod 均停留在 `ContainerCreating`：
+
+```text
+error mounting "proc" to rootfs at "/proc":
+mount src=proc, dst=/proc, dstFd=/proc/thread-self/fd/11,
+flags=MS_NOSUID|MS_NODEV|MS_NOEXEC: no such file or directory
+```
+
+内层复现命令：
+
+```bash
+kubectl --kubeconfig /home/afan/.kube/114.config \
+  -n k3k-admin exec k3k-ckm-6hsjh-server-5b896f9fd4-lhgrx \
+  -c k3k-ckm-6hsjh-server -- \
+  sh -c 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n kube-system describe pod coredns-8b64bcf7c-dhx4m'
+```
+
+已确认：
+
+- 错误发生在内层 K3s containerd 使用普通 `runc` 创建 pause sandbox 时。
+- 失败的是 OCI spec 的基础 `/proc` 挂载，不是 `/proc/pressure/{io,cpu,memory}` 挂载。
+- 外层 Sysbox 容器的 `/proc` 和 sysbox-fs 挂载正常。
+- 外层容器根目录为 PVC-backed `fuse-overlayfs`。
+- 因所有内层 Pod 同时失败，问题与 CoreDNS 镜像无关。
+
+已测试将内层 K3s snapshotter 从 `overlayfs` 切换为 `native`：配置文件确认 `snapshotter = "native"`，但 CoreDNS、metrics-server、local-path-provisioner 仍以相同的 `/proc` 挂载 `ENOENT` 失败。因此该问题不是内层 overlayfs snapshotter 单独造成的，`native` 不能作为此场景的规避方案。
+
+Ubuntu 可用而当前 CentOS Stream 9 失败仍是待验证差异。高概率关联点是当前外层根目录为 `fuse-overlayfs`，影响内层 runc 对 rootfs 挂载点的解析和 mount propagation；需要在相同 PVC/rootfs 与 K3s 版本下完成 Ubuntu/CentOS 对照，或直接修复 runc/FUSE rootfs 的基础 `/proc` 挂载兼容性。pressure 兼容修改不能解决此问题。
 
 ## 最终验证
 
