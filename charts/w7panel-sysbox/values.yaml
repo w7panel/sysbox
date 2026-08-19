@@ -9,6 +9,8 @@ installer:
   image:
     repository: docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s
     tag: ""
+    # A digest takes precedence over tag and is recommended for releases.
+    digest: sha256:54999e25d3362101caf71ae17d7e95d70a581e7a5ae7af63921cf548a35946ae
     pullPolicy: Always
   podLabels: {}
   podAnnotations: {}
@@ -18,6 +20,7 @@ admission:
   image:
     repository: ""
     tag: ""
+    digest: ""
     pullPolicy: ""
   replicas: 1
   containerdConfigPath: /var/lib/rancher/k3s/agent/etc/containerd

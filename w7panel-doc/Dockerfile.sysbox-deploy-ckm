@@ -1,0 +1,7 @@
+ARG BASE_IMAGE=docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-11-nested-proc-fallback
+FROM ${BASE_IMAGE}
+
+# Keep the already-built release binaries and replace only the nested startup
+# scripts. This fast release image is used by CKM's pinned initContainer.
+COPY --chmod=0755 sysbox-pkgr/k8s/scripts/sysbox-inner-k3s.sh /opt/sysbox/scripts/sysbox-inner-k3s.sh
+COPY --chmod=0755 sysbox-pkgr/k8s/scripts/sysbox-nested-agent.sh /opt/sysbox/scripts/sysbox-nested-agent.sh

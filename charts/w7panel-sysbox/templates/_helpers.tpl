@@ -91,6 +91,19 @@ RuntimeClass name.
 {{- end }}
 
 {{/*
+Render a mutable tag reference only when the caller did not pin an immutable
+digest. The caller passes repository, tag, and digest explicitly so admission
+can inherit installer defaults without duplicating this behavior.
+*/}}
+{{- define "w7panel-sysbox.imageRef" -}}
+{{- if .digest -}}
+{{- printf "%s@%s" .repository .digest -}}
+{{- else -}}
+{{- printf "%s:%s" .repository .tag -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Admission backend Deployment name.
 */}}
 {{- define "w7panel-sysbox.admissionName" -}}
