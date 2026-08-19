@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nested-l3-sysbox-nginx
+  annotations:
+    sysbox/allow-proc-exec: "true"
+spec:
+  runtimeClassName: sysbox-runc
+  enableServiceLinks: false
+  restartPolicy: Never
+  containers:
+    - name: nginx
+      image: ccr.ccs.tencentyun.com/afan-public/nginx:latest
+      imagePullPolicy: Always

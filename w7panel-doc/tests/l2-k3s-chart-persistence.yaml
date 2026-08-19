@@ -1,0 +1,50 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nested-l2-k3s-final-rootfs
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nested-l2-k3s-final
+  annotations:
+    sysbox/allow-proc-exec: "true"
+    sysbox/rootfs-rw-layer: '[{"name":"k3s","volumeName":"rootfs","path":"rootfs","persistentSpecialMounts":true}]'
+spec:
+  runtimeClassName: sysbox-runc
+  enableServiceLinks: false
+  terminationGracePeriodSeconds: 30
+  containers:
+    - name: k3s
+      image: docker.cnb.cool/i0358/zpk/sysbox-nested-k3s-test:v1.35.6-20260814-4
+      imagePullPolicy: Always
+      securityContext:
+        seccompProfile:
+          type: Unconfined
+      command:
+        - /bin/sh
+        - -ec
+      args:
+        - |
+          mount --make-rshared /
+          mount --bind /run /run
+          mount --make-rshared /run
+          exec /usr/local/bin/nested-k3s-entrypoint.sh
+      volumeMounts:
+        - name: fuse
+          mountPath: /dev/fuse
+  volumes:
+    - name: fuse
+      hostPath:
+        path: /dev/fuse
+        type: CharDevice
+    - name: rootfs
+      persistentVolumeClaim:
+        claimName: nested-l2-k3s-final-rootfs

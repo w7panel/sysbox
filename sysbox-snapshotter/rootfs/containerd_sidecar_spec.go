@@ -30,6 +30,7 @@ func (s *ContainerdSidecarSpecStore) LoadSidecarSpec(ctx context.Context, reques
 		return nil, fmt.Errorf("list containerd containers for sidecar spec lookup: %w", err)
 	}
 	specs := make([]*runtimespec.Spec, 0, len(containers))
+	runningSpecs := make([]*runtimespec.Spec, 0, 1)
 	for _, container := range containers {
 		spec, err := container.Spec(ctx)
 		if err != nil {
@@ -39,6 +40,21 @@ func (s *ContainerdSidecarSpecStore) LoadSidecarSpec(ctx context.Context, reques
 			return nil, ErrSidecarSpecMalformed
 		}
 		specs = append(specs, spec)
+		task, err := container.Task(ctx, nil)
+		if err != nil {
+			continue
+		}
+		status, err := task.Status(ctx)
+		if err == nil && status.Status == containerdclient.Running {
+			runningSpecs = append(runningSpecs, spec)
+		}
+	}
+	return selectSidecarSpec(specs, runningSpecs)
+}
+
+func selectSidecarSpec(specs, runningSpecs []*runtimespec.Spec) (*runtimespec.Spec, error) {
+	if len(runningSpecs) > 0 {
+		return uniqueSidecarSpec(runningSpecs)
 	}
 	return uniqueSidecarSpec(specs)
 }

@@ -1,5 +1,8 @@
+FROM docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s@sha256:57cf3c6e343372e8ff4660e48dded434638e592ee8bcb19db53f75c26e713c2a AS sysbox-tools
+
 FROM rancher/k3s:v1.35.6-k3s1
 
+COPY --from=sysbox-tools --chmod=0755 /opt/sysbox/bin/generic/rsync /usr/local/bin/rsync
 COPY --chmod=0755 w7panel-doc/tests/nested-k3s-entrypoint.sh /usr/local/bin/nested-k3s-entrypoint.sh
 COPY w7panel-doc/tests/registries.yaml /etc/rancher/k3s/registries.yaml
 

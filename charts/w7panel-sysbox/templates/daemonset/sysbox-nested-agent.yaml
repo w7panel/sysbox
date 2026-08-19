@@ -53,6 +53,8 @@ spec:
               value: /run/sysbox/sysbox-snapshotter.sock
             - name: SYSBOX_INNER_DATA_ROOT
               value: /var/lib/rancher/k3s/sysbox-inner
+            - name: SYSBOX_INNER_HOST_ROOT
+              value: /proc/1/root
           securityContext:
             privileged: true
           readinessProbe:
