@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Added
+	* 修复 nested-agent readiness 在 L1 中误读取自身 `/proc/net/unix` 的问题：agent 与 L1 Sysbox 服务不共享 network namespace 时，readiness 现在只验证共享目录中的 Unix socket 文件和 ready 标记；独立安装的 nested Chart 不再因看不到其他 namespace 的 socket 而保持未 Ready。
 	* 新增单 chart 双层安装模式：`installMode=host` 保留 L0 宿主 installer，`installMode=nested` 在 L1 K3s 运行常驻 agent、安装当前镜像二进制并以 `nested-identity` 启动独立服务；两种模式统一暴露 `RuntimeClass/sysbox-runc`。nested agent 仅在 containerd 已加载 handler 后标记节点 ready，chart 本身不执行重启；迁移已运行的 L1 时仅需从 L0 滚动重建对应 K3s Pod，不重启物理宿主，避免直接终止 containerd 导致整套 K3s 退出。
 	* 将 chart 的 `installMode` 改为无默认目标的必填参数；遗漏时 Helm 校验失败，防止在 L1 内安装时误用 `host` 模式并执行 `systemctl restart k3s`。
 	* host installer 增加 initial-userns fail-closed 检查；即使错误显式选择 `installMode=host`，在 L1 Sysbox 容器内也会在写宿主文件或重启 K3s 前退出。

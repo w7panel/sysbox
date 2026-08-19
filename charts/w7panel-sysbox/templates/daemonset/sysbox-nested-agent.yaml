@@ -65,7 +65,7 @@ spec:
                 - >-
                   test -f /run/sysbox/nested-runtime-ready &&
                   for socket in /run/sysbox/sysmgr.sock /run/sysbox/sysfs.sock /run/sysbox/sysbox-snapshotter.sock; do
-                    test -S "$socket" && grep -Fq " $socket" /proc/net/unix || exit 1;
+                    test -S "$socket" || exit 1;
                   done
             periodSeconds: 5
           volumeMounts:

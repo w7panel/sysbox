@@ -1,0 +1,7 @@
+FROM docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-14-ckm-nested AS payload
+FROM busybox:1.36
+
+# The outer Sysbox runtime validates the init-container environment before its
+# command starts. Copy only the payload into a neutral image so legacy deploy
+# image variables (notably SYSBOX_VERSION) never reach that validation.
+COPY --from=payload /opt/sysbox /opt/sysbox
