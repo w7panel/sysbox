@@ -5,3 +5,4 @@ FROM ${BASE_IMAGE}
 # scripts. This fast release image is used by CKM's pinned initContainer.
 COPY --chmod=0755 sysbox-pkgr/k8s/scripts/sysbox-inner-k3s.sh /opt/sysbox/scripts/sysbox-inner-k3s.sh
 COPY --chmod=0755 sysbox-pkgr/k8s/scripts/sysbox-nested-agent.sh /opt/sysbox/scripts/sysbox-nested-agent.sh
+COPY --chmod=0755 sysbox-pkgr/k8s/scripts/sysbox-ckm-nested-uninstall.sh /opt/sysbox/scripts/sysbox-ckm-nested-uninstall.sh
