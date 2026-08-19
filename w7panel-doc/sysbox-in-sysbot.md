@@ -334,6 +334,56 @@ L2 同时生成了该 CNI 的 SNAT 规则。从 L2 执行 `wget` 访问 L3 nginx
 上述历史轮次刻意禁用了 CoreDNS；后续最终回归已启用 CoreDNS，并确认 Service
 ClusterIP、跨 Pod HTTP、外部域名解析和外网 HTTPS 均正常。
 
+### ckm-bzhrq 复测（2026-08-19）
+
+本轮使用 CKM `ckm-bzhrq`，目的是在另一份 CKM 实例上重复确认 L1、独立 nested
+chart 和 L2 网络链路。该轮是分步回归，不能替代已完成的 L3 全链路记录。
+
+| 阶段 | 结果 | 现场问题与处理 |
+| --- | --- | --- |
+| CKM 初始启动 | 阻塞 | `spec.innerSysbox.enabled` 初始为 `false`；patch 为 `true` 后才创建带 L1 nested runtime 的 Deployment。 |
+| 全局 pre-install | 跳过 | `w7panel-ckmv3` ServiceAccount 缺少 `pods/exec` RBAC 权限，执行报 `forbidden`；本轮仅将该 CKM 的历史 execution 标记为 `skip`，没有放宽全局权限或执行未知脚本。 |
+| L1 mount 与独立 chart | 通过 | L1 `/var/lib/rancher/k3s` 为 shared mount；在 L1 内以 `installMode=nested` 安装 `w7panel-sysbox`，nested-agent 成功 Ready，节点出现 `sysbox.w7panel.io/nested-runtime=ready`。 |
+| L2 nginx | 通过 | L2 使用统一 `runtimeClassName: sysbox-runc`，UID/GID map 均为 `0 0 65536`；腾讯云 nginx 镜像拉取成功，CNI 分配地址、L1 到 L2 HTTP 访问均正常。 |
+| 带 `sysbox/rootfs-rw-layer` 的 L2 K3s | 失败 | K3s 启动阶段报 `rsync: ACLs are not supported on this client`，Pod 未 Ready。该错误来自当前测试镜像/rsync ACL 能力，不应记录为 CNI 或 userns 映射失败。 |
+| 去掉持久 rootfs 后的 L2 K3s | 通过 | 去掉 `sysbox/rootfs-rw-layer` 后 L2 K3s Node 进入 `Ready`，证明基础 nested runtime 可用。 |
+| L2 内独立 nested chart | 阻塞 | Chart 已创建 L2 `RuntimeClass/sysbox-runc` 与 agent DaemonSet。L2 能解析 `docker.cnb.cool` 且有默认路由，但完整 deploy 镜像解包报 `copy_file_range failed: no space left on device`；kubelet 可用 ephemeral storage 低于 1Gi 后进入 `DiskPressure` 并驱逐 agent。L1 已缓存镜像也已尝试导出导入 L2，但磁盘不足时不能完成解包，因此不能归因为 handler 或 CNI。 |
+| L1 重建影响 | 已恢复 | L2 内安装 Chart 的 exec 会话期间 L1 被 K3k 重建，旧 websocket 返回 EOF；L1 K3s、L1 Chart 和无 rootfs 的 L2 K3s 均从 L1 持久数据恢复，但测试命令必须每次按 label 重新发现 L1 Pod。 |
+| 清理后重建 L2 | 阻塞 | 删除临时 L2 后重建时，L1 containerd 创建 Sysbox sandbox 报 `failed to get reader from content store: content digest ... not found`。这是 snapshot/content-store 内容缺失，继续重试只会重复失败 sandbox；须先修复或重新拉取该 sandbox 所依赖的内容。 |
+| L3 | 未完成 | L2 nested-agent 尚未 Ready，不能创建并验收 L3 Sysbox Pod；本轮不能从 `ckm-bzhrq` 单独宣称 L3 通过。 |
+
+本轮新增或确认的问题：
+
+1. CKM 模板必须显式开启 `innerSysbox.enabled`，否则不会部署 L1 nested runtime。
+2. `w7panel-ckmv3` 的 pre-install 执行权限缺少 `pods/exec`；临时 skip 只适用于本次
+   已知历史 execution，正式部署仍需补齐最小 RBAC 并单独验证脚本范围。
+3. `rootfs-rw-layer` 路径触发的 rsync ACL 错误尚未修复；需要在测试镜像提供支持 ACL
+   的 rsync，或让该初始化路径在不支持 ACL 的客户端上采用明确的兼容策略。
+4. L2 K3s Ready 不代表 L3 可用；必须先在 L2 内独立安装 `w7panel-sysbox`
+   (`installMode=nested`)，确认 `sysbox-runc` handler 和 nested-agent Ready 后再做 L3。
+5. L2 侧 deploy 镜像拉取长期无进度时，先记录 `ContainerCreating/Pulling`、DNS、路由和
+   CRI 事件；本轮最终根因是 L2 节点 ephemeral storage 低于 1Gi，镜像解包失败并被
+   `DiskPressure` 驱逐，不是 DNS 或 handler 失败。不能用 L1 的网络通过状态替代 L2
+   镜像分发验证。
+6. 清理或 GC 后若新 Sysbox sandbox 报 content digest not found，先恢复缺失的 sandbox
+   镜像内容或修复 snapshot/content-store 一致性，再创建 L2；反复重新创建 Pod 无效。
+
+### ckm-bzhrq 修复后最终复测（2026-08-19）
+
+前表中的 ACL、磁盘和 content-store 错误属于修复前现场；完成 bootstrap 镜像、持久
+rootfs 依赖探测和运行时二进制保留修复后，在同一 CKM `ckm-bzhrq` 重新创建 L2
+并完成以下结果：
+
+| 检查项 | 结果 | 现场证据 |
+| --- | --- | --- |
+| L2 K3s 重建 | 通过 | `nested-l2-k3s-final` 新 Pod `2/2 Running`，Node `nested-rootfs-poc` 为 `Ready`，K3s `v1.35.6+k3s1`。 |
+| L2 独立 chart | 通过 | `sysbox-system` admission 与 nested-agent 均 `1/1 Running`；`RuntimeClass/sysbox-runc.handler=sysbox-runc`，节点带 `sysbox.w7panel.io/nested-runtime=ready`。 |
+| L2 rootfs-rw-layer 持久化 | 通过 | `/rootfs-persistence-bzhrq` 重建前后 inode `43947400`、size `29`、owner `0:0` 和内容 `nested-bzhrq-rootfs-20260819` 全部一致。 |
+| L3 nginx/CNI | 通过 | 使用 `ccr.ccs.tencentyun.com/afan-public/nginx:latest`，L3 UID/GID `0 0 65536`、child userns、Pod IP `10.245.0.7`、L2 HTTP、IPAM/veth/NAT 回收均通过；镜像 digest 为 `sha256:29cf9892ca1103e0b8c97db86f819fac1d9457b176bc77dd4f18ed2da4dd159f`。 |
+
+因此当前 CKM 实例的 L0 → L1 → L2 → L3 主链路已通过。历史记录中关于“L3 未完成”
+和“带 rootfs 的 L2 K3s 失败”的结论只适用于修复前轮次，不应覆盖本节最终复测结果。
+
 ### loopback 修复端到端复测
 
 新 runc 先经 node-debugger 写入宿主的仅测试路径
