@@ -1,15 +1,18 @@
 [submodule "sysbox-fs"]
 	path = sysbox-fs
 	url = https://github.com/w7panel/sysbox-fs
+	branch = w7panel
 [submodule "sysbox-runc"]
 	path = sysbox-runc
 	url = https://github.com/w7panel/sysbox-runc
+	branch = w7panel
 [submodule "sysbox-ipc"]
 	path = sysbox-ipc
 	url = https://github.com/nestybox/sysbox-ipc
 [submodule "sysbox-mgr"]
 	path = sysbox-mgr
 	url = https://github.com/w7panel/sysbox-mgr
+	branch = w7panel
 [submodule "sysbox-libs"]
 	path = sysbox-libs
 	url = https://github.com/w7panel/sysbox-libs

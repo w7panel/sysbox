@@ -3,6 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Added
+  * submodules: track the `w7panel` branch for the W7Panel-maintained `sysbox-fs`, `sysbox-runc`, and `sysbox-mgr` repositories; upstream-only modules remain on their default branch.
+  * sysbox-deploy-k8s: run host service operations through the host PID 1 on all distributions; Ubuntu 24.04 installers previously treated the helper unit cleanup as a chroot operation and exited with code 1.
   * sysbox-deploy-k8s: support installation on CentOS Stream 9 hosts; the deploy script now normalizes the quoted `ID=centos` value to recognize `centos-9`, uses the generic Sysbox artifacts, and builds the K3s installer from a CentOS Stream 9 base instead of the retired CentOS 7 base.
   * sysbox-deploy-k8s: mount the host DBus socket at both `/var/run/dbus` and `/run/dbus` so systemd control commands work inside CentOS Stream 9 installer containers.
   * sysbox-deploy-k8s: set the DBus system bus address explicitly for CentOS Stream 9 installer containers.
