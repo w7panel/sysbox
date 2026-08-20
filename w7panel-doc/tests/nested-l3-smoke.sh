@@ -7,6 +7,10 @@ set -euo pipefail
 kubeconfig="${KUBECONFIG_218:-/root/.kube/218.config}"
 outer_namespace="${NAMESPACE:-k3k-console-164315}"
 l1_deployment="${DEPLOYMENT:-sysbox-inner-k3s-rootfs-poc}"
+ckm_selector="${CKM_SELECTOR:-cluster=ckm-bzhrq,role=server}"
+l1_selector="${L1_SELECTOR:-$ckm_selector}"
+l1_pod_override="${L1_POD:-}"
+l1_container_override="${L1_CONTAINER:-}"
 l2_pod="${L2_POD:-nested-l2-k3s-final}"
 test_pod="${TEST_POD:-nested-l3-chart-nginx}"
 test_image="${TEST_IMAGE:-ccr.ccs.tencentyun.com/afan-public/nginx:latest}"
@@ -25,7 +29,7 @@ outer_kubectl() {
 }
 
 l1_kubectl() {
-	outer_kubectl -n "$outer_namespace" exec "$l1_pod" -c k3s -- \
+	outer_kubectl -n "$outer_namespace" exec "$l1_pod" -c "$l1_container" -- \
 		/bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml "$@"
 }
 
@@ -46,10 +50,29 @@ trap cleanup EXIT INT TERM
 
 [ -r "$kubeconfig" ] || die "kubeconfig is not readable: $kubeconfig"
 
-l1_pod="$(outer_kubectl -n "$outer_namespace" get pods \
-	-l "app=$l1_deployment" --field-selector=status.phase=Running \
+[ -n "$l1_pod_override" ] && l1_pod="$l1_pod_override" || l1_pod="$(outer_kubectl -n "$outer_namespace" get pods \
+	-l "$l1_selector" --field-selector=status.phase=Running \
 	-o jsonpath='{.items[0].metadata.name}')"
-[ -n "$l1_pod" ] || die "no Running L1 pod found for app=$l1_deployment"
+if [ -z "$l1_pod" ] && [ "$l1_selector" = "$ckm_selector" ]; then
+	# Preserve the standalone PoC as a fallback, but prefer the real CKM when
+	# both are present so an old PoC cannot masquerade as ckm-bzhrq evidence.
+	l1_selector="app=$l1_deployment"
+	l1_pod="$(outer_kubectl -n "$outer_namespace" get pods \
+		-l "$l1_selector" --field-selector=status.phase=Running \
+		-o jsonpath='{.items[0].metadata.name}')"
+fi
+[ -n "$l1_pod" ] || die "no Running L1 pod found for selector: $l1_selector"
+
+# CKM-derived L1 Pods use their generated server name instead of `k3s`.
+# Select the first regular container and allow callers to override it.
+if [ -n "$l1_container_override" ]; then
+	l1_container="$l1_container_override"
+else
+	l1_container="$(outer_kubectl -n "$outer_namespace" get pod "$l1_pod" \
+		-o jsonpath='{range .spec.containers[*]}{.name}{"\n"}{end}' |
+		awk '$1 != "sysbox-rootfs" { print; exit }')"
+fi
+[ -n "$l1_container" ] || die "no regular container found in L1 pod: $l1_pod"
 
 l1_kubectl -n default get pod "$l2_pod" >/dev/null || die "L2 pod is not available: $l2_pod"
 l2_kubectl get runtimeclass sysbox-runc -o jsonpath='{.handler}' | grep -qx sysbox-runc ||

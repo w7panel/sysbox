@@ -955,3 +955,79 @@ CNI 回收全部通过。不要将 L0 的普通 `kubectl` 输出作为该结论�
 - 每次复测记录时间、二进制或 helper 版本、L1/L2/L3 phase、uid map、namespace
   inode、关键事件、错误归类及清理结果。构建成功、Pod `Running` 和完整功能验收是
   三个不同状态，不得混写。
+
+## ckm-bzhrq 当前复测（2026-08-20）
+
+本轮证据来自 218 的真实 CKM，外层 namespace 为 `k3k-console-164315`。CKM
+controller 在测试期间重建过 L1，因此旧 Pod
+`k3k-ckm-bzhrq-server-5dc666d59-cn5x9` 不能继续作为证据；当前 L1 必须按
+`cluster=ckm-bzhrq,role=server` 重新发现（本轮最终为
+`k3k-ckm-bzhrq-server-5dc666d59-r24g6`）。
+
+### 已确认
+
+| 检查项 | 结果 | 证据 |
+| --- | --- | --- |
+| 静态 runc 注入 | 通过 | `/opt/sysbox/bin/generic/sysbox-runc` 为静态 ELF，无 `INTERP`；digest `6feb5160f57b895efd003f6f70301a5030593908f4eb0a27f99690c2754d2a95`。 |
+| L1 daemon 恢复 | 通过 | stale `/run/sysbox/sysmgr.pid` 清理后，inner mgr/fs/snapshotter socket 和 Ready 均恢复。 |
+| L2 rootfs-rw-layer | 通过 | `nested-l2-k3s-final` 重建后仍为 `2/2 Running`；`/rootfs-persistence-bzhrq` 内容保持，inode `576074`、owner `0:0`。 |
+| L2 nested chart | 通过 | 真正 L2 K3s 内 `RuntimeClass/sysbox-runc.handler=sysbox-runc`，admission 与 nested-agent `1/1 Running`，节点 `Ready` 且带 `sysbox.w7panel.io/nested-runtime=ready`。nested-agent 最终使用 v23 digest `sha256:387f5ae2b347d021fc04a5eb9ea01828460d7e7b9bbf17a8fffd787ae2498206`。 |
+| L2 containerd handler | 通过 | `sysbox-runc` 使用 snapshotter `sysbox`，`BinaryName=/var/lib/sysbox-inner/bin/sysbox-runc-nested`。 |
+| L3 腾讯云 nginx | 通过 | 通过完整 L0 -> L1 -> L2 API 路径检查 `nested-l3-bzhrq-real-nginx`：`1/1 Running`、IP `10.245.3.91`，`uid_map/gid_map` 均为 `0 0 65536`，L2 userns `4026549034` 与 L3 userns `4026547267` 不同；镜像 digest `sha256:29cf9892ca1103e0b8c97db86f819fac1d9457b176bc77dd4f18ed2da4dd159f`。 |
+| L3 HTTP/CNI | 通过 | L2 可访问 `10.245.3.91` 的 nginx HTTP。v23 自动脚本 `nested-l3-v23-pass` 获得 `10.245.3.95` 并输出 PASS；删除后 `/var/lib/cni/networks` IPAM 文件和对应 iptables 状态均回收。 |
+
+### 本轮已解决问题
+
+1. 纠正了早期少一层 `exec nested-l2-k3s-final -c k3s` 的测试路径。此前记录的
+   `10.52.x.x` 是 L1 K3s 中的 L2 Pod 地址，不能作为 L3 证据；真正 L3 CNI 地址为
+   `10.245.x.x`。`nested-l3-smoke.sh` 现在默认优先选择
+   `cluster=ckm-bzhrq,role=server`，避免同时存在的旧 PoC Deployment 被误选。
+2. nested-agent 的私有 mount namespace 原先看到空的 `/run/sysbox` 或外层
+   `/run/k3s`，L2 containerd 因此报
+   `dial unix /run/sysbox/sysbox-snapshotter.sock: timeout`。v23 通过
+   `nsenter -m -t 1` 在 K3s PID 1 的 mount namespace 启动、检查 mgr、fs 和
+   snapshotter，并在相同 namespace 查询 containerd handler。
+3. 极简 K3s rootfs 缺少 `modprobe` 和 `iptables`。launcher 现在把 image 中的
+   `kmod`、`xtables-multi` 安装到共享 `/var/lib/sysbox-inner/bin`，并在 L2 rootfs
+   暴露标准命令入口。
+4. 修复了 mount-namespace socket 检查的 shell 参数错位，以及 snapshotter 启动分支
+   仍在 agent 自身 namespace 检查 containerd socket 的问题。旧的
+   `nested-l3-real` 和 `nested-l3-bzhrq-real-nginx` 在更新真正的 L2 agent 后无需重建
+   即从 `ContainerCreating` 自动恢复到 `Running`。
+
+### 当前未完成或需固化
+
+1. 当前固化的 `sysbox-nested-k3s-test:v1.35.6-20260814-4` 镜像没有
+   `systemctl`/`docker` 客户端，因此本轮只能证明 K3s、containerd、nested chart 和
+   cgroup v2 delegation；L2 systemd、dockerd、overlay2 组合需要使用带这些工具的
+   测试镜像重新验收，不能沿用极简镜像结果。
+2. 该镜像的 entrypoint 把 CNI 清单写到 `/etc/cni/net.d`，而 containerd 模板读取
+   `/var/lib/rancher/k3s/agent/etc/cni/net.d`。本轮通过持久 rootfs 补齐目标文件恢复
+   `Node Ready`；源码 `nested-k3s-entrypoint.sh` 已改为同时写两个目录，仍需重建并
+   推送最终测试镜像后再做一次干净重启验证。
+
+### 快速复测
+
+```bash
+K=/root/.kube/218.config
+NS=k3k-console-164315
+L1="$(kubectl --kubeconfig "$K" -n "$NS" get pod \
+  -l cluster=ckm-bzhrq,role=server --field-selector=status.phase=Running \
+  -o jsonpath='{.items[0].metadata.name}')"
+
+# L2 状态、RuntimeClass、rootfs marker
+kubectl --kubeconfig "$K" -n "$NS" exec "$L1" -c k3k-ckm-bzhrq-server -- \
+  /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml \
+  get pod nested-l2-k3s-final -o wide
+kubectl --kubeconfig "$K" -n "$NS" exec "$L1" -c k3k-ckm-bzhrq-server -- \
+  /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml \
+  exec nested-l2-k3s-final -c k3s -- sh -ec \
+  'cat /rootfs-persistence-bzhrq; cat /proc/self/uid_map; \
+   /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml get runtimeclass sysbox-runc'
+
+# L3 nginx、child userns、HTTP 与 CNI 回收
+cd /root/workspace/sysbox
+KUBECONFIG_218="$K" NAMESPACE="$NS" L1_POD="$L1" \
+  L2_POD=nested-l2-k3s-final TEST_POD=nested-l3-bzhrq-final \
+  bash w7panel-doc/tests/nested-l3-smoke.sh
+```

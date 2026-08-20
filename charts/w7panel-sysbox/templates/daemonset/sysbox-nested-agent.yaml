@@ -55,6 +55,10 @@ spec:
               value: /var/lib/rancher/k3s/sysbox-inner
             - name: SYSBOX_INNER_HOST_ROOT
               value: /proc/1/root
+            - name: SYSBOX_INNER_MOUNT_NS_PID
+              value: "1"
+            - name: K3S_CONTAINERD_SOCKET
+              value: /run/k3s/containerd/containerd.sock
           securityContext:
             privileged: true
           readinessProbe:
@@ -64,9 +68,9 @@ spec:
                 - -ec
                 - >-
                   test -f /run/sysbox/nested-runtime-ready &&
-                  for socket in /run/sysbox/sysmgr.sock /run/sysbox/sysfs.sock /run/sysbox/sysbox-snapshotter.sock; do
+                  nsenter -m -t 1 -- sh -ec 'for socket in /run/sysbox/sysmgr.sock /run/sysbox/sysfs.sock /run/sysbox/sysbox-snapshotter.sock; do
                     test -S "$socket" || exit 1;
-                  done
+                  done'
             periodSeconds: 5
           volumeMounts:
             - name: dev-fuse
@@ -95,11 +99,16 @@ spec:
             type: CharDevice
         - name: host-k3s-run
           hostPath:
-            path: /run/k3s
-            type: Directory
+            # The nested K3s process publishes this bind-mounted path from
+            # its own mount namespace; the node's outer /run/k3s is a
+            # different containerd socket.
+            path: /var/lib/rancher/k3s/agent/k3s-run
+            type: DirectoryOrCreate
         - name: host-sysbox-run
           hostPath:
-            path: /run/sysbox
+            # Keep inner mgr/fs/snapshotter sockets on the L2-visible shared
+            # data path rather than the L1 host's /run/sysbox.
+            path: /var/lib/rancher/k3s/agent/sysbox-run
             type: DirectoryOrCreate
         - name: host-k3s-data
           hostPath:

@@ -103,7 +103,7 @@ installer tag is empty, the chart defaults it to `v{{ .Chart.AppVersion }}`.
 | --- | --- | --- |
 | `installer.image.repository` | `docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s` | Shared host-installer and nested-agent image repository. |
 | `installer.image.tag` | `""` | Installer image tag; defaults to `v{{ .Chart.AppVersion }}`. |
-| `installer.image.digest` | `sha256:b4562eb6581baf91a10ac12ac4aea4eee9584c26a94f76632bba1e804adc85c8` | Immutable installer image digest; takes precedence over `tag`. |
+| `installer.image.digest` | `sha256:387f5ae2b347d021fc04a5eb9ea01828460d7e7b9bbf17a8fffd787ae2498206` | Immutable installer image digest; takes precedence over `tag`. |
 | `admission.image.repository` | `""` | Optional admission image repository override; defaults to `installer.image.repository`. |
 | `admission.image.tag` | `""` | Optional admission image tag override; defaults to `installer.image.tag`. |
 | `admission.image.digest` | `""` | Optional immutable admission image digest; defaults to `installer.image.digest`. |
@@ -132,6 +132,11 @@ only L1-visible state under `/var/lib/sysbox-inner`, `/var/lib/sysboxfs-inner`,
 `/run/sysbox`, and the K3s data directory, and starts the manager with explicit
 `nested-identity` mapping. It requires delegated cgroup v2, `/dev/fuse`, and
 bidirectional mount propagation from the L1 Sysbox Pod.
+
+The agent has a private mount namespace. It enters PID 1's mount namespace for
+the K3s containerd socket and for the manager, fs, and snapshotter sockets. This
+prevents a nested install from becoming Ready against an unrelated outer
+`/run/k3s` or an empty hostPath directory.
 
 | Value | Default | Description |
 | --- | --- | --- |

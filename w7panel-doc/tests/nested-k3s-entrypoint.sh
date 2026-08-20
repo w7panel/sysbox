@@ -2,7 +2,6 @@
 set -eu
 
 cni_conf_dir="${CNI_CONF_DIR:-/var/lib/rancher/k3s/agent/etc/cni/net.d}"
-cni_conf="$cni_conf_dir/10-sysbox-nested.conflist"
 cni_bin_dir="${CNI_BIN_DIR:-/var/lib/rancher/k3s/data/cni}"
 containerd_template="${CONTAINERD_TEMPLATE:-/var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.tmpl}"
 pause_image="${K3S_PAUSE_IMAGE:-docker.cnb.cool/i0358/zpk/nested-pause:20260810-1}"
@@ -24,8 +23,13 @@ prepare_cni_plugins() {
 }
 
 write_cni_config() {
-	mkdir -p "$cni_conf_dir"
-	cat >"$cni_conf" <<'EOF'
+	# Older test images default to /etc/cni/net.d while K3s-generated
+	# containerd config reads its agent directory. Keep both paths populated so
+	# a controlled Pod restart cannot lose the network during migration.
+	for target_dir in "$cni_conf_dir" /etc/cni/net.d /var/lib/rancher/k3s/agent/etc/cni/net.d; do
+		[ -n "$target_dir" ] || continue
+		mkdir -p "$target_dir"
+		cat >"$target_dir/10-sysbox-nested.conflist" <<'EOF'
 {
   "cniVersion": "1.0.0",
   "name": "sysbox-nested",
@@ -49,6 +53,7 @@ write_cni_config() {
   ]
 }
 EOF
+	done
 }
 
 write_containerd_template() {
@@ -109,6 +114,15 @@ prepare_server() {
 	prepare_cni_plugins
 	write_cni_config
 	write_containerd_template
+	# Publish the L2 K3s and Sysbox sockets through the persistent data mount.
+	# The nested chart's hostPath volumes must not resolve to L1's outer /run.
+	mkdir -p /var/lib/rancher/k3s/agent/k3s-run /var/lib/rancher/k3s/agent/sysbox-run
+	mountpoint -q /var/lib/rancher/k3s/agent/k3s-run || \
+		mount --bind /run/k3s /var/lib/rancher/k3s/agent/k3s-run
+	mountpoint -q /run/sysbox || \
+		mount --bind /var/lib/rancher/k3s/agent/sysbox-run /run/sysbox
+	mount --make-rshared /var/lib/rancher/k3s/agent/k3s-run
+	mount --make-rshared /run/sysbox
 }
 
 if [ "$#" -gt 0 ]; then
