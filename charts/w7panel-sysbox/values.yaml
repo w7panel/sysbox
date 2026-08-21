@@ -10,7 +10,7 @@ installer:
     repository: docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s
     tag: ""
     # A digest takes precedence over tag and is recommended for releases.
-    digest: sha256:3d81d504e0646d4b9f8c761f59a0f2d568c87430166cc3e1b4109013010cd67a
+    digest: sha256:c4756d2e164ccdc9bc4802528e95ae47775a13a61ae74c5c4d67c387fc81ca3c
     pullPolicy: Always
   podLabels: {}
   podAnnotations: {}

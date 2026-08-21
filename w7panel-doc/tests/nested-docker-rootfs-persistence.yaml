@@ -2,6 +2,8 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: nested-docker-rootfs-persistence
+  labels:
+    w7.cc/group-name: nested-docker-rootfs-persistence
 spec:
   accessModes:
     - ReadWriteOnce
@@ -25,8 +27,9 @@ spec:
     metadata:
       labels:
         app: nested-docker-rootfs-persistence
+        w7.cc/group-name: nested-docker-rootfs-persistence
       annotations:
-        sysbox/rootfs-rw-layer: '[{"name":"system","volumeName":"rootfs","path":"system"}]'
+        sysbox/rootfs-rw-layer: '[{"name":"system","volumeName":"rootfs","path":"system","persistentSpecialMounts":true}]'
         sysbox/allow-proc-exec: "true"
     spec:
       runtimeClassName: sysbox-runc
@@ -38,6 +41,10 @@ spec:
           imagePullPolicy: IfNotPresent
           command:
             - /sbin/init
+          resources:
+            limits:
+              cpu: "1"
+              memory: 2Gi
       volumes:
         - name: rootfs
           persistentVolumeClaim:

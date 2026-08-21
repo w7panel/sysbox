@@ -15,7 +15,7 @@ type: application
 # This is the chart version. This version number should be incremented each time you make changes
 # to the chart and its templates, including the app version.
 # Versions are expected to follow Semantic Versioning (https://semver.org/)
-version: 0.7.1-12
+version: 0.7.1-13
 
 # This is the version number of the application being deployed. This version number should be
 # incremented each time you make changes to the application. Versions are not expected to
@@ -23,4 +23,4 @@ version: 0.7.1-12
 # It is recommended to use it with quotes.
 # github release tag carries a v prefix
 # release 时候根据release tag 修改此处 镜像也是用这个tag
-appVersion: "0.7.1-43-handler-compat"
+appVersion: "0.7.1-45-nested-lifecycle-safe"
