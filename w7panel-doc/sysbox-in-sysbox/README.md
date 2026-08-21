@@ -38,6 +38,7 @@ KUBECONFIG_218=/root/.kube/218.config
 OUTER_NAMESPACE=k3k-console-164315
 CKM_NAMESPACE=$OUTER_NAMESPACE
 CKM_NAME=ckm-bzhrq
+CHART_NAMESPACE=default
 ```
 
 `CKM_NAME` 是唯一选择依据，脚本不会在多个 CKM 中随机选择；`CKM_SELECTOR` 会根据
@@ -212,7 +213,8 @@ handler 时，若 containerd 不能热加载，按已有 CKM 控制器做一次�
 bash ./05-test-ckm-k3s.sh
 ```
 
-该脚本通过 L0 kubeconfig → CKM Pod → CKM 内 K3s API 创建 nginx Pod，验证：
+该脚本通过 L0 kubeconfig → CKM Pod → CKM 内 K3s API 在 `default` namespace 创建 nginx Deployment，
+chart 和 workload 都使用 `default` namespace，验证：
 
 ```yaml
 spec:
@@ -222,10 +224,10 @@ spec:
 
 必须同时满足：
 
-- CKM K3s 中的 `RuntimeClass/sysbox-runc.handler=sysbox-runc`；
+- CKM K3s `default` namespace 中的 chart 资源和 `RuntimeClass/sysbox-runc.handler=sysbox-runc`；
 - workload 使用独立 user namespace，`uid_map=0 0 65536`；
-- nginx Pod 获得 CNI IP，CKM K3s 能访问 HTTP；
-- 删除 workload 后 CNI bridge/IPAM/iptables 状态回收。
+- nginx Deployment 的 Pod 获得 CNI IP，CKM K3s 能访问 HTTP；
+- 删除 Deployment 后 CNI bridge/IPAM/iptables 状态回收。
 
 ## 5. 三层 L2/L3 实验（可选历史流程）
 
@@ -254,7 +256,7 @@ DELETE_CKM=true bash ./99-cleanup.sh
 | 找不到 CKM K3s | 检查 `CKM_NAMESPACE/CKM_NAME`，以及 CKM 是否 `innerSysbox.enabled=true` |
 | nested-agent 不 Ready | 检查 CKM K3s 的 `/run/k3s`、`/run/sysbox` 和 K3s 数据目录是否 shared |
 | 镜像 `no space left on device` | 检查 CKM K3s 节点 ephemeral storage 和节点磁盘 |
-| admission 访问旧 IP | 删除 CKM K3s 中的 `w7panel-sysbox-admission` Pod，等待 Service endpoint 重建 |
+| admission 访问旧 IP | 删除 CKM K3s `default` 中的 `w7panel-sysbox-admission` Pod，等待 Service endpoint 重建 |
 | `sidecar spec unavailable` 或 seccomp notify 错误 | 先确认 L0 `sysbox-mgr/fs/snapshotter` 健康；单 Pod、串行重建，不要并发删除 CKM |
 | workload 无 IP | 检查 CKM K3s 的 `/var/lib/cni/networks`、bridge、`registries.yaml` 和 CNI plugin symlink |
 | CKM K3s 内看到 `memory.max=max` | 该视图不代表父 cgroup 无限制；用实际压力测试验证父级限制 |
