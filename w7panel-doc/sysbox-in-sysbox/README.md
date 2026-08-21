@@ -36,13 +36,14 @@ Helm 二进制塞进测试镜像，也能清楚区分当前操作落在哪一层
 KUBECONFIG_218=/root/.kube/218.config
 OUTER_NAMESPACE=k3k-console-164315
 CKM_NAMESPACE=$OUTER_NAMESPACE
-CKM_NAME=ckm-sysbox-manual
+CKM_NAME=ckm-bzhrq
 ```
 
-也可以不改文件，临时覆盖变量：
+`CKM_NAME` 是唯一选择依据，脚本不会在多个 CKM 中随机选择；`CKM_SELECTOR` 会根据
+该名称自动生成为 `cluster=<CKM_NAME>,role=server`。也可以临时覆盖配置：
 
 ```bash
-CKM_NAME=ckm-bzhrq CKM_SELECTOR='cluster=ckm-bzhrq,role=server' \
+CKM_NAME=ckm-bzhrq CKM_NAMESPACE=k3k-console-164315 \
   bash ./00-check-prereqs.sh
 ```
 
@@ -53,9 +54,32 @@ cd /root/workspace/sysbox/w7panel-doc/sysbox-in-sysbox
 bash ./00-check-prereqs.sh
 ```
 
-## 1. 新建 CKM（创建 L1）
+## 1. 选择已有 CKM 或显式新建 CKM
 
-`01-create-ckm.sh` 创建 `ckm.w7.cc/v1alpha2` 的 `Ckm`，关键字段是：
+`w7panel-ckm` 中的已有 CKM 已经自带一个 K3s，该 K3s 是本流程的 L1。默认执行
+`01-create-ckm.sh` 只按 `config.sh` 的 `CKM_NAMESPACE/CKM_NAME` 查找并校验已有 CKM，
+不会创建新的 `Ckm`：
+
+```bash
+CREATE_CKM=false bash ./01-create-ckm.sh
+```
+
+必须满足：
+
+- `status.clusterPhase=Ready`；
+- `spec.runtimeClass=sysbox-runc`；
+- `spec.innerSysbox.enabled=true`；
+- CKM Server Pod 使用 `hostUsers=false`。
+
+只有明确要创建一次性 CKM 时才设置 `CREATE_CKM=true`，并使用一个新的名称：
+
+```bash
+CKM_NAME=ckm-sysbox-manual-$(date +%s) \
+CKM_NAMESPACE=k3k-console-164315 \
+CREATE_CKM=true bash ./01-create-ckm.sh
+```
+
+新建对象的关键字段是：
 
 ```yaml
 spec:
@@ -69,21 +93,8 @@ spec:
 
 `innerSysbox.enabled=true` 只负责让 controller 在 L1 K3s 启动前准备 nested
 handler、`/dev/fuse` 和 Sysbox 二进制；它不会自动安装 `w7panel-sysbox` Helm Chart。
-脚本会等待 CKM Server Pod 以 `cluster=<CKM_NAME>,role=server` 标签进入 Running，并
-打印 L1 Pod 名称。执行：
-
-```bash
-bash ./01-create-ckm.sh
-```
-
-如果集群使用已有 CKM，不要重复创建，直接在 `config.sh` 设置：
-
-```bash
-CKM_NAME=ckm-bzhrq
-CKM_SELECTOR='cluster=ckm-bzhrq,role=server'
-L1_POD=<实际的 k3k-ckm-bzhrq-server Pod>
-L1_CONTAINER=k3k-ckm-bzhrq-server
-```
+无论是复用还是新建，脚本都会按配置的 CKM 名称定位 Server Pod；如果同名 CKM 不存在
+或状态不满足要求会直接失败，不会改用其他 CKM。
 
 确认 L1 的边界：
 
@@ -202,7 +213,8 @@ handler 时，若 containerd 不能热加载，按已有 CKM 控制器做一次�
 
 ## 4. 创建 L2 K3s
 
-`04-create-l2-k3s.sh` 在 L1 K3s 的 `default` namespace 创建：
+`04-create-l2-k3s.sh` 不创建 CKM，也不切换 CKM 版本；它复用配置中 CKM 自己创建的
+L1 K3s，在 L1 的 `default` namespace 创建 L2：
 
 - `nested-l2-k3s-manual-rootfs`，5 Gi `local-path` PVC；
 - `nested-l2-k3s-manual`，`runtimeClassName: sysbox-runc`；
@@ -215,6 +227,16 @@ handler 时，若 containerd 不能热加载，按已有 CKM 控制器做一次�
 ```bash
 bash ./04-create-l2-k3s.sh
 ```
+
+因此版本关系是：
+
+```text
+已有 CKM 的 K3s = L1
+04-create-l2-k3s.sh 创建的 K3s = L2
+```
+
+CKM controller、SystemTemplate 或 K3s 镜像版本需要单独升级并完成 L1 受控重建后，
+再重新执行本流程；不能通过 `04-create-l2-k3s.sh` 切换 CKM 版本。
 
 检查 L2 使用的是独立 user namespace，而不是加入 L1：
 

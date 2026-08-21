@@ -17,10 +17,31 @@ die() { printf '[sysbox-in-sysbox] ERROR: %s\n' "$*" >&2; exit 1; }
 need_cmd() { command -v "$1" >/dev/null 2>&1 || die "missing command: $1"; }
 outer_kubectl() { kubectl --kubeconfig "$KUBECONFIG_218" "$@"; }
 
+select_existing_ckm() {
+  local rows candidate ckm_inner ckm_runtime ckm_phase
+
+  [ -n "${CKM_NAME:-}" ] || die 'CKM_NAME must be set in config.sh; automatic/random CKM selection is disabled'
+  rows="$(outer_kubectl get ckm -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,INNER:.spec.innerSysbox.enabled,RUNTIME:.spec.runtimeClass,PHASE:.status.clusterPhase' --no-headers)"
+  candidate="$(awk -v namespace="${CKM_NAMESPACE:-}" -v name="$CKM_NAME" \
+    '$2 == name && (namespace == "" || $1 == namespace) { print; exit }' <<<"$rows")"
+  [ -n "$candidate" ] || die "configured CKM ${CKM_NAMESPACE:-<any>}/$CKM_NAME was not found"
+
+  read -r CKM_NAMESPACE CKM_NAME ckm_inner ckm_runtime ckm_phase <<<"$candidate"
+  [ "$ckm_inner" = true ] || die "CKM $CKM_NAMESPACE/$CKM_NAME has innerSysbox.enabled=$ckm_inner"
+  [ "$ckm_runtime" = sysbox-runc ] || die "CKM $CKM_NAMESPACE/$CKM_NAME uses runtimeClass=$ckm_runtime"
+  [ "$ckm_phase" = Ready ] || die "CKM $CKM_NAMESPACE/$CKM_NAME is not Ready: $ckm_phase"
+  CKM_SELECTOR="cluster=${CKM_NAME},role=server"
+  export CKM_NAMESPACE CKM_NAME CKM_SELECTOR
+  log "selected existing CKM ${CKM_NAMESPACE}/${CKM_NAME} selector=${CKM_SELECTOR}"
+}
+
 discover_l1() {
+  local pod_rows
+  [ -n "${CKM_NAME:-}" ] || select_existing_ckm
   if [ -z "${L1_POD:-}" ]; then
-    L1_POD="$(outer_kubectl -n "$OUTER_NAMESPACE" get pods -l "$CKM_SELECTOR" \
-      --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')"
+    pod_rows="$(outer_kubectl -n "$OUTER_NAMESPACE" get pods -l "$CKM_SELECTOR" \
+      -o custom-columns='NAME:.metadata.name,PHASE:.status.phase,DELETING:.metadata.deletionTimestamp' --no-headers)"
+    L1_POD="$(awk '$2 == "Running" && ($3 == "" || $3 == "<none>") { print $1; exit }' <<<"$pod_rows")"
   fi
   [ -n "$L1_POD" ] || die "no running L1 Pod for selector $CKM_SELECTOR"
   if [ -z "${L1_CONTAINER:-}" ]; then

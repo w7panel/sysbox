@@ -4,6 +4,16 @@ set -euo pipefail
 source "$(dirname "$0")/_common.sh"
 
 check_common
+[ "${CREATE_CKM:-false}" = true ] || {
+  select_existing_ckm
+  discover_l1
+  log "CREATE_CKM=false; reusing configured CKM ${CKM_NAMESPACE}/${CKM_NAME}, no Ckm object was created"
+  outer_kubectl -n "$OUTER_NAMESPACE" get pod "$L1_POD" -o wide
+  exit 0
+}
+[ -n "${CKM_NAME:-}" ] || die 'CREATE_CKM=true requires a new CKM_NAME in config.sh'
+CKM_SELECTOR="cluster=${CKM_NAME},role=server"
+export CKM_SELECTOR
 outer_kubectl create namespace "$CKM_NAMESPACE" --dry-run=client -o yaml | outer_kubectl apply -f - >/dev/null
 log "creating CKM $CKM_NAMESPACE/$CKM_NAME with innerSysbox.enabled=true"
 outer_kubectl apply -f - <<EOF
@@ -39,7 +49,9 @@ EOF
 log 'waiting for CKM and its L1 Deployment'
 for _ in $(seq 1 60); do
   phase="$(outer_kubectl -n "$CKM_NAMESPACE" get ckm "$CKM_NAME" -o jsonpath='{.status.clusterPhase}' 2>/dev/null || true)"
-  l1="$(outer_kubectl -n "$OUTER_NAMESPACE" get pods -l "$CKM_SELECTOR" --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+  pod_rows="$(outer_kubectl -n "$OUTER_NAMESPACE" get pods -l "$CKM_SELECTOR" \
+    -o custom-columns='NAME:.metadata.name,PHASE:.status.phase,DELETING:.metadata.deletionTimestamp' --no-headers 2>/dev/null || true)"
+  l1="$(awk '$2 == "Running" && ($3 == "" || $3 == "<none>") { print $1; exit }' <<<"$pod_rows")"
   printf '  clusterPhase=%s l1=%s\n' "${phase:-<pending>}" "${l1:-<pending>}"
   if [ -n "$l1" ]; then
     L1_POD="$l1"

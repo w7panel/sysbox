@@ -4,9 +4,12 @@
 
 export KUBECONFIG_218="${KUBECONFIG_218:-/root/.kube/218.config}"
 export OUTER_NAMESPACE="${OUTER_NAMESPACE:-k3k-console-164315}"
-export CKM_NAMESPACE="${CKM_NAMESPACE:-$OUTER_NAMESPACE}"
-export CKM_NAME="${CKM_NAME:-ckm-sysbox-manual}"
-export CKM_SELECTOR="${CKM_SELECTOR:-cluster=${CKM_NAME},role=server}"
+# CKM_NAME/CKM_NAMESPACE are authoritative. The scripts never pick a random
+# CKM when several clusters exist.
+export CKM_NAMESPACE="${CKM_NAMESPACE:-k3k-console-164315}"
+export CKM_NAME="${CKM_NAME:-ckm-bzhrq}"
+export CKM_SELECTOR="${CKM_SELECTOR:-}"
+export CREATE_CKM="${CREATE_CKM:-false}"
 export OUTER_RUNTIME_CLASS="${OUTER_RUNTIME_CLASS:-sysbox-runc}"
 export INNER_RUNTIME_CLASS="${INNER_RUNTIME_CLASS:-sysbox-runc}"
 export SYSBOX_IMAGE_REPO="${SYSBOX_IMAGE_REPO:-docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s}"
