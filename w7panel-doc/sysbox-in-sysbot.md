@@ -1143,3 +1143,11 @@ bash w7panel-doc/tests/nested-chart-smoke.sh
 这是宿主 Sysbox daemon/旧容器状态的恢复窗口，不是 cgroup 测试结论；应先确认
 `sysbox-mgr`、`sysbox-fs`、`sysbox-snapshotter` 均 active，再重试单个 CKM Pod，避免
 并发滚动造成更多 OCI 残留。
+
+### CKM 恢复后复测（Pod `k3k-ckm-bzhrq-server-7788d8fbf6-lj89t`）
+
+- v43 `nested-chart-smoke.sh` 通过；L1 K3s identity `346:2407` 未变化。
+- L2 腾讯云 nginx、`uid_map=0:0:65536`、HTTP、CNI/IPAM 清理通过。
+- `nested-l2-k3s-final` 为 `2/2 Running`，rootfs marker inode `576074`、owner `0:0`、内容 `bzhrq-rootfs-verified` 保持。
+- L3 腾讯云 nginx 两次通过，示例 IP `10.245.0.7` 和 `10.245.0.15`，独立 userns、HTTP、CNI 清理通过。
+- 期间遇到一次 L2 admission webhook 旧 endpoint 缓存（`10.245.0.4:9443`），重建 admission Pod 后恢复；nested-agent 也出现 daemon health check 重启，单 Pod rollout 后恢复 Ready。

@@ -81,6 +81,29 @@
 
 嵌套 userns、L2 CNI、L3 userns、Docker/overlay2、rootfs-rw-layer 和实际 cgroup 资源边界均已有实测通过证据。当前阻塞点集中在真实 CKM Pod 重建后的宿主 Sysbox OCI/seccomp 状态恢复，以及 CKM 模板 socket bind 修复的全新 Pod 验证；这两项闭环前，不应宣称最新 CKM 已完成最终验收。
 
+## 2026-08-21 `ckm-bzhrq` 恢复后复测结果
+
+CKM 新 Pod：
+
+```text
+k3k-ckm-bzhrq-server-7788d8fbf6-lj89t
+```
+
+本轮结果：
+
+- `nested-chart-smoke.sh` 通过；L1 K3s identity `346:2407` 在 chart apply、nested-agent rollout 和 L2 nginx 测试前后保持不变。
+- L2 腾讯云 nginx 镜像拉取成功，digest 为 `sha256:29cf9892ca1103e0b8c97db86f819fac1d9457b176bc77dd4f18ed2da4dd159f`；`uid_map=0:0:65536`，HTTP 和 CNI/IPAM 清理通过。
+- L2 `nested-l2-k3s-final` 恢复为 `2/2 Running`，rootfs marker 保持：inode `576074`、owner `0:0`、内容 `bzhrq-rootfs-verified`。
+- L3 腾讯云 nginx 连续两次通过：示例地址 `10.245.0.7`、`10.245.0.15`；L3 userns 独立、UID map 为 `0 0 65536`、HTTP 和 CNI 清理均通过。
+- L2 `RuntimeClass/sysbox-runc.handler=sysbox-runc`，节点最终带有 `sysbox.w7panel.io/nested-runtime=ready`。
+
+本轮遇到但已恢复的问题：
+
+1. L2 admission webhook 曾缓存旧 endpoint `10.245.0.4:9443`，而当前 Service endpoint 已变为 `10.52.0.10:9443`，创建 L3 时出现 API server 502。删除并等待重建 `w7panel-sysbox-admission` 后 endpoint 更新为 `10.52.0.19:9443`，L3 创建恢复。
+2. nested-agent 曾因 `CKM-prepared Sysbox daemon health check failed` 重启并短暂移除节点 ready label。删除单个 nested-agent Pod 后重新 rollout，Pod `w7panel-sysbox-nested-agent-7b9td` Ready，L3 再次通过。
+
+因此本轮已证明：在 CKM 新 Pod 已能稳定运行的窗口内，L1 → L2 → L3 主链路、rootfs-rw-layer 和 CNI 均可通过；admission endpoint 刷新和 nested-agent daemon health check 的偶发抖动仍需作为稳定性问题继续观察。
+
 > 2026-08-11 更新：专用 inner runtime 已实现显式 `nested-identity`、child userns `0:0:65536`、NoShift 和二次 cgroup v2 delegation。但真实 L1 Docker 验证发现 seccomp user-notify listener 不能在继承 L0 listener 的进程树中再次创建（`EBUSY`），所以该方案尚不能启动完整 L2 systemd/Docker。旧的“取消第三层 userns”路径仅保留为历史 PoC；下文涉及共享 outer userns 的结论只描述旧 PoC。
 
 > 上游 Sysbox 不支持 Sysbox nesting。本文分析的方案仅用于 218 实验性
