@@ -1,5 +1,86 @@
 # Sysbox Pod 内运行 Sysbox 的局限与问题分析
 
+## 2026-08-21 当前问题清单（218 真实 CKM）
+
+本节以最近一次 218 测试为准，区分“仍未闭环”和“曾经出现但已经解决”，避免把历史排障现场误认为当前结论。
+
+### 当前仍未解决或未闭环
+
+1. **最新 `ckm-bzhrq` Pod 的 Sysbox OCI 状态未恢复稳定。**
+
+   连续重建 CKM Pod 后出现：
+
+   ```text
+   sysbox sidecar oci spec unavailable
+   ```
+
+   当前 Pod 仍可能 `CrashLoopBackOff`，需要清理宿主 Sysbox 旧容器/OCI 状态后，再做单 Pod 受控重建。
+
+2. **宿主 Sysbox 重启后的 seccomp 注册窗口尚未闭环。**
+
+   部分旧 Pod 曾出现：
+
+   ```text
+   Rejected seccomp session for unregistered container
+   Unable to receive expected seccomp-notif-ack
+   ```
+
+   `sysbox-mgr`、`sysbox-fs`、`sysbox-snapshotter` 已能恢复为 active，但还需确认重建后不会再次影响已有工作负载。
+
+3. **CKM socket bind 修复尚未完成全新 Pod 验证。**
+
+   `w7panel-ckm` 已提交启动模板修复，使 L1 在 K3s 启动前建立：
+
+   ```text
+   /run/k3s   -> /var/lib/rancher/k3s/agent/k3s-run
+   /run/sysbox -> /var/lib/rancher/k3s/agent/sysbox-run
+   ```
+
+   两个路径还必须是 shared mount。当前 CKM Pod 恰逢宿主 OCI 异常，尚未完成干净重建后的最终确认。
+
+4. **最新 CKM 版本的完整 L0 → L1 → L2 → L3 回归需要重跑。**
+
+   旧 CKM Pod 上的 v43 smoke 已通过，但最新 Pod 重建后还未重新确认 L1 identity、L2 chart、L3、CNI、Docker 和 rootfs-rw-layer 的完整组合。
+
+5. **L2 内再次部署完整 CKM 业务工作负载尚未验收。**
+
+   当前只验证了 L2 K3s、nested chart、Docker、L3 nginx、CNI 和 rootfs marker。
+
+6. **mgr 大目录 rsync 生命周期控制尚未完成。**
+
+   `ckm-old4` CrashLoop 曾造成单次约 16.7GiB rsync 和并发写入。当前通过清理资源规避，但 rsync single-flight、取消、临时目录和 orphan 进程回收仍未完整实现或压力验证。
+
+7. **CKM pre-install RBAC 仍有权限缺口。**
+
+   `w7panel-ckmv3` ServiceAccount 曾缺少 `pods/exec` 权限。本轮只 skip 了已知历史 execution，正式部署仍需补齐最小 RBAC 并验证脚本范围。
+
+8. **L2 cgroup 资源显示与实际限制存在视图差异。**
+
+   实际边界已通过压力测试：512MiB 内存 Pod 被 `OOMKilled`，500m CPU 压测出现 throttling；但 L2 内部仍显示 `cpu.max=max`、`memory.max=max`。如果要求 L2 视图准确反映父级限制，还需继续改进 Sysbox cgroup 视图。
+
+### 曾经遇到、目前已解决或已验证通过
+
+- `innerSysbox.enabled=false` 导致 CKM 不创建 L1 nested runtime。
+- L1/L2/L3 UID/GID mapping 不正确；当前统一验证为 `0 0 65536`，并使用独立 child userns。
+- `sysbox-runc-inner`/`sysbox-runc-nested` wrapper 兼容问题。
+- `nsenter -p` 后错误使用外层 PID 检查 daemon，已改为 socket/RPC 健康检查。
+- stale PID、`/proc/*/exe` 的 `(deleted)` 后缀导致 daemon 被误判。
+- L1/L2 mount namespace 看不到 containerd、mgr、fs、snapshotter socket。
+- `/run/k3s`、`/run/sysbox` 未 shared 导致 nested-agent 报 `path is not a shared mount`。
+- 极简 K3s 镜像缺少 `modprobe`、`iptables`、`mount.fuse3` 和 `rsync`。
+- L2 CNI、IPAM、iptables、veth 回收和腾讯云 nginx HTTP 已通过。
+- systemd、dockerd、Docker bridge、端口映射、overlay2 和 systemd cgroup driver 已通过。
+- `rootfs-rw-layer` marker 在 L2 Pod 及 L1 Pod 重建后保持。
+- overlay2 问题最终定位为 special mount/backing filesystem 处理，不是简单的 `make shared` 缺失。
+- 镜像解包 `no space left on device`、`DiskPressure` 和磁盘占满问题已通过清理旧 BuildImage 资源、清理磁盘和扩容处理。
+- snapshot/content-store 缺失 digest 导致 sandbox 创建失败的问题已通过恢复/重新拉取内容处理。
+- L1 K3s identity 在 chart 安装和 nested-agent rollout 前后保持不变。
+- cgroup 二次 delegation 的 CPU throttling、OOM 边界和子 cgroup 可写性已通过压力测试。
+
+### 当前判断
+
+嵌套 userns、L2 CNI、L3 userns、Docker/overlay2、rootfs-rw-layer 和实际 cgroup 资源边界均已有实测通过证据。当前阻塞点集中在真实 CKM Pod 重建后的宿主 Sysbox OCI/seccomp 状态恢复，以及 CKM 模板 socket bind 修复的全新 Pod 验证；这两项闭环前，不应宣称最新 CKM 已完成最终验收。
+
 > 2026-08-11 更新：专用 inner runtime 已实现显式 `nested-identity`、child userns `0:0:65536`、NoShift 和二次 cgroup v2 delegation。但真实 L1 Docker 验证发现 seccomp user-notify listener 不能在继承 L0 listener 的进程树中再次创建（`EBUSY`），所以该方案尚不能启动完整 L2 systemd/Docker。旧的“取消第三层 userns”路径仅保留为历史 PoC；下文涉及共享 outer userns 的结论只描述旧 PoC。
 
 > 上游 Sysbox 不支持 Sysbox nesting。本文分析的方案仅用于 218 实验性
