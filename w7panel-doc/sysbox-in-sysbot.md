@@ -1078,7 +1078,7 @@ KUBECONFIG_218="$K" NAMESPACE="$NS" L1_POD="$L1" \
 ### 尚未完成
 
 - Admission、L2 systemd、dockerd/overlay2、真实 CKM v43 smoke 已在本轮补测通过；
-  尚未完成的是 L1 资源上限向 L2 的实际 CPU/内存边界压力验证。
+  L1 资源上限向 L2 的实际 CPU/内存边界压力验证已在后续压力测试中通过（详见下节）。
 - L2 中再部署 CKM 业务工作负载尚未验收；当前只验证了 L2 K3s、Docker、L3 nginx、
   CNI 和 rootfs marker。
 - 代码、子模块和文档已提交并推送；后续增量修改仍需执行 `helm lint/template`、Go
