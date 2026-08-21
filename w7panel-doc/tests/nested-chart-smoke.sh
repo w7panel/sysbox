@@ -8,6 +8,8 @@ root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 kubeconfig="${KUBECONFIG_218:-/root/.kube/218.config}"
 outer_namespace="${NAMESPACE:-k3k-console-164315}"
 l1_deployment="${DEPLOYMENT:-sysbox-inner-k3s-command-poc}"
+l1_pod_override="${L1_POD:-}"
+l1_container_override="${L1_CONTAINER:-}"
 inner_namespace="${INNER_NAMESPACE:-sysbox-system}"
 chart="${CHART:-$root_dir/charts/w7panel-sysbox}"
 image_tag="${IMAGE_TAG:-v0.7.1-11-nested-proc-fallback}"
@@ -29,14 +31,14 @@ outer_kubectl() {
 }
 
 inner_kubectl() {
-	outer_kubectl -n "$outer_namespace" exec "$l1_pod" -c k3s -- \
+	outer_kubectl -n "$outer_namespace" exec "$l1_pod" -c "$l1_container" -- \
 		/bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml "$@"
 }
 
 k3s_identity() {
 	# The checks are intentionally expanded by the remote /bin/sh.
 	# shellcheck disable=SC2016
-	outer_kubectl -n "$outer_namespace" exec "$l1_pod" -c k3s -- /bin/sh -ec '
+	outer_kubectl -n "$outer_namespace" exec "$l1_pod" -c "$l1_container" -- /bin/sh -ec '
 		for proc_dir in /proc/[0-9]*; do
 			[ -r "$proc_dir/exe" ] && [ -r "$proc_dir/cmdline" ] || continue
 			[ "${proc_dir##*/}" != "$$" ] || continue
@@ -72,11 +74,23 @@ command -v helm >/dev/null || die 'helm is required'
 log "checking outer API through $kubeconfig"
 outer_kubectl version --request-timeout=5s >/dev/null
 
-l1_pod="$(outer_kubectl -n "$outer_namespace" get pods \
-	-l "app=$l1_deployment" --field-selector=status.phase=Running \
-	-o jsonpath='{.items[0].metadata.name}')"
+	if [ -n "$l1_pod_override" ]; then
+		l1_pod="$l1_pod_override"
+	else
+		l1_pod="$(outer_kubectl -n "$outer_namespace" get pods \
+			-l "app=$l1_deployment" --field-selector=status.phase=Running \
+			-o jsonpath='{.items[0].metadata.name}')"
+	fi
 [ -n "$l1_pod" ] || die "no Running L1 pod found for app=$l1_deployment"
 log "L1 pod: $outer_namespace/$l1_pod"
+
+if [ -n "$l1_container_override" ]; then
+	l1_container="$l1_container_override"
+else
+	l1_container="$(outer_kubectl -n "$outer_namespace" get pod "$l1_pod" \
+		-o jsonpath='{.spec.containers[0].name}')"
+fi
+[ -n "$l1_container" ] || die "no L1 container found in pod $l1_pod"
 
 l1_runtime="$(outer_kubectl -n "$outer_namespace" get pod "$l1_pod" \
 	-o jsonpath='{.spec.runtimeClassName}')"
@@ -98,7 +112,7 @@ helm template w7panel-sysbox "$chart" \
 	--set admission.enabled="$admission_enabled" \
 	--set installer.image.digest="" \
 	--set-string installer.image.tag="$image_tag" |
-	outer_kubectl -n "$outer_namespace" exec -i "$l1_pod" -c k3s -- \
+	outer_kubectl -n "$outer_namespace" exec -i "$l1_pod" -c "$l1_container" -- \
 		/bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml apply -f -
 
 after_apply_identity="$(k3s_identity)" || die 'L1 K3s disappeared after chart apply'
@@ -150,7 +164,7 @@ printf '%s\n' "$uid_map" | awk '
 	END { exit !valid }
 ' || die "unexpected L2 uid_map: $uid_map"
 
-l1_userns="$(outer_kubectl -n "$outer_namespace" exec "$l1_pod" -c k3s -- readlink /proc/self/ns/user)"
+l1_userns="$(outer_kubectl -n "$outer_namespace" exec "$l1_pod" -c "$l1_container" -- readlink /proc/self/ns/user)"
 l2_userns="$(inner_kubectl -n default exec "$test_pod" -- readlink /proc/self/ns/user)"
 [ "$l1_userns" != "$l2_userns" ] || die "L2 reused the L1 user namespace: $l2_userns"
 
@@ -162,7 +176,7 @@ pod_ip="$(inner_kubectl -n default get pod "$test_pod" -o jsonpath='{.status.pod
 image_id="$(inner_kubectl -n default get pod "$test_pod" \
 	-o jsonpath='{.status.containerStatuses[0].imageID}')"
 [ -n "$image_id" ] || die 'L2 Pod did not report an image ID'
-outer_kubectl -n "$outer_namespace" exec "$l1_pod" -c k3s -- \
+outer_kubectl -n "$outer_namespace" exec "$l1_pod" -c "$l1_container" -- \
 	/bin/wget -qO- --timeout=10 "http://$pod_ip" | grep -q 'Welcome to nginx' ||
 	die "L1 cannot reach nginx at $pod_ip"
 inner_kubectl -n default get pod "$test_pod" -o wide
@@ -171,7 +185,7 @@ log "nginx image ID: $image_id"
 inner_kubectl -n default delete pod "$test_pod" --wait=true --timeout=60s >/dev/null
 # The cleanup checks are intentionally expanded by the remote /bin/sh.
 # shellcheck disable=SC2016
-outer_kubectl -n "$outer_namespace" exec "$l1_pod" -c k3s -- /bin/sh -ec '
+outer_kubectl -n "$outer_namespace" exec "$l1_pod" -c "$l1_container" -- /bin/sh -ec '
 	[ -z "$(find /var/lib/cni/networks -type f -name "$1" -print -quit 2>/dev/null)" ]
 	! iptables-save 2>/dev/null | grep -q -- "$1"
 ' nested-chart-smoke "$pod_ip" || die "CNI resources for $pod_ip were not reclaimed"

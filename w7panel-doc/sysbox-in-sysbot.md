@@ -1077,10 +1077,38 @@ KUBECONFIG_218="$K" NAMESPACE="$NS" L1_POD="$L1" \
 
 ### 尚未完成
 
-- 本轮 `admission.enabled=false`，L2 systemd、dockerd/overlay2、K3s 中再部署 CKM 的
-  完整业务验收尚未重新执行；目前只完成 K3s/containerd/Sysbox、L3 nginx、CNI、
-  rootfs marker 和二次 cgroup 基础路径。
-- 真实 `ckm-bzhrq` 当前 Pod 的 v43 agent 尚未重新做一遍完整 CKM smoke；command PoC
-  路径已通过，CKM 复测需按 selector 找到新 L1 后执行同一脚本。
-- 代码、子模块和文档仍未提交/推送；提交前需完成 `helm lint/template`、Go 测试、
-  `git diff --check`，并确认不删除 `.gitmodules.swp`。
+- Admission、L2 systemd、dockerd/overlay2、真实 CKM v43 smoke 已在本轮补测通过；
+  尚未完成的是 L1 资源上限向 L2 的实际 CPU/内存边界压力验证。
+- L2 中再部署 CKM 业务工作负载尚未验收；当前只验证了 L2 K3s、Docker、L3 nginx、
+  CNI 和 rootfs marker。
+- 代码、子模块和文档已提交并推送；后续增量修改仍需执行 `helm lint/template`、Go
+  测试和 `git diff --check`，并确认不删除 `.gitmodules.swp`。
+
+## 2026-08-21 真实 ckm-bzhrq 与 Docker 回归补充
+
+在 CKM 重建后的 L1 Pod
+`k3k-ckm-bzhrq-server-7788d8fbf6-vlj48`（容器
+`k3k-ckm-bzhrq-server`）上使用 v43 chart agent 完成了真实 CKM 回归：
+
+- `nested-chart-smoke.sh` 使用 `L1_POD/L1_CONTAINER` 显式指定 CKM L1，
+  `admission.enabled=true`；Admission、nested-agent、RuntimeClass 全部 Ready。
+- L1 K3s identity `345:2287` 在 apply、rollout 和 L2 nginx 测试前后保持不变。
+- L2 nginx 使用腾讯云镜像，IP `10.52.0.18`，`uid_map=0:0:65536`，HTTP/CNI 清理通过。
+- L2 systemd/Docker 回归通过：PID1 为 `systemd`，`systemctl is-active docker=active`，
+  Docker `overlay2`、`CgroupDriver=systemd`，`/var/lib/docker` 为 ext4 idmapped mount。
+  Docker bridge 端口映射 `18080:80`、腾讯云 nginx HTTP 和容器删除清理均通过。
+- L2 cgroup v2 可创建自己的子 cgroup，`cpu.max` 与 `memory.max` 可写，controllers
+  包含 `cpuset cpu io memory ...`。但带 Pod `limits.cpu=500m,memory=512Mi` 的测试中，
+  L2 视图的父级 `cpu.max/memory.max` 仍显示 `max`；因此“L1 上限对 L2 生效且不可绕过”
+  尚未证明，当前标记为未完成，不能宣称资源边界验收通过。
+
+`nested-chart-smoke.sh` 已支持：
+
+```sh
+L1_POD=k3k-ckm-bzhrq-server-7788d8fbf6-vlj48 \
+L1_CONTAINER=k3k-ckm-bzhrq-server \
+KUBECONFIG_218=/root/.kube/218.config \
+NAMESPACE=k3k-console-164315 \
+IMAGE_TAG=v0.7.1-43-handler-compat ADMISSION_ENABLED=true \
+bash w7panel-doc/tests/nested-chart-smoke.sh
+```
