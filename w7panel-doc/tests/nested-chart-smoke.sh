@@ -11,6 +11,7 @@ l1_deployment="${DEPLOYMENT:-sysbox-inner-k3s-command-poc}"
 l1_pod_override="${L1_POD:-}"
 l1_container_override="${L1_CONTAINER:-}"
 inner_namespace="${INNER_NAMESPACE:-sysbox-system}"
+test_namespace="${TEST_NAMESPACE:-default}"
 chart="${CHART:-$root_dir/charts/w7panel-sysbox}"
 image_tag="${IMAGE_TAG:-v0.7.1-11-nested-proc-fallback}"
 admission_enabled="${ADMISSION_ENABLED:-true}"
@@ -59,7 +60,7 @@ cleanup() {
 	status=$?
 	trap - EXIT INT TERM
 	if [ "${KEEP_TEST_POD:-false}" != true ] && [ -n "${l1_pod:-}" ]; then
-		inner_kubectl -n default delete pod "$test_pod" --ignore-not-found \
+		inner_kubectl -n "$test_namespace" delete pod "$test_pod" --ignore-not-found \
 			--wait=true --timeout=60s >/dev/null 2>&1 || true
 	fi
 	exit "$status"
@@ -152,37 +153,37 @@ ready_nodes="$(inner_kubectl get nodes -l sysbox.w7panel.io/nested-runtime=ready
 	-o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')"
 [ -n "$ready_nodes" ] || die 'no L1 node has nested-runtime=ready'
 
-inner_kubectl -n default delete pod "$test_pod" --ignore-not-found --wait=true >/dev/null
-log "creating L2 test Pod with $test_image"
-inner_kubectl -n default run "$test_pod" --image="$test_image" --restart=Never \
+inner_kubectl -n "$test_namespace" delete pod "$test_pod" --ignore-not-found --wait=true >/dev/null
+log "creating test Pod in $test_namespace with $test_image"
+inner_kubectl -n "$test_namespace" run "$test_pod" --image="$test_image" --restart=Never \
 	--overrides='{"metadata":{"annotations":{"sysbox/allow-proc-exec":"true"}},"spec":{"runtimeClassName":"sysbox-runc","enableServiceLinks":false}}'
-inner_kubectl -n default wait --for=condition=Ready "pod/$test_pod" --timeout=180s
+inner_kubectl -n "$test_namespace" wait --for=condition=Ready "pod/$test_pod" --timeout=180s
 
-uid_map="$(inner_kubectl -n default exec "$test_pod" -- cat /proc/self/uid_map)"
+uid_map="$(inner_kubectl -n "$test_namespace" exec "$test_pod" -- cat /proc/self/uid_map)"
 printf '%s\n' "$uid_map" | awk '
 	NF == 3 && $1 == 0 && $2 == 0 && $3 == 65536 { valid = 1 }
 	END { exit !valid }
 ' || die "unexpected L2 uid_map: $uid_map"
 
 l1_userns="$(outer_kubectl -n "$outer_namespace" exec "$l1_pod" -c "$l1_container" -- readlink /proc/self/ns/user)"
-l2_userns="$(inner_kubectl -n default exec "$test_pod" -- readlink /proc/self/ns/user)"
+l2_userns="$(inner_kubectl -n "$test_namespace" exec "$test_pod" -- readlink /proc/self/ns/user)"
 [ "$l1_userns" != "$l2_userns" ] || die "L2 reused the L1 user namespace: $l2_userns"
 
-l2_lo="$(inner_kubectl -n default exec "$test_pod" -- cat /sys/class/net/lo/operstate)"
+l2_lo="$(inner_kubectl -n "$test_namespace" exec "$test_pod" -- cat /sys/class/net/lo/operstate)"
 [ "$l2_lo" = unknown ] || [ "$l2_lo" = up ] || die "L2 loopback is not up: $l2_lo"
 
-pod_ip="$(inner_kubectl -n default get pod "$test_pod" -o jsonpath='{.status.podIP}')"
+pod_ip="$(inner_kubectl -n "$test_namespace" get pod "$test_pod" -o jsonpath='{.status.podIP}')"
 [ -n "$pod_ip" ] || die 'L2 Pod did not receive a CNI address'
-image_id="$(inner_kubectl -n default get pod "$test_pod" \
+image_id="$(inner_kubectl -n "$test_namespace" get pod "$test_pod" \
 	-o jsonpath='{.status.containerStatuses[0].imageID}')"
 [ -n "$image_id" ] || die 'L2 Pod did not report an image ID'
 outer_kubectl -n "$outer_namespace" exec "$l1_pod" -c "$l1_container" -- \
 	/bin/wget -qO- --timeout=10 "http://$pod_ip" | grep -q 'Welcome to nginx' ||
 	die "L1 cannot reach nginx at $pod_ip"
-inner_kubectl -n default get pod "$test_pod" -o wide
+inner_kubectl -n "$test_namespace" get pod "$test_pod" -o wide
 log "nginx image ID: $image_id"
 
-inner_kubectl -n default delete pod "$test_pod" --wait=true --timeout=60s >/dev/null
+inner_kubectl -n "$test_namespace" delete pod "$test_pod" --wait=true --timeout=60s >/dev/null
 # The cleanup checks are intentionally expanded by the remote /bin/sh.
 # shellcheck disable=SC2016
 outer_kubectl -n "$outer_namespace" exec "$l1_pod" -c "$l1_container" -- /bin/sh -ec '
