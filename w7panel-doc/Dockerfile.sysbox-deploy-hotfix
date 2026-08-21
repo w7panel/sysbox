@@ -2,9 +2,19 @@ ARG BASE_IMAGE=docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-9-nested-rootf
 FROM docker.cnb.cool/i0358/zpk/sysbox-nested-k3s-test:v1.35.6-20260814-4 AS nested-tools
 FROM ${BASE_IMAGE}
 
+# K3s keeps its iptables/kmod helpers in /bin/aux instead of the normal
+# lookup paths. The CKM bootstrap image also runs kube-proxy, so carry this
+# helper directory into L1; sysbox-inner-k3s.sh exposes the required commands
+# in /usr/sbin and /usr/bin before K3s starts.
+COPY --from=nested-tools /bin/aux /opt/sysbox/bin/aux
+# /bin/aux/modprobe is a symlink to this busybox binary. Keep the target in
+# the deployment image so the nested manager's modprobe preflight succeeds.
+COPY --from=nested-tools /bin/busybox /opt/sysbox/bin/busybox
+
 # Build the static binaries before building this image.
 COPY --chmod=0755 sysbox-runc/build/amd64/sysbox-runc /opt/sysbox/bin/generic/sysbox-runc
 COPY --chmod=0755 sysbox-fs/build/amd64/sysbox-fs /opt/sysbox/bin/generic/sysbox-fs
 COPY --chmod=0755 sysbox-snapshotter/build/amd64/sysbox-snapshotter /opt/sysbox/bin/generic/sysbox-snapshotter
 COPY --from=nested-tools --chmod=0755 /usr/local/bin/rsync /opt/sysbox/bin/generic/rsync
 COPY --chmod=0755 sysbox-pkgr/k8s/scripts/sysbox-inner-k3s.sh /opt/sysbox/scripts/sysbox-inner-k3s.sh
+COPY --chmod=0755 sysbox-pkgr/k8s/scripts/sysbox-nested-agent.sh /opt/sysbox/scripts/sysbox-nested-agent.sh

@@ -1031,3 +1031,56 @@ KUBECONFIG_218="$K" NAMESPACE="$NS" L1_POD="$L1" \
   L2_POD=nested-l2-k3s-final TEST_POD=nested-l3-bzhrq-final \
   bash w7panel-doc/tests/nested-l3-smoke.sh
 ```
+
+## 2026-08-21 nested chart 回归（218 / command PoC）
+
+本轮使用 `sysbox-inner-k3s-command-poc-8b49c9fcf-kr9fc` 作为 L1，外层 namespace
+为 `k3k-console-164315`。测试镜像和 chart agent 已推送：
+
+| 组件 | 镜像/摘要 |
+| --- | --- |
+| L1/L2 nested-agent | `docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-43-handler-compat`，digest `sha256:3d81d504e0646d4b9f8c761f59a0f2d568c87430166cc3e1b4109013010cd67a` |
+| L2 K3s entrypoint | `docker.cnb.cool/i0358/zpk/sysbox-nested-k3s-test:v1.35.6-20260820-9`，digest `sha256:15de5c99e815cd96844e10e322ddbc9e69c5f38d23e590015700d66e06a2fe03` |
+
+### 已完成
+
+1. L1 内独立安装 `w7panel-sysbox`（`installMode=nested`）通过
+   `nested-chart-smoke.sh`：L1 K3s PID/starttime `269:455` 在 apply、agent rollout
+   和 L2 nginx 测试前后不变；nested-agent `1/1 Running`。
+2. L1 中 L2 腾讯云 nginx 使用
+   `ccr.ccs.tencentyun.com/afan-public/nginx:latest`，镜像 digest
+   `sha256:29cf9892ca1103e0b8c97db86f819fac1d9457b176bc77dd4f18ed2da4dd159f`，
+   `uid_map=0:0:65536`、独立 userns、HTTP 和 CNI/IPAM 回收均通过。
+3. 在保留 PVC `nested-l2-k3s-final-rootfs` 上重建 L2 Pod 后，L2 内再次安装同一
+   chart；受控重建一次让 containerd 加载 handler，最终
+   `BinaryName=/var/lib/sysbox-inner/bin/sysbox-runc-nested`，节点带
+   `sysbox.w7panel.io/nested-runtime=ready`，L2 nested-agent `1/1 Running`。
+4. L2 内 L3 nginx 回归连续通过（示例 IP `10.245.0.7`/`10.245.0.8`）：
+   `uid_map/gid_map=0:0:65536`、L2/L3 userns 不同、HTTP 成功，删除后 CNI IPAM 和
+   iptables 状态清理。
+5. L2 rootfs-rw-layer marker `/rootfs-persistence-marker` 重建前后保持：
+   inode `43030632`、size `20`、owner `0:0`、内容 `nested-l2-v9-marker`。
+
+### 本轮修复并验证
+
+- `nsenter -p` 后不能用外层 `$!` PID 做 L2 `kill -0`；改为 socket/RPC 和目标
+  namespace 进程检查，snapshotter 不再把 L1 nsenter PID 写入 L2 pidfile。
+- 旧 daemon 的 `/proc/*/exe` 可能显示 `(deleted)`；清理和健康检查现在会去掉该后缀，
+  可回收 stale mgr/fs/snapshotter。
+- K3s `/bin/aux/modprobe` 指向 `/bin/busybox`；hotfix 镜像补齐 busybox，mgr preflight
+  不再报 `modprobe is not installed`。
+- L2 entrypoint 在 bind 前创建 `/run/k3s`、`/run/sysbox`，并将
+  `/var/lib/rancher/k3s` 及 socket 子目录设为 shared，nested-agent 的
+  `path ... is not a shared mount` 和 entrypoint mount 失败已解决。
+- 旧 CKM 配置可能仍使用 `sysbox-runc-inner` wrapper；agent 兼容识别该 wrapper，仍要求
+  显式 `nested-identity`，Pod RuntimeClass 名保持 `sysbox-runc`。
+
+### 尚未完成
+
+- 本轮 `admission.enabled=false`，L2 systemd、dockerd/overlay2、K3s 中再部署 CKM 的
+  完整业务验收尚未重新执行；目前只完成 K3s/containerd/Sysbox、L3 nginx、CNI、
+  rootfs marker 和二次 cgroup 基础路径。
+- 真实 `ckm-bzhrq` 当前 Pod 的 v43 agent 尚未重新做一遍完整 CKM smoke；command PoC
+  路径已通过，CKM 复测需按 selector 找到新 L1 后执行同一脚本。
+- 代码、子模块和文档仍未提交/推送；提交前需完成 `helm lint/template`、Go 测试、
+  `git diff --check`，并确认不删除 `.gitmodules.swp`。

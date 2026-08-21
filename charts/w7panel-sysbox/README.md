@@ -103,7 +103,7 @@ installer tag is empty, the chart defaults it to `v{{ .Chart.AppVersion }}`.
 | --- | --- | --- |
 | `installer.image.repository` | `docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s` | Shared host-installer and nested-agent image repository. |
 | `installer.image.tag` | `""` | Installer image tag; defaults to `v{{ .Chart.AppVersion }}`. |
-| `installer.image.digest` | `sha256:387f5ae2b347d021fc04a5eb9ea01828460d7e7b9bbf17a8fffd787ae2498206` | Immutable installer image digest; takes precedence over `tag`. |
+| `installer.image.digest` | `sha256:077a7832960e77c327e68847be025040746ca8895d32ee89fc41d98ced91194b` | Immutable installer image digest; takes precedence over `tag`. |
 | `admission.image.repository` | `""` | Optional admission image repository override; defaults to `installer.image.repository`. |
 | `admission.image.tag` | `""` | Optional admission image tag override; defaults to `installer.image.tag`. |
 | `admission.image.digest` | `""` | Optional immutable admission image digest; defaults to `installer.image.digest`. |

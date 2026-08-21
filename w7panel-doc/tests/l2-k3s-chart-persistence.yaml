@@ -23,7 +23,7 @@ spec:
   terminationGracePeriodSeconds: 30
   containers:
     - name: k3s
-      image: docker.cnb.cool/i0358/zpk/sysbox-nested-k3s-test:v1.35.6-20260814-4
+      image: docker.cnb.cool/i0358/zpk/sysbox-nested-k3s-test:v1.35.6-20260820-9
       imagePullPolicy: Always
       securityContext:
         seccompProfile:
@@ -33,9 +33,6 @@ spec:
         - -ec
       args:
         - |
-          mount --make-rshared /
-          mount --bind /run /run
-          mount --make-rshared /run
           exec /usr/local/bin/nested-k3s-entrypoint.sh
       volumeMounts:
         - name: fuse

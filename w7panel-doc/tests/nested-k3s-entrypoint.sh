@@ -8,6 +8,17 @@ pause_image="${K3S_PAUSE_IMAGE:-docker.cnb.cool/i0358/zpk/nested-pause:20260810-
 service_cidr="${K3S_SERVICE_CIDR:-10.247.0.0/16}"
 cluster_dns="${K3S_CLUSTER_DNS:-10.247.0.10}"
 
+# A persistent rootfs may retain /usr/sbin/iptables links created by an older
+# nested chart. Those links target /var/lib/sysbox-inner and are unavailable
+# during the next K3s bootstrap, before the chart agent starts. Prefer K3s'
+# image-owned helpers and select the real nft multi-call backend up front.
+export PATH="/bin/aux:$PATH"
+if [ -x /bin/aux/xtables-nft-multi ]; then
+	for utility in iptables iptables-save iptables-restore ip6tables ip6tables-save ip6tables-restore; do
+		ln -sf xtables-nft-multi "/bin/aux/$utility"
+	done
+fi
+
 prepare_cni_plugins() {
 	# The rancher/k3s image ships the CNI plugins as a multicall /bin/cni
 	# binary, but does not populate the data/cni symlinks when used with this
@@ -116,7 +127,22 @@ prepare_server() {
 	write_containerd_template
 	# Publish the L2 K3s and Sysbox sockets through the persistent data mount.
 	# The nested chart's hostPath volumes must not resolve to L1's outer /run.
+	# Sysbox may not materialize these mountpoints until the first task starts;
+	# create the source directories before establishing the persistent binds.
+	mkdir -p /run/k3s /run/sysbox
 	mkdir -p /var/lib/rancher/k3s/agent/k3s-run /var/lib/rancher/k3s/agent/sysbox-run
+	# The nested chart bind-mounts the complete K3s data tree with
+	# Bidirectional propagation; containerd rejects a non-shared parent even
+	# when the individual socket subdirectories are shared.
+	mount --make-rshared /var/lib/rancher/k3s
+	# hostPath + Bidirectional propagation used by the L2 nested-agent requires
+	# this FUSE mountpoint to be a shared mount before the agent Pod is created.
+	# A Pod restart recreates the mount namespace, so a previous manual
+	# `mount --make-rshared` is not sufficient.
+	mkdir -p /var/lib/sysboxfs-inner
+	mountpoint -q /var/lib/sysboxfs-inner || \
+		mount --bind /var/lib/sysboxfs-inner /var/lib/sysboxfs-inner
+	mount --make-rshared /var/lib/sysboxfs-inner
 	mountpoint -q /var/lib/rancher/k3s/agent/k3s-run || \
 		mount --bind /run/k3s /var/lib/rancher/k3s/agent/k3s-run
 	mountpoint -q /run/sysbox || \

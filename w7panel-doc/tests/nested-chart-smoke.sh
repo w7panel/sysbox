@@ -38,11 +38,12 @@ k3s_identity() {
 	# shellcheck disable=SC2016
 	outer_kubectl -n "$outer_namespace" exec "$l1_pod" -c k3s -- /bin/sh -ec '
 		for proc_dir in /proc/[0-9]*; do
-			[ -r "$proc_dir/comm" ] && [ -r "$proc_dir/cmdline" ] || continue
-			[ "$(cat "$proc_dir/comm")" = k3s ] || continue
+			[ -r "$proc_dir/exe" ] && [ -r "$proc_dir/cmdline" ] || continue
+			[ "${proc_dir##*/}" != "$$" ] || continue
+			[ "$(basename "$(readlink "$proc_dir/exe" 2>/dev/null || true)")" = k3s ] || continue
 			cmdline="$(tr "\000" " " <"$proc_dir/cmdline")"
 			case "$cmdline" in
-				*"/k3s server"*)
+				*"k3s server"*)
 					awk "{print \$1 \":\" \$22}" "$proc_dir/stat"
 					exit 0
 					;;
@@ -95,6 +96,7 @@ helm template w7panel-sysbox "$chart" \
 	--namespace "$inner_namespace" \
 	--set installMode=nested \
 	--set admission.enabled="$admission_enabled" \
+	--set installer.image.digest="" \
 	--set-string installer.image.tag="$image_tag" |
 	outer_kubectl -n "$outer_namespace" exec -i "$l1_pod" -c k3s -- \
 		/bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml apply -f -

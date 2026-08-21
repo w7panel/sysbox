@@ -68,7 +68,7 @@ spec:
                 - -ec
                 - >-
                   test -f /run/sysbox/nested-runtime-ready &&
-                  nsenter -m -t 1 -- sh -ec 'for socket in /run/sysbox/sysmgr.sock /run/sysbox/sysfs.sock /run/sysbox/sysbox-snapshotter.sock; do
+                  nsenter -m -n -t 1 -- sh -ec 'for socket in /run/sysbox/sysmgr.sock /run/sysbox/sysfs.sock /run/sysbox/sysbox-snapshotter.sock; do
                     test -S "$socket" || exit 1;
                   done'
             periodSeconds: 5
