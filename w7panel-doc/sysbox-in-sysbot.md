@@ -1112,3 +1112,34 @@ NAMESPACE=k3k-console-164315 \
 IMAGE_TAG=v0.7.1-43-handler-compat ADMISSION_ENABLED=true \
 bash w7panel-doc/tests/nested-chart-smoke.sh
 ```
+
+## 2026-08-21 cgroup 边界压力验证与 CKM 重建注意事项
+
+在最新 CKM L1 `k3k-ckm-bzhrq-server-6d9ffc878f-gqsmr`（随后控制器重建为
+`6d9ffc878f-4kc6z`）中重新创建带有 `limits.cpu=500m,memory=512Mi` 的 L2 Pod，
+并从 L1 的实际 cgroup 树和压力结果交叉验证：
+
+| 检查 | 结果 |
+| --- | --- |
+| L2 可创建自己的子 cgroup、写入 `cpu.max/memory.max` | 通过 |
+| L1 Pod cgroup 的实际上限 | `cpu.max=50000 100000`、`memory.max=536870912` |
+| 内存压力 | Python 分配 700MiB 的 L2 Pod 被 `OOMKilled`（512MiB 父级上限生效） |
+| CPU 压力 | 500m busy-loop 后父 cgroup `nr_throttled=141`、`throttled_usec≈6.6s`，子 cgroup 同样出现 throttling |
+| L2 `/sys/fs/cgroup` 直接视图 | 仍显示 `cpu.max=max 100000`、`memory.max=max`；这是 Sysbox 的隔离视图，不代表父级限制可绕过 |
+
+因此 cgroup delegation 的实际资源边界已通过压力测试；后续若要检查可见视图，必须
+同时读取 L1/宿主侧 Pod cgroup，不能只依据 L2 的 `max`。
+
+本轮还发现 CKM 模板的一个重建契约：L1 启动脚本必须在 K3s 启动前建立
+`/run/k3s -> /var/lib/rancher/k3s/agent/k3s-run` 和
+`/run/sysbox -> /var/lib/rancher/k3s/agent/sysbox-run` 的 shared bind mount，
+否则 CKM Pod 重建后 nested-agent 会找不到 containerd/snapshotter socket，节点
+`sysbox.w7panel.io/nested-runtime=ready` 会抖动，L2 Pod 会长期 Pending。修复已写入
+`w7panel-ckm/pkg/resources/k3s_deployment.go` 及两份 kodata 模板；部署模板更新后应
+做一次受控 CKM Pod 重建，确认两个 socket 路径和 nested-agent Ready。
+
+重建过程中若连续删除多个 Sysbox Pod，218 宿主可能暂时出现
+`sysbox sidecar oci spec unavailable` 或 `sysbox-fs ... seccomp-notif-ack ... EOF`。
+这是宿主 Sysbox daemon/旧容器状态的恢复窗口，不是 cgroup 测试结论；应先确认
+`sysbox-mgr`、`sysbox-fs`、`sysbox-snapshotter` 均 active，再重试单个 CKM Pod，避免
+并发滚动造成更多 OCI 残留。
