@@ -15,7 +15,8 @@ if configured_ckm_exists; then
 fi
 
 CKM_SELECTOR="cluster=${CKM_NAME},role=server"
-export CKM_SELECTOR
+CKM_SELECTED=true
+export CKM_SELECTOR CKM_SELECTED
 outer_kubectl create namespace "$CKM_NAMESPACE" --dry-run=client -o yaml | outer_kubectl apply -f - >/dev/null
 log "creating CKM $CKM_NAMESPACE/$CKM_NAME with innerSysbox.enabled=true"
 outer_kubectl apply -f - <<EOF

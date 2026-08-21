@@ -35,13 +35,14 @@ select_existing_ckm() {
   [ "$ckm_runtime" = sysbox-runc ] || die "CKM $CKM_NAMESPACE/$CKM_NAME uses runtimeClass=$ckm_runtime"
   [ "$ckm_phase" = Ready ] || die "CKM $CKM_NAMESPACE/$CKM_NAME is not Ready: $ckm_phase"
   CKM_SELECTOR="cluster=${CKM_NAME},role=server"
-  export CKM_NAMESPACE CKM_NAME CKM_SELECTOR
+  CKM_SELECTED=true
+  export CKM_NAMESPACE CKM_NAME CKM_SELECTOR CKM_SELECTED
   log "selected existing CKM ${CKM_NAMESPACE}/${CKM_NAME} selector=${CKM_SELECTOR}"
 }
 
 discover_l1() {
   local pod_rows
-  [ -n "${CKM_NAME:-}" ] || select_existing_ckm
+  [ "${CKM_SELECTED:-false}" = true ] || select_existing_ckm
   if [ -z "${L1_POD:-}" ]; then
     pod_rows="$(outer_kubectl -n "$OUTER_NAMESPACE" get pods -l "$CKM_SELECTOR" \
       -o custom-columns='NAME:.metadata.name,PHASE:.status.phase,DELETING:.metadata.deletionTimestamp' --no-headers)"
@@ -60,6 +61,10 @@ discover_l1() {
 
 l1_exec() { outer_kubectl -n "$OUTER_NAMESPACE" exec "$L1_POD" -c "$L1_CONTAINER" -- "$@"; }
 l1_kubectl() { l1_exec /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml "$@"; }
+l1_kubectl_input() {
+  outer_kubectl -n "$OUTER_NAMESPACE" exec -i "$L1_POD" -c "$L1_CONTAINER" -- \
+    /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml "$@"
+}
 l2_kubectl() {
   l1_kubectl -n "$L2_NAMESPACE" exec "$L2_POD" -c k3s -- \
     /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml "$@"

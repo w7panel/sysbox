@@ -1,16 +1,17 @@
 # Sysbox-in-Sysbox 人工验证流程
 
-本文和同目录脚本用于按步骤验证完整链路：
+本文和同目录脚本用于按步骤验证 CKM Pod 内唯一 K3s 的 Sysbox chart：
 
 ```text
 L0 宿主 Kubernetes
-└── L1 CKM Server Pod（外层 RuntimeClass=sysbox-runc）
-    └── L2 K3s（在 L1 Pod 内安装 w7panel-sysbox，RuntimeClass=sysbox-runc）
-        └── L3 Sysbox Pod（腾讯云 nginx）
+└── CKM Server Pod（外层 RuntimeClass=sysbox-runc）
+    └── CKM 自己创建的 K3s
+        └── 在该 K3s 安装 w7panel-sysbox（installMode=nested）
+            └── Sysbox workload Pod（腾讯云 nginx）
 ```
 
 脚本不会假设 `helm` 可以连接到内层 API。Chart 统一在操作者机器上用
-`helm template` 渲染，再通过 `kubectl exec` 把 YAML 送进 L1/L2 K3s；这样不需要把
+`helm template` 渲染，再通过 `kubectl exec` 把 YAML 送进 CKM Pod 内的 K3s；这样不需要把
 Helm 二进制塞进测试镜像，也能清楚区分当前操作落在哪一层。
 
 ## 0. 准备工作
@@ -28,7 +29,7 @@ Helm 二进制塞进测试镜像，也能清楚区分当前操作落在哪一层
 - `clusters.k3k.io`（K3k controller）；
 - `SystemTemplate/k3s.v1`；
 - L0 的 `RuntimeClass/sysbox-runc` 及可用的 Sysbox host chart；
-- `local-path` StorageClass（用于 L1/L2 的 K3s 数据 PVC）。
+- `local-path` StorageClass（用于 CKM K3s 的系统盘 PVC）。
 
 编辑 [config.sh](./config.sh)，最少确认以下值：
 
@@ -141,26 +142,14 @@ kubectl --kubeconfig "$KUBECONFIG_218" -n ckm-system \
 如果 controller 是 Helm 管理的，优先在 Helm values 中更新 image，再执行
 `helm upgrade`，避免下次 reconcile 被旧 values 覆盖。
 
-### 2.2 构建 L2 K3s 测试镜像
+### 2.2 测试镜像说明
 
-同一个脚本还会构建 `Dockerfile.nested-k3s-test`。它包含：
+`02-build-images.sh` 中的 `Dockerfile.nested-k3s-test` 只用于历史三层实验，不是当前
+CKM 单 K3s 流程的必需镜像。当前 CKM K3s workload 直接使用：
 
-- K3s server；
-- CNI multicall 插件和 `registries.yaml`；
-- `nested-k3s-entrypoint.sh`，负责建立 CNI、containerd、`/run/k3s`、
-  `/run/sysbox` 和 shared mount；
-- 与当前 nested chart 兼容的 Sysbox 工具。
+- `ccr.ccs.tencentyun.com/afan-public/nginx:latest`。
 
-构建并推送：
-
-```bash
-NESTED_K3S_IMAGE=docker.cnb.cool/i0358/zpk/sysbox-nested-k3s-test:manual-$(date +%Y%m%d%H%M) \
-PUSH_IMAGES=true bash ./02-build-images.sh
-```
-
-如果只想使用已经发布的镜像，跳过本步骤，并在 `config.sh` 保留可拉取的
-`NESTED_K3S_IMAGE`。Kubernetes 节点不能直接使用操作者 Docker daemon 中的本地
-镜像，因此真实 CKM 测试必须把镜像推到节点可访问的 registry，或预先导入每个节点。
+如需执行历史 L2/L3 三层实验，才需要构建并推送 `NESTED_K3S_IMAGE`；当前流程可以跳过。
 
 ### 2.3 从当前 Sysbox 源码重建 deploy 镜像（可选）
 
@@ -182,23 +171,29 @@ PUSH_IMAGE=true bash ./02-build-sysbox-deploy.sh
 该步骤比复用已发布镜像慢很多；只是验证 CKM/chart 流程时可跳过，直接使用
 `config.sh` 中的稳定 `SYSBOX_IMAGE_TAG`。
 
-## 3. 在 L1 安装独立 Sysbox Chart
+## 3. 在 CKM 自己的 K3s 中安装 Sysbox Chart
 
-L0 和 L1 使用同一个 chart，但安装模式不同：
+L0 和 CKM 内 K3s 使用同一个 chart，但安装模式不同：
 
 | 层级 | Helm 值 | 作用 |
 | --- | --- | --- |
-| L0 | `installMode=host` | 安装宿主 Sysbox，提供 L1 的 `sysbox-runc` |
-| L1 | `installMode=nested` | 在 L1 K3s 安装 nested-agent、mgr/fs/snapshotter 和 admission，提供 L2 的 `sysbox-runc` |
-| L2 | `installMode=nested` | 在 L2 K3s 再安装一套 nested runtime，提供 L3 的 `sysbox-runc` |
+| L0 | `installMode=host` | 安装宿主 Sysbox，提供 CKM Pod 的 `sysbox-runc` |
+| CKM 内 K3s | `installMode=nested` | 安装 nested-agent、mgr/fs/snapshotter 和 admission，提供 Sysbox workload 的 `sysbox-runc` |
 
-先执行 L1 安装：
+先在 CKM Pod 内的 K3s 安装：
+
+```bash
+bash ./04-install-ckm-chart.sh
+```
+
+兼容旧流程也可以执行：
 
 ```bash
 bash ./03-install-l1-chart.sh
+# 或旧文件名：bash ./04-create-l2-k3s.sh
 ```
 
-脚本会检查 L1 `runtimeClassName=sysbox-runc`、`hostUsers=false`，然后等待：
+脚本会检查 CKM Pod 的 `runtimeClassName=sysbox-runc`、`hostUsers=false`，然后等待：
 
 ```text
 daemonset/w7panel-sysbox-nested-agent successfully rolled out
@@ -207,103 +202,40 @@ RuntimeClass/sysbox-runc.handler=sysbox-runc
 node label sysbox.w7panel.io/nested-runtime=ready
 ```
 
-L1 Chart 安装不应重启 L0 宿主。首次把一个已经运行的旧 L1 迁移到 nested
+Chart 安装不应重启 L0 宿主。首次把一个已经运行的 CKM K3s 迁移到 nested
 handler 时，若 containerd 不能热加载，按已有 CKM 控制器做一次“只重建 L1 Pod”的
 受控迁移；不要重启物理节点，也不要并发删除多个 CKM Pod。
 
-## 4. 创建 L2 K3s
-
-`04-create-l2-k3s.sh` 不创建 CKM，也不切换 CKM 版本；它复用配置中 CKM 自己创建的
-L1 K3s，在 L1 的 `default` namespace 创建 L2：
-
-- `nested-l2-k3s-manual-rootfs`，5 Gi `local-path` PVC；
-- `nested-l2-k3s-manual`，`runtimeClassName: sysbox-runc`；
-- `enableServiceLinks: false`，避免 `SYSBOX_*` ServiceLinks 污染；
-- `/dev/fuse`；
-- `sysbox/rootfs-rw-layer`，把 PVC 用作持久 rootfs 层。
-
-执行并等待 L2 API：
+## 4. 在 CKM K3s 中运行 Sysbox workload
 
 ```bash
-bash ./04-create-l2-k3s.sh
+bash ./05-test-ckm-k3s.sh
 ```
 
-因此版本关系是：
-
-```text
-已有 CKM 的 K3s = L1
-04-create-l2-k3s.sh 创建的 K3s = L2
-```
-
-CKM controller、SystemTemplate 或 K3s 镜像版本需要单独升级并完成 L1 受控重建后，
-再重新执行本流程；不能通过 `04-create-l2-k3s.sh` 切换 CKM 版本。
-
-检查 L2 使用的是独立 user namespace，而不是加入 L1：
-
-```bash
-kubectl --kubeconfig "$KUBECONFIG_218" -n "$OUTER_NAMESPACE" \
-  exec "$L1_POD" -c "$L1_CONTAINER" -- readlink /proc/self/ns/user
-```
-
-## 5. 在 L2 再安装 Chart
-
-```bash
-bash ./05-install-l2-chart.sh
-```
-
-脚本仍然从本地 `charts/w7panel-sysbox` 渲染，目标改为 L2 K3s。成功条件与 L1
-相同：admission 和 nested-agent Ready，节点有
-`sysbox.w7panel.io/nested-runtime=ready`，且 `RuntimeClass/sysbox-runc.handler` 为
-`sysbox-runc`。工作负载 YAML 在 L1 和 L2 都只写：
+该脚本通过 L0 kubeconfig → CKM Pod → CKM 内 K3s API 创建 nginx Pod，验证：
 
 ```yaml
 spec:
   runtimeClassName: sysbox-runc
-```
-
-不要在 Pod 中使用历史的 `sysbox-runc-inner` 或 `sysbox-runc-nested` 名称。
-
-## 6. 创建 L3 并验证网络、映射和清理
-
-```bash
-bash ./06-test-l3.sh
-```
-
-该脚本调用现有的 [nested-l3-smoke.sh](../tests/nested-l3-smoke.sh)，完整路径是
-L0 kubeconfig → L1 `kubectl exec` → L2 `kubectl exec` → L3 Pod。默认镜像是：
-
-```text
-ccr.ccs.tencentyun.com/afan-public/nginx:latest
+  enableServiceLinks: false
 ```
 
 必须同时满足：
 
-- L3 `uid_map` 和 `gid_map` 都是 `0 0 65536`；
-- L3 user namespace 与 L2 不同；
-- L3 获得 Pod IP，L2 能访问 nginx HTTP；
-- CNI bridge/IPAM/iptables 在删除 L3 后回收；
-- L3 Pod 使用 `enableServiceLinks: false` 和 `runtimeClassName=sysbox-runc`。
+- CKM K3s 中的 `RuntimeClass/sysbox-runc.handler=sysbox-runc`；
+- workload 使用独立 user namespace，`uid_map=0 0 65536`；
+- nginx Pod 获得 CNI IP，CKM K3s 能访问 HTTP；
+- 删除 workload 后 CNI bridge/IPAM/iptables 状态回收。
 
-## 7. 验证 rootfs-rw-layer 持久化
+## 5. 三层 L2/L3 实验（可选历史流程）
 
-先只验证写入（不重建 Pod）：
+`05-install-l2-chart.sh`、`06-test-l3.sh`、`07-test-rootfs-persistence.sh` 仍保留用于
+历史的 L2 K3s/L3 Sysbox 实验，但不属于“CKM Pod 内单个 K3s 安装 chart”的默认流程。
+默认测试不要执行这些脚本，也不要创建第二个 K3s。
 
-```bash
-bash ./07-test-rootfs-persistence.sh
-```
+## 6. 清理
 
-确认 marker 写入成功后，再做一次可控的 L2 Pod 重建：
-
-```bash
-RECREATE_L2=true bash ./07-test-rootfs-persistence.sh
-```
-
-PVC 不删除，脚本会重新创建 L2 Pod 并检查 marker 内容仍一致。若需要保留 inode、属主
-和大小证据，将脚本输出保存到测试记录中。
-
-## 8. 清理
-
-清理默认只删除 L2 Pod/PVC 和 L1/L2 chart，保留 CKM，避免误删真实测试集群：
+清理默认只删除当前测试 workload 和 chart，保留 CKM：
 
 ```bash
 bash ./99-cleanup.sh
@@ -319,13 +251,13 @@ DELETE_CKM=true bash ./99-cleanup.sh
 
 | 现象 | 优先检查 |
 | --- | --- |
-| 找不到 L1 | `CKM_SELECTOR` 是否为 `cluster=<CKM_NAME>,role=server`，以及 CKM 是否 `innerSysbox.enabled=true` |
-| L1 agent 不 Ready | L1 `/run/k3s`、`/run/sysbox` 和 K3s 数据目录是否 shared；查看 `kubectl -n sysbox-system logs daemonset/w7panel-sysbox-nested-agent` |
-| 镜像 `no space left on device` | 检查 L1/L2 ephemeral storage 和节点磁盘；清理旧 image/container 后重新执行对应阶段 |
-| admission 访问旧 IP | 删除 L1/L2 `w7panel-sysbox-admission` Pod，等待 Service endpoint 重建后再测 |
+| 找不到 CKM K3s | 检查 `CKM_NAMESPACE/CKM_NAME`，以及 CKM 是否 `innerSysbox.enabled=true` |
+| nested-agent 不 Ready | 检查 CKM K3s 的 `/run/k3s`、`/run/sysbox` 和 K3s 数据目录是否 shared |
+| 镜像 `no space left on device` | 检查 CKM K3s 节点 ephemeral storage 和节点磁盘 |
+| admission 访问旧 IP | 删除 CKM K3s 中的 `w7panel-sysbox-admission` Pod，等待 Service endpoint 重建 |
 | `sidecar spec unavailable` 或 seccomp notify 错误 | 先确认 L0 `sysbox-mgr/fs/snapshotter` 健康；单 Pod、串行重建，不要并发删除 CKM |
-| L3 无 IP | 检查 L2 `/var/lib/cni/networks`、`cni3` bridge、`registries.yaml` 和 CNI plugin symlink |
-| L2 内看到 `memory.max=max` | 该视图不代表父 cgroup 无限制；用实际压力测试验证父级 `memory.max`/CPU throttling |
+| workload 无 IP | 检查 CKM K3s 的 `/var/lib/cni/networks`、bridge、`registries.yaml` 和 CNI plugin symlink |
+| CKM K3s 内看到 `memory.max=max` | 该视图不代表父 cgroup 无限制；用实际压力测试验证父级限制 |
 
 每完成一个脚本就保存输出和 `kubectl get events --sort-by=.lastTimestamp`，这样可以
-区分 CKM 创建、镜像拉取、nested chart、L2 K3s、L3 CNI 各阶段的问题。
+区分 CKM 创建、镜像拉取、nested chart、CKM K3s workload 和 CNI 各阶段的问题。
