@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Shared configuration for the manual Sysbox-in-Sysbox test flow.
+# Edit this file, then run the numbered scripts from this directory.
+
+export KUBECONFIG_218="${KUBECONFIG_218:-/root/.kube/218.config}"
+export OUTER_NAMESPACE="${OUTER_NAMESPACE:-k3k-console-164315}"
+export CKM_NAMESPACE="${CKM_NAMESPACE:-$OUTER_NAMESPACE}"
+export CKM_NAME="${CKM_NAME:-ckm-sysbox-manual}"
+export CKM_SELECTOR="${CKM_SELECTOR:-cluster=${CKM_NAME},role=server}"
+export OUTER_RUNTIME_CLASS="${OUTER_RUNTIME_CLASS:-sysbox-runc}"
+export INNER_RUNTIME_CLASS="${INNER_RUNTIME_CLASS:-sysbox-runc}"
+export SYSBOX_IMAGE_REPO="${SYSBOX_IMAGE_REPO:-docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s}"
+export SYSBOX_IMAGE_TAG="${SYSBOX_IMAGE_TAG:-v0.7.1-43-handler-compat}"
+export CKM_IMAGE_REPO="${CKM_IMAGE_REPO:-docker.cnb.cool/i0358/zpk/w7panel-ckmv3}"
+export CKM_IMAGE_TAG="${CKM_IMAGE_TAG:-manual-sysboxin}"
+export NESTED_K3S_IMAGE="${NESTED_K3S_IMAGE:-docker.cnb.cool/i0358/zpk/sysbox-nested-k3s-test:v1.35.6-manual}"
+export L1_POD="${L1_POD:-}"
+export L1_CONTAINER="${L1_CONTAINER:-}"
+export L2_POD="${L2_POD:-nested-l2-k3s-manual}"
+export L2_PVC="${L2_PVC:-nested-l2-k3s-manual-rootfs}"
+export L2_NAMESPACE="${L2_NAMESPACE:-default}"
+export L3_POD="${L3_POD:-nested-l3-manual-nginx}"
+export TEST_IMAGE="${TEST_IMAGE:-ccr.ccs.tencentyun.com/afan-public/nginx:latest}"
+export PUSH_IMAGES="${PUSH_IMAGES:-false}"
