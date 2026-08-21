@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Added
+	* 增加 Sysbox-in-Sysbox 只读隔离审计脚本，固定检查 `/proc noexec`、PID namespace、CPU 和内存视图，明确区分功能验证与不支持的隔离能力。
+	* 扩展 CKM nginx Deployment smoke test：通过保留 PVC 启用 `sysbox/rootfs-rw-layer`，删除并重建 Pod 后校验根文件系统 marker 的内容、inode、属主、大小及 HTTP，覆盖普通 Deployment 的 rootfs 持久化。
+
 	* 修复 nested-agent readiness 在 L1 中误读取自身 `/proc/net/unix` 的问题：agent 与 L1 Sysbox 服务不共享 network namespace 时，readiness 现在只验证共享目录中的 Unix socket 文件和 ready 标记；独立安装的 nested Chart 不再因看不到其他 namespace 的 socket 而保持未 Ready。
 	* 新增单 chart 双层安装模式：`installMode=host` 保留 L0 宿主 installer，`installMode=nested` 在 L1 K3s 运行常驻 agent、安装当前镜像二进制并以 `nested-identity` 启动独立服务；两种模式统一暴露 `RuntimeClass/sysbox-runc`。nested agent 仅在 containerd 已加载 handler 后标记节点 ready，chart 本身不执行重启；迁移已运行的 L1 时仅需从 L0 滚动重建对应 K3s Pod，不重启物理宿主，避免直接终止 containerd 导致整套 K3s 退出。
 	* 将 chart 的 `installMode` 改为无默认目标的必填参数；遗漏时 Helm 校验失败，防止在 L1 内安装时误用 `host` 模式并执行 `systemctl restart k3s`。
@@ -32,6 +35,10 @@ All notable changes to this project will be documented in this file.
   * sysbox-deploy-k8s: add support for Kubernetes v1.36; the deployment script previously rejected this version through its supported-version whitelist.
   * Fix Debian release packaging by keeping the unreleased changelog header in the format required by the package converter.
   * Fix PVC subPath validation when kubelet uses a generated PVC directory name and CRI uses the logical volume name.
+
+### Changed
+	* 明确 Sysbox-in-Sysbox 能力边界：方案继续保留并做功能验证，但放弃 `/proc` 强隔离和 Pod 内 Sysbox 资源视图隔离；218 实测 inner CNI 依赖可执行 `/proc/self/exe`，且 nested-identity 未挂载每个 L2 独立的 sysbox-fs 资源视图。
+	* 手工测试默认镜像恢复为已验证的 `v0.7.1-43-handler-compat`，避免使用带有过宽 stale-launcher 清理逻辑的旧 `v0.7.1-44-lifecycle-fix` 制品。
 
 ## [0.7.1] - 2026-07-28
 ### Added

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# DEPRECATED: historical L3 experiment. Do not run for the single-CKM-K3s
+# workflow documented in README.md.
 # shellcheck disable=SC1091
 source "$(dirname "$0")/_common.sh"
 

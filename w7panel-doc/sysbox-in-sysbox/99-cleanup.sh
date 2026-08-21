@@ -6,6 +6,11 @@ source "$(dirname "$0")/_common.sh"
 
 check_common
 discover_l1
+log "deleting retained CKM nginx Deployment/PVC from $CHART_NAMESPACE"
+l1_kubectl -n "$CHART_NAMESPACE" delete deployment "$CKM_TEST_DEPLOYMENT" \
+  --ignore-not-found --wait=true --timeout=120s || true
+l1_kubectl -n "$CHART_NAMESPACE" delete pvc "$CKM_TEST_ROOTFS_PVC" \
+  --ignore-not-found --wait=true --timeout=120s || true
 if l1_kubectl -n "$L2_NAMESPACE" get pod "$L2_POD" >/dev/null 2>&1; then
   log 'deleting legacy L2 chart resources and L2 test Pod/PVC'
   l2_kubectl -n sysbox-system delete daemonset,deploy,service,serviceaccount,configmap,secret,role,rolebinding \

@@ -1,7 +1,10 @@
 # Sysbox-in-Sysbox 218 验证记录
 
-> 状态日期：2026-08-19。本文只描述 `w7panel-sysboxin` 当前实现和 218
-> 测试现场。Sysbox nesting 仍是实验性功能，不可据此视为生产可用。
+> 能力边界（2026-08-21）：**Sysbox-in-Sysbox 方案继续保留，只放弃 `/proc` 强隔离
+> 和 Pod 内 Sysbox 系统视图隔离。** 218 确认 L2 `/proc` 为可执行挂载，且
+> 1 CPU/2GiB Pod 仍看到 72 CPU/63457684kB 内存。K3s、Docker、CNI、L3 和持久化
+> 等功能验证继续有效，但不能据此声称具备这两项隔离能力。详细边界见
+> `sysbox-in-sysbox-problem.md` 与 `sysbox-in-sysbox/README.md`。
 
 ## 目标与层级
 
@@ -267,6 +270,7 @@ Running Pod，不应复用重启前记录。
 | Docker overlay2 | 已通过；不加 tmpfs 的 `/var/lib/docker` 自动使用 ext4-backed 现有 special mount，dockerd 自动选择 `overlay2` |
 | 腾讯云 Docker nginx | 已通过；实际 pull digest `sha256:29cf9892...dd159f`，容器 `172.17.0.2`，`-p 18080:80` 返回 HTTP 200 |
 | Docker 与 rootfs rw layer 组合 | 已通过；腾讯云 nginx pull/run、HTTP 200，L2 marker 经 L2 Pod 重建和整个 L1 Pod 重建后均保持 |
+| CKM `ckm-k3s-nginx` Deployment rootfs-rw-layer | 测试脚本已接入，待执行 | 使用 `ckm-k3s-nginx-rootfs` PVC，写入 `/rootfs-persistence-ckm-nginx`，删除 Deployment 管理的 Pod 后校验 marker 内容、inode、属主、大小和 HTTP；尚未在当前 CKM 轮次实机执行 |
 | 固化 L2 K3s 测试镜像 | 镜像已构建推送；本地 K3s 8 秒 Ready、CRI NetworkReady、腾讯云 nginx、HTTP 200 和 CNI 回收通过；仍需用当前最终 runtime 镜像做一次完整组合回归 |
 
 L3 procfs 原先通过继承的 `mount(2)` seccomp notify 路径，外层 helper 对更深层 userns

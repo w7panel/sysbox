@@ -1,8 +1,45 @@
 # Sysbox Pod 内运行 Sysbox 的局限与问题分析
 
+## 2026-08-21 最终决定：保留方案，放弃两项隔离能力
+
+218 的 `k3k-console-164315/ckm-sysbox-manual` 实测无法提供 `/proc` 强隔离和 Pod 内
+Sysbox 系统视图隔离。决定不是放弃 Sysbox-in-Sysbox，而是接受这两个能力缺口：继续构建、
+部署和验证 nested runtime 的 K3s、CNI、Docker、rootfs、cgroup 实际边界与生命周期功能，
+不再把 `/proc noexec` 和资源视图虚拟化作为目标。该方案不能用于多租户或不可信负载隔离。
+
+测试对象为 L2 Deployment `default/ckm-k3s-nginx`，资源限制为 1 CPU/2GiB，
+`runtimeClassName=sysbox-runc`。实测证据：
+
+```text
+/proc: rw,nosuid,nodev,relatime             # 缺少 noexec
+L1 pid namespace: pid:[4026548708]
+L2 pid namespace: pid:[4026541853]          # PID 隔离正常
+L2 /proc/cpuinfo: 72 processors             # 期望 1
+L2 /proc/meminfo: MemTotal 63457684 kB      # 期望不超过 2GiB
+L2 /sys/fs/cgroup/cpu.max: max 100000
+L2 /sys/fs/cgroup/memory.max: max
+L1 所见 L2 祖先 cpu.max: 100000 100000
+L1 所见 L2 祖先 memory.max: 2147483648
+```
+
+`/proc` 缺少 `noexec` 是当前 CNI 可用的必要降级。K3s/containerd 的 netns helper
+需要执行 `/proc/self/exe`；恢复 `noexec` 会使 inner CNI 创建 network namespace
+失败。`sysbox/allow-proc-exec: "true"` 或 runtime 无条件删除 `noexec` 都不满足强隔离，
+不能作为解决方案。
+
+视图失败也不是资源限额未生效。L2 的父 cgroup 已正确限制到 1 CPU/2GiB，实际 throttling
+和 OOM 边界此前均已验证；但 nested-identity 代码明确跳过每个 L2 的 sysbox-fs 子挂载，
+导致 `/proc/cpuinfo`、`/proc/meminfo` 和 `/sys/fs/cgroup` 暴露错误视图。即使单独补齐
+FUSE 视图，也无法解决 `/proc noexec` 与 inner CNI 的冲突。
+
+仍不接受共享 L1 user namespace、跳过 `/proc`、使用 host network，或用 Pod Running
+代替功能验证。当前明确接受的是 L2 `/proc` 不含 `noexec` 和资源视图不虚拟化；真实 cgroup
+CPU/内存边界仍必须生效。方案状态为 **功能继续支持，强隔离与视图隔离不支持**。
+
 ## 2026-08-21 当前问题清单（218 真实 CKM）
 
-本节以最近一次 218 测试为准，区分“仍未闭环”和“曾经出现但已经解决”，避免把历史排障现场误认为当前结论。
+本节区分“仍未闭环”和“曾经出现但已经解决”。两项隔离能力已放弃，其余功能与稳定性
+问题继续跟踪。
 
 ### 当前仍未解决或未闭环
 
@@ -58,6 +95,15 @@
 
    实际边界已通过压力测试：512MiB 内存 Pod 被 `OOMKilled`，500m CPU 压测出现 throttling；但 L2 内部仍显示 `cpu.max=max`、`memory.max=max`。如果要求 L2 视图准确反映父级限制，还需继续改进 Sysbox cgroup 视图。
 
+   2026-08-21 决定放弃该视图隔离能力，不再继续改进显示；后续只验证真实 CPU、内存
+   和子 cgroup 边界仍然生效。
+
+9. **CKM nginx Deployment 的 rootfs-rw-layer 重建验收待执行。**
+
+   `nested-chart-smoke.sh` 已加入 `ckm-k3s-nginx-rootfs` PVC、PVC-backed 根挂载检查、
+   marker 写入、Pod 删除重建、metadata/content 和重建后 HTTP 校验；尚未在 218 执行，
+   不能提前记录为通过。
+
 ### 曾经遇到、目前已解决或已验证通过
 
 - `innerSysbox.enabled=false` 导致 CKM 不创建 L1 nested runtime。
@@ -80,6 +126,9 @@
 ### 当前判断
 
 嵌套 userns、L2 CNI、L3 userns、Docker/overlay2、rootfs-rw-layer 和实际 cgroup 资源边界均已有实测通过证据。当前阻塞点集中在真实 CKM Pod 重建后的宿主 Sysbox OCI/seccomp 状态恢复，以及 CKM 模板 socket bind 修复的全新 Pod 验证；这两项闭环前，不应宣称最新 CKM 已完成最终验收。
+
+该判断只覆盖功能和稳定性，不包含已经放弃的 `/proc` 强隔离与 Sysbox 系统视图隔离；
+后续回归继续验证实际 cgroup 边界、K3s、CNI、Docker、rootfs 和生命周期。
 
 ## 2026-08-21 `ckm-bzhrq` 恢复后复测结果
 

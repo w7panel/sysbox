@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# DEPRECATED: tests the old L2 Pod/PVC rootfs flow and is outside the current
+# CKM-owned-K3s workflow. It may create or recreate a second K3s.
 # shellcheck disable=SC1091
 source "$(dirname "$0")/_common.sh"
 

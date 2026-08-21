@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# DEPRECATED: historical L2 K3s experiment. The current flow installs the
+# chart directly in the CKM-owned K3s with 04-install-ckm-chart.sh.
 # shellcheck disable=SC1091
 source "$(dirname "$0")/_common.sh"
 
