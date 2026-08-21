@@ -4,14 +4,16 @@ set -euo pipefail
 source "$(dirname "$0")/_common.sh"
 
 check_common
-[ "${CREATE_CKM:-false}" = true ] || {
+[ -n "${CKM_NAME:-}" ] || die 'CKM_NAME must be set in config.sh'
+if configured_ckm_exists; then
+  [ "${CREATE_CKM:-false}" != true ] || die "CKM $CKM_NAMESPACE/$CKM_NAME already exists; choose a new CKM_NAME"
   select_existing_ckm
   discover_l1
   log "CREATE_CKM=false; reusing configured CKM ${CKM_NAMESPACE}/${CKM_NAME}, no Ckm object was created"
   outer_kubectl -n "$OUTER_NAMESPACE" get pod "$L1_POD" -o wide
   exit 0
-}
-[ -n "${CKM_NAME:-}" ] || die 'CREATE_CKM=true requires a new CKM_NAME in config.sh'
+fi
+
 CKM_SELECTOR="cluster=${CKM_NAME},role=server"
 export CKM_SELECTOR
 outer_kubectl create namespace "$CKM_NAMESPACE" --dry-run=client -o yaml | outer_kubectl apply -f - >/dev/null

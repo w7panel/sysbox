@@ -16,6 +16,10 @@ log() { printf '[sysbox-in-sysbox] %s\n' "$*"; }
 die() { printf '[sysbox-in-sysbox] ERROR: %s\n' "$*" >&2; exit 1; }
 need_cmd() { command -v "$1" >/dev/null 2>&1 || die "missing command: $1"; }
 outer_kubectl() { kubectl --kubeconfig "$KUBECONFIG_218" "$@"; }
+configured_ckm_exists() {
+  [ -n "${CKM_NAMESPACE:-}" ] && [ -n "${CKM_NAME:-}" ] || return 1
+  outer_kubectl -n "$CKM_NAMESPACE" get ckm "$CKM_NAME" >/dev/null 2>&1
+}
 
 select_existing_ckm() {
   local rows candidate ckm_inner ckm_runtime ckm_phase

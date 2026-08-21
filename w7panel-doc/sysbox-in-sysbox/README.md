@@ -56,12 +56,12 @@ bash ./00-check-prereqs.sh
 
 ## 1. 选择已有 CKM 或显式新建 CKM
 
-`w7panel-ckm` 中的已有 CKM 已经自带一个 K3s，该 K3s 是本流程的 L1。默认执行
-`01-create-ckm.sh` 只按 `config.sh` 的 `CKM_NAMESPACE/CKM_NAME` 查找并校验已有 CKM，
-不会创建新的 `Ckm`：
+`w7panel-ckm` 中的已有 CKM 已经自带一个 K3s，该 K3s 是本流程的 L1。执行
+`01-create-ckm.sh` 时只使用 `config.sh` 的 `CKM_NAMESPACE/CKM_NAME`：已有 CKM 就复用，
+不存在就用这个名称创建，不会随机选择其他 CKM：
 
 ```bash
-CREATE_CKM=false bash ./01-create-ckm.sh
+bash ./01-create-ckm.sh
 ```
 
 必须满足：
@@ -71,7 +71,7 @@ CREATE_CKM=false bash ./01-create-ckm.sh
 - `spec.innerSysbox.enabled=true`；
 - CKM Server Pod 使用 `hostUsers=false`。
 
-只有明确要创建一次性 CKM 时才设置 `CREATE_CKM=true`，并使用一个新的名称：
+如果要强制创建一次性 CKM，设置 `CREATE_CKM=true`，并使用一个当前不存在的新名称：
 
 ```bash
 CKM_NAME=ckm-sysbox-manual-$(date +%s) \
@@ -93,8 +93,8 @@ spec:
 
 `innerSysbox.enabled=true` 只负责让 controller 在 L1 K3s 启动前准备 nested
 handler、`/dev/fuse` 和 Sysbox 二进制；它不会自动安装 `w7panel-sysbox` Helm Chart。
-无论是复用还是新建，脚本都会按配置的 CKM 名称定位 Server Pod；如果同名 CKM 不存在
-或状态不满足要求会直接失败，不会改用其他 CKM。
+无论是复用还是新建，脚本都会按配置的 CKM 名称定位 Server Pod；如果同名 CKM 已存在
+但状态不满足要求会直接失败，不会改用其他 CKM。
 
 确认 L1 的边界：
 
