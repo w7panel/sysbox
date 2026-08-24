@@ -77,6 +77,26 @@ L1 所见 L2 祖先 memory.max: 2147483648
 导致 `/proc/cpuinfo`、`/proc/meminfo` 和 `/sys/fs/cgroup` 暴露错误视图。即使单独补齐
 FUSE 视图，也无法解决 `/proc noexec` 与 inner CNI 的冲突。
 
+### 重复 seccomp user-notify listener 的直接根因
+
+这里的“重复 notify”不是普通 seccomp filter 重复。普通 seccomp filter 可以逐层叠加；
+Sysbox 使用的 seccomp user-notification 则需要一个 listener FD 和对应的用户态处理者。
+L1 进程树会继承外层 L0 的 listener，L2 若再为同类 `mount`、`umount`、`openat2`
+syscall 创建一套由 L1 `sysbox-fs` 处理的 listener，当前内核场景会返回：
+
+```text
+device or resource busy (EBUSY)
+```
+
+即使强行复用外层 listener，L0/L1 helper 也未必拥有 L2 mount/user namespace 中的权限，
+可能把 L2 的请求处理成 `EPERM` 或 `EINVAL`。因此 nested-identity 当前跳过 L2 的完整
+Sysbox-FS syscall trapping，优先保证 K3s、CNI、nginx 和 Docker 可以启动。
+
+这个降级直接解释了 `free -h` 的结果：没有 L2 专属 Sysbox-FS `/proc` 视图时，
+`free` 读取的 `/proc/meminfo` 仍是内核的宿主级内存统计，而不是 L1 的 2GiB cgroup
+上限。实际 CPU/内存限制仍由 L1 父 cgroup 和 L2 delegated 子树执行，必须从 L1 cgroup
+路径或压力测试验证，不能用 L2 内 `free -h` 判断限额是否生效。
+
 仍不接受共享 L1 user namespace、跳过 `/proc`、使用 host network，或用 Pod Running
 代替功能验证。当前明确接受的是 L2 `/proc` 不含 `noexec` 和资源视图不虚拟化；真实 cgroup
 CPU/内存边界仍必须生效。方案状态为 **功能继续支持，强隔离与视图隔离不支持**。
