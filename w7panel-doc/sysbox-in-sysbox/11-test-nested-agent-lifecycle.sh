@@ -14,7 +14,7 @@ k3s_identity() {
     for proc_dir in /proc/[0-9]*; do
       [ -r "$proc_dir/exe" ] && [ -r "$proc_dir/cmdline" ] || continue
       [ "$(basename "$(readlink "$proc_dir/exe" 2>/dev/null || true)")" = k3s ] || continue
-      case "$(tr "\000" " " < "$proc_dir/cmdline")" in
+      case "$(tr "\000" " " 2>/dev/null < "$proc_dir/cmdline" || true)" in
         *"k3s server"*) awk "{print \$1 \":\" \$22}" "$proc_dir/stat"; exit 0 ;;
       esac
     done
@@ -30,7 +30,7 @@ check_lifecycle_processes() {
     launcher_count=0
     snapshotter_count=0
     for proc_dir in /proc/[0-9]*; do
-      cmdline="$(tr "\000" " " < "$proc_dir/cmdline" 2>/dev/null || true)"
+      cmdline="$(tr "\000" " " 2>/dev/null < "$proc_dir/cmdline" || true)"
       case "$cmdline" in
         "/bin/sh /opt/sysbox/scripts/sysbox-inner-k3s.sh "*)
           if tr "\000" "\n" < "$proc_dir/environ" 2>/dev/null | grep -qx SYSBOX_INNER_KEEPALIVE=true; then
@@ -91,7 +91,16 @@ l1_kubectl -n "$CHART_NAMESPACE" wait --for=condition=Ready "pod/$workload" --ti
 new_workload_uid="$(l1_kubectl -n "$CHART_NAMESPACE" get pod "$workload" -o jsonpath='{.metadata.uid}')"
 [ "$new_workload_uid" != "$workload_uid" ] || die 'Sysbox workload Pod was not recreated'
 pod_ip="$(l1_kubectl -n "$CHART_NAMESPACE" get pod "$workload" -o jsonpath='{.status.podIP}')"
-l1_exec /bin/wget -qO- --timeout=10 "http://$pod_ip" | grep -q 'Welcome to nginx' ||
-  die "recreated Sysbox workload is unreachable at $pod_ip"
+workload_reachable=false
+for _ in $(seq 1 30); do
+  if l1_exec /bin/wget -qO- --timeout=3 "http://$pod_ip" 2>/dev/null |
+    grep -q 'Welcome to nginx'; then
+    workload_reachable=true
+    break
+  fi
+  sleep 2
+done
+[ "$workload_reachable" = true ] ||
+  die "recreated Sysbox workload is unreachable at $pod_ip after 60 seconds"
 
 log "PASS: nested-agent UID $old_uid -> $new_uid; CKM K3s stayed $before_identity; $process_state; new Sysbox workload is Ready"

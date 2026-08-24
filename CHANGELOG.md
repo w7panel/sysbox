@@ -4,8 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Added
+	* 增加双层真实 PTY 的交互 exec 回归和统一 shell 入口，覆盖 CKM K3s 中保留的 nginx 与 systemd/Docker Deployment。
 	* 增加 CKM 单 K3s 的 Docker、cgroup delegation 和 nested-agent 生命周期自动回归脚本；覆盖 persistent special mount、overlay2、镜像构建与 Pod 重建持久性、L1 资源父边界、agent 单实例回收及重建后 workload 创建。
-	* 记录 218 `ckm-sysbox-manual` 的 v46 验收：nginx CNI/rootfs、systemd/dockerd、Docker pull/run/build、overlay2、1 CPU/2GiB cgroup 父边界和 nested-agent 重建均通过。
+	* 记录 218 `ckm-sysbox-manual` 的 v47 验收：nginx CNI/rootfs、systemd/dockerd、Docker pull/run/build、overlay2、1 CPU/2GiB cgroup 父边界、nested-agent 重建和双层交互 exec 均通过。
 	* 增加 Sysbox-in-Sysbox 只读隔离审计脚本，固定检查 `/proc noexec`、PID namespace、CPU 和内存视图，明确区分功能验证与不支持的隔离能力。
 	* 扩展 CKM nginx Deployment smoke test：通过保留 PVC 启用 `sysbox/rootfs-rw-layer`，删除并重建 Pod 后校验根文件系统 marker 的内容、inode、属主、大小及 HTTP，覆盖普通 Deployment 的 rootfs 持久化。
 
@@ -39,6 +40,7 @@ All notable changes to this project will be documented in this file.
   * Fix PVC subPath validation when kubelet uses a generated PVC directory name and CRI uses the logical volume name.
 
 ### Changed
+	* nested Chart 更新为 `0.7.1-15`，默认镜像切换到 `v0.7.1-47-nested-tty-exec`；修复 nested-identity exec 泄漏内部同步 socket，导致 `kubectl exec -it` 在终端附加前永久卡住的问题。
 	* nested Chart 更新为 `0.7.1-14`，默认 deploy 镜像切换到包含当前 sysbox-runc/mgr/fs 二进制的 `v0.7.1-46-current-binaries` digest。
 	* 明确 Sysbox-in-Sysbox 能力边界：方案继续保留并做功能验证，但放弃 `/proc` 强隔离和 Pod 内 Sysbox 资源视图隔离；218 实测 inner CNI 依赖可执行 `/proc/self/exe`，且 nested-identity 未挂载每个 L2 独立的 sysbox-fs 资源视图。
 	* 手工测试默认镜像恢复为已验证的 `v0.7.1-43-handler-compat`，避免使用带有过宽 stale-launcher 清理逻辑的旧 `v0.7.1-44-lifecycle-fix` 制品。

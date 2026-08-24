@@ -1,0 +1,7 @@
+ARG BASE_IMAGE=docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-46-current-binaries
+FROM ${BASE_IMAGE}
+
+# Fast-path image for a sysbox-runc-only fix. Build the static binary from the
+# committed source before building this image; all other deploy assets remain
+# pinned to the verified base image.
+COPY --chmod=0755 sysbox-runc/build/amd64/sysbox-runc /opt/sysbox/bin/generic/sysbox-runc

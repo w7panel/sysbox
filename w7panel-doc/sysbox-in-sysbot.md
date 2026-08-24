@@ -9,21 +9,22 @@
 ## 2026-08-24 CKM 单 K3s 最新回归
 
 当前默认流程以 `ckm-sysbox-manual` 为 L1，不再额外创建第二个 K3s。使用
-`sysbox-deploy-k3s:v0.7.1-46-current-binaries`（digest
-`sha256:0b85c10dad9599c407fc29b555377f615f398d07b3580e342ed50bb3b2b44423`，
-`sysbox-runc=8fbe8c1`）完成以下验证：
+`sysbox-deploy-k3s:v0.7.1-47-nested-tty-exec`（digest
+`sha256:e10b0f5905fc1d0dbf913079fc396cea4a5984b69810ed1ce04d029555c946a2`，
+`sysbox-runc=5208ebb`）完成以下验证：
 
-- L1 K3s 安装 `w7panel-sysbox` chart `0.7.1-14`，`installMode=nested`，不重启 K3s。
+- L1 K3s 安装 `w7panel-sysbox` chart `0.7.1-15`，`installMode=nested`，不重启 K3s。
 - L2 nginx 使用独立 child userns、`uid_map=0 0 65536`，CNI/HTTP 和 PVC rootfs 重建保持。
 - L2 systemd/Docker 使用 `overlay2`；`/var/lib/docker` 为 PVC 上 `ext4 idmapped` special
   mount，Pod 重建后 marker、inode、构建镜像 ID 和镜像缓存保持。
 - L2 cgroup 实际位于 `sysbox.delegate/init.scope`；L1 父边界保持 1 CPU/2GiB。
 - nested-agent Pod 重建后 launcher/snapshotter 各一份、socket 正在监听，K3s identity
   保持 `376:2996`，随后 Sysbox nginx 可重新创建。
+- nginx 和 systemd/Docker 容器的双层 `kubectl exec -it` 均获得真实 PTY，可交互并正常退出。
 
 可重复执行的权威流程位于 `w7panel-doc/sysbox-in-sysbox/README.md`，新增检查为
-`09-test-docker-rootfs.sh`、`10-test-cgroup-delegation.sh` 和
-`11-test-nested-agent-lifecycle.sh`。本文件后续较早日期的镜像和结论保留为历史记录。
+`09-test-docker-rootfs.sh`、`10-test-cgroup-delegation.sh`、
+`11-test-nested-agent-lifecycle.sh` 和 `12-test-interactive-exec.sh`。本文件后续较早日期的镜像和结论保留为历史记录。
 
 ## 目标与层级
 

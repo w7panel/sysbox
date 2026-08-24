@@ -1,16 +1,16 @@
 # Sysbox Pod 内运行 Sysbox 的局限与问题分析
 
-## 2026-08-24 v46 当前结论
+## 2026-08-24 v47 当前结论
 
 当前权威测试对象为 218 的
 `k3k-console-164315/ckm-sysbox-manual`，CKM Server Pod 为
 `k3k-ckm-sysbox-manual-server-647fddbd67-gmfpp`。本轮使用：
 
 ```text
-image: docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-46-current-binaries
-digest: sha256:0b85c10dad9599c407fc29b555377f615f398d07b3580e342ed50bb3b2b44423
-sysbox-runc commit: 8fbe8c1f1fd5ce95185b9e8ce38c6bff2e57f995
-chart: w7panel-sysbox 0.7.1-14, installMode=nested
+image: docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-47-nested-tty-exec
+digest: sha256:e10b0f5905fc1d0dbf913079fc396cea4a5984b69810ed1ce04d029555c946a2
+sysbox-runc commit: 5208ebbfae1fb487f765df7f0ffec2f0cdbe2ffb
+chart: w7panel-sysbox 0.7.1-15, installMode=nested
 ```
 
 已经实跑通过：
@@ -26,6 +26,8 @@ chart: w7panel-sysbox 0.7.1-14, installMode=nested
 - `11-test-nested-agent-lifecycle.sh`：nested-agent Pod 删除重建后 launcher=1、
   snapshotter=1、socket=listening；CKM K3s identity 保持 `376:2996`，新 nginx Sysbox Pod
   随后成功创建并可访问。
+- `12-test-interactive-exec.sh`：nginx `/bin/sh` 与 systemd/Docker `/bin/bash` 均获得真实
+  `/dev/pts/*`，可以接收命令并正常退出，退出后无残留 `sysbox-runc exec` 进程。
 
 当前未解决但不阻塞本轮功能验收：
 
@@ -37,7 +39,7 @@ chart: w7panel-sysbox 0.7.1-14, installMode=nested
 5. 因前两项隔离能力缺失，该模式不能作为多租户或不可信负载的安全边界。
 
 下方带更早日期的章节保留问题演进记录；其中“尚未验证”“只能使用 vfs”或“取消 child
-userns”等结论只描述当时旧镜像/旧 PoC，不代表 v46 当前状态。
+userns”等结论只描述当时旧镜像/旧 PoC，不代表 v47 当前状态。
 
 ## 2026-08-21 最终决定：保留方案，放弃两项隔离能力
 
@@ -434,6 +436,28 @@ generic distro ID。
 
 恢复 FIFO writer 的短暂保留后，pause Pod 才重新启动成功。这属于专用 nested
 实现回归，不是网络或镜像拉取问题。
+
+## 交互式 exec 在附加终端前卡死
+
+`v0.7.1-46` 中 nginx `/bin/sh` 和 systemd/Docker `/bin/bash` 均可执行非交互命令，
+但 `kubectl exec -it` 会在终端附加前永久等待。根因是 nested-identity 同时启用了
+`SkipSpecialMounts`，setns exec 路径因此跳过 `UnsafeCloseFrom()`，让目标 shell 继承了
+runc 内部同步 socket。只要交互 shell 不退出，父 runc 就一直等待该 socket 的 EOF，
+containerd 无法完成 PTY 附加。
+
+`sysbox-runc` commit `5208ebb` 将 FD 清理策略与 special mount 策略分开：
+nested-identity 的标准 init 和 setns exec 始终关闭内部 FD，只有旧的非 nested PoC 保留原行为。
+该修复同时恢复了 nested init 的 FD 清理保护。镜像
+`v0.7.1-47-nested-tty-exec` 已在 nested-agent 删除重建前后验证：
+
+```bash
+bash ./12-test-interactive-exec.sh
+bash ./06-enter-ckm-shell.sh nginx
+bash ./06-enter-ckm-shell.sh docker
+```
+
+两个容器都获得 `/dev/pts/*`、能接收输入并正常退出，退出后没有残留
+`sysbox-runc exec --console-socket` 进程。命令参数是 `-it`，不是 `-ut`。
 
 ## 需要区分的环境与时序问题
 

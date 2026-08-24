@@ -74,9 +74,9 @@ bash ./08-check-isolation.sh
 - `11-test-nested-agent-lifecycle.sh` 已验证 nested-agent 删除重建后只有一个 keepalive launcher、
   一个 snapshotter 和一个监听 socket；CKM K3s identity 不变，随后新 Sysbox workload 可创建。
 
-本轮使用镜像 `v0.7.1-46-current-binaries`，digest 为
-`sha256:0b85c10dad9599c407fc29b555377f615f398d07b3580e342ed50bb3b2b44423`；镜像内
-`sysbox-runc` commit 为 `8fbe8c1`。仍需跟踪的是长时间/并发重启压力、L0 宿主服务重启恢复，
+本轮使用镜像 `v0.7.1-47-nested-tty-exec`，digest 为
+`sha256:e10b0f5905fc1d0dbf913079fc396cea4a5984b69810ed1ce04d029555c946a2`；镜像内
+`sysbox-runc` commit 为 `5208ebb`。仍需跟踪的是长时间/并发重启压力、L0 宿主服务重启恢复，
 以及历史大目录 rsync 的限流与取消；它们不影响本轮单节点功能验收结论。
 
 ### 层级名称
@@ -103,11 +103,12 @@ bash ./08-check-isolation.sh
 | 3 | `03-install-l1-chart.sh` | 兼容入口，实际调用 CKM K3s chart 安装 |
 | 4 | `04-install-ckm-chart.sh` | 在 CKM 自有 K3s 的 `default` 安装 nested chart |
 | 5 | `05-test-ckm-k3s.sh` | 创建并验证保留的 nginx Deployment |
-| 6 | `06-enter-ckm-nginx-shell.sh` | 从真实 TTY 进入保留的 nginx shell |
+| 6 | `06-enter-ckm-shell.sh` | 从真实 TTY 进入保留的 nginx 或 Docker shell |
 | 8 | `08-check-isolation.sh` | 只读审计两项已放弃的隔离能力；当前实现预期返回非零 |
 | 9 | `09-test-docker-rootfs.sh` | 验证 Docker overlay2、构建及 rootfs/special mount 重建持久性 |
 | 10 | `10-test-cgroup-delegation.sh` | 验证 L2 delegated 子树与 L1 的 1 CPU/2GiB 父边界 |
 | 11 | `11-test-nested-agent-lifecycle.sh` | 重建 nested-agent，检查服务单实例和新 workload 创建 |
+| 12 | `12-test-interactive-exec.sh` | 用真实 PTY 自动验证 nginx、Docker 交互式 exec |
 | 99 | `99-cleanup.sh` | 清理 chart/历史测试资源，默认保留 CKM |
 
 脚本不会自动跳过失败步骤。需要重建 CKM Server Pod 或删除资源时，应先人工确认；这些操作
@@ -124,10 +125,12 @@ bash ./05-test-ckm-k3s.sh
 bash ./09-test-docker-rootfs.sh
 bash ./10-test-cgroup-delegation.sh
 bash ./11-test-nested-agent-lifecycle.sh
+bash ./12-test-interactive-exec.sh
 # 隔离能力审计（当前实现预期返回非零，不影响功能结论）：
 bash ./08-check-isolation.sh
-# 保留 Deployment 后，在真实终端进入 nginx：
-bash ./06-enter-ckm-nginx-shell.sh
+# 保留 Deployment 后，在真实终端进入 nginx 或 Docker：
+bash ./06-enter-ckm-shell.sh nginx
+bash ./06-enter-ckm-shell.sh docker
 ```
 
 查看 Deployment、标签和资源限制（命令在 CKM 内 K3s 执行）：
@@ -140,8 +143,9 @@ discover_l1
 l1_kubectl -n default get deployment ckm-k3s-nginx -o yaml
 ```
 
-直接从 L0 进入 nginx 也必须给两层 `kubectl exec` 都分配 TTY；推荐使用
-`06-enter-ckm-nginx-shell.sh`，避免手工命令漏掉外层 `-it`。
+直接从 L0 进入 workload 必须给两层 `kubectl exec` 都分配 TTY；推荐使用
+`06-enter-ckm-shell.sh nginx|docker`，避免手工命令漏掉外层 `-it`。参数是 `-it`，
+不是 `-ut`。自动回归可执行 `12-test-interactive-exec.sh`。
 
 ## 0. 准备工作
 
