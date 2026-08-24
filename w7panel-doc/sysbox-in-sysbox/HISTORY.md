@@ -1,14 +1,18 @@
-# Sysbox-in-Sysbox 218 验证记录
+# Sysbox-in-Sysbox 历史验证记录
+
+> 本文是 218 上旧镜像、旧 CKM 和 L2/L3 实验的时间线归档。文中的“当前”、待办、
+> Pod 名称和命令只代表对应日期，不作为现行操作依据。当前人工流程见 [README.md](./README.md)，
+> 当前能力边界与未解决问题见 [KNOWN-ISSUES.md](./KNOWN-ISSUES.md)。
 
 > 能力边界（2026-08-21）：**Sysbox-in-Sysbox 方案继续保留，只放弃 `/proc` 强隔离
 > 和 Pod 内 Sysbox 系统视图隔离。** 218 确认 L2 `/proc` 为可执行挂载，且
 > 1 CPU/2GiB Pod 仍看到 72 CPU/63457684kB 内存。K3s、Docker、CNI、L3 和持久化
 > 等功能验证继续有效，但不能据此声称具备这两项隔离能力。详细边界见
-> `sysbox-in-sysbox-problem.md` 与 `sysbox-in-sysbox/README.md`。
+> [KNOWN-ISSUES.md](./KNOWN-ISSUES.md) 与 [README.md](./README.md)。
 
-## 2026-08-24 CKM 单 K3s 最新回归
+## 2026-08-24 CKM 单 K3s 最终回归快照
 
-当前默认流程以 `ckm-sysbox-manual` 为 L1，不再额外创建第二个 K3s。使用
+本次流程以 `ckm-sysbox-manual` 为 L1，不再额外创建第二个 K3s。使用
 `sysbox-deploy-k3s:v0.7.1-47-nested-tty-exec`（digest
 `sha256:e10b0f5905fc1d0dbf913079fc396cea4a5984b69810ed1ce04d029555c946a2`，
 `sysbox-runc=5208ebb`）完成以下验证：
@@ -22,7 +26,7 @@
   保持 `376:2996`，随后 Sysbox nginx 可重新创建。
 - nginx 和 systemd/Docker 容器的双层 `kubectl exec -it` 均获得真实 PTY，可交互并正常退出。
 
-可重复执行的权威流程位于 `w7panel-doc/sysbox-in-sysbox/README.md`，新增检查为
+可重复执行的权威流程见 [README.md](./README.md)，新增检查为
 `09-test-docker-rootfs.sh`、`10-test-cgroup-delegation.sh`、
 `11-test-nested-agent-lifecycle.sh` 和 `12-test-interactive-exec.sh`。本文件后续较早日期的镜像和结论保留为历史记录。
 
@@ -625,7 +629,9 @@ cd sysbox-fs
 go test ./...
 ```
 
-## 未解决或待验证
+## 历史未解决或待验证快照
+
+> 本节已经冻结，不代表当前待办。当前状态只看 [KNOWN-ISSUES.md](./KNOWN-ISSUES.md)。
 
 ### 1. 最终 runtime 与固化 L2 K3s 镜像的组合回归
 
@@ -667,7 +673,9 @@ systemd、默认 Docker bridge/iptables、端口映射、systemd cgroup driver �
 BuildImage 资源停止 runaway；mgr 对同一目标的 rsync single-flight、container
 取消时的中止，以及 orphan 临时目录/进程回收尚未实现或完成压力验证。
 
-## 快速回归测试
+## 历史快速回归命令（已停用）
+
+> 下列命令依赖已经删除的旧 L2/L3 流程，仅用于理解历史现场，禁止作为当前验收步骤。
 
 ### 1. 创建可持久化的 L1 并运行 chart smoke
 

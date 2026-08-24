@@ -78,6 +78,13 @@ LLM 经常默默选择一种解释然后执行。这个原则强制明确推理�
 - 每次完成本项目的代码、配置或行为改动后，必须同步更新根目录 `CHANGELOG.md`。
 - Changelog 条目必须说明改动内容及其原因；若改动修复故障，还要记录故障触发条件和预期效果。
 
+### Sysbox-in-Sysbox 文档索引
+
+- `w7panel-doc/sysbox-in-sysbox/README.md`：当前唯一操作手册、脚本顺序和快速测试入口。
+- `w7panel-doc/sysbox-in-sysbox/KNOWN-ISSUES.md`：当前能力边界、未解决项和问题根因。
+- `w7panel-doc/sysbox-in-sysbox/HISTORY.md`：旧镜像、旧 CKM 和 L2/L3 实验归档，不作为当前执行依据。
+- 修改 Sysbox-in-Sysbox 实现、chart 或测试脚本后，同步更新前两份文档；仅需追溯旧测试现场时查阅 `HISTORY.md`。
+
 
 ## Git 与网络
 

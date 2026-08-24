@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Variables such as L2_POD are supplied by config.sh, which ShellCheck cannot
-# follow through the runtime-selected config path.
+# Variables are supplied by config.sh, which ShellCheck cannot follow through
+# the runtime-selected config path.
 # shellcheck disable=SC2153
 set -euo pipefail
 
@@ -65,11 +65,6 @@ l1_kubectl_input() {
   outer_kubectl -n "$OUTER_NAMESPACE" exec -i "$L1_POD" -c "$L1_CONTAINER" -- \
     /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml "$@"
 }
-l2_kubectl() {
-  l1_kubectl -n "$L2_NAMESPACE" exec "$L2_POD" -c k3s -- \
-    /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml "$@"
-}
-
 check_common() {
   need_cmd kubectl
   need_cmd helm

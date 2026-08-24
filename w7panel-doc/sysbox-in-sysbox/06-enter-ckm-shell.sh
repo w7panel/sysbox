@@ -12,7 +12,7 @@ case "$target" in
     shell=/bin/sh
     ;;
   docker)
-    namespace="$L2_NAMESPACE"
+    namespace="$CHART_NAMESPACE"
     deployment="$CKM_DOCKER_TEST_DEPLOYMENT"
     container=system
     shell=/bin/bash

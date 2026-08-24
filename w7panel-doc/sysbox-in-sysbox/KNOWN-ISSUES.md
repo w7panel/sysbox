@@ -1,6 +1,10 @@
-# Sysbox Pod 内运行 Sysbox 的局限与问题分析
+# Sysbox-in-Sysbox 已知问题与能力边界
 
-## 2026-08-24 v47 当前结论
+本文记录当前限制、待验证事项以及已经定位的问题根因。执行步骤以
+[README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
+[HISTORY.md](./HISTORY.md)。
+
+## 当前验收基线（2026-08-24）
 
 当前权威测试对象为 218 的
 `k3k-console-164315/ckm-sysbox-manual`，CKM Server Pod 为
@@ -41,7 +45,7 @@ chart: w7panel-sysbox 0.7.1-15, installMode=nested
 下方带更早日期的章节保留问题演进记录；其中“尚未验证”“只能使用 vfs”或“取消 child
 userns”等结论只描述当时旧镜像/旧 PoC，不代表 v47 当前状态。
 
-## 2026-08-21 最终决定：保留方案，放弃两项隔离能力
+## 固定能力边界（2026-08-21 决定）
 
 218 的 `k3k-console-164315/ckm-sysbox-manual` 实测无法提供 `/proc` 强隔离和 Pod 内
 Sysbox 系统视图隔离。决定不是放弃 Sysbox-in-Sysbox，而是接受这两个能力缺口：继续构建、
@@ -77,7 +81,7 @@ FUSE 视图，也无法解决 `/proc noexec` 与 inner CNI 的冲突。
 代替功能验证。当前明确接受的是 L2 `/proc` 不含 `noexec` 和资源视图不虚拟化；真实 cgroup
 CPU/内存边界仍必须生效。方案状态为 **功能继续支持，强隔离与视图隔离不支持**。
 
-## 2026-08-21 当前问题清单（218 真实 CKM）
+## 当前问题清单（更新至 2026-08-24）
 
 本节区分“仍未闭环”和“曾经出现但已经解决”。两项隔离能力已放弃，其余功能与稳定性
 问题继续跟踪。
@@ -86,10 +90,10 @@ CPU/内存边界仍必须生效。方案状态为 **功能继续支持，强隔�
 
 1. **长时间及并发重启稳定性尚未完成。**
 
-   v46 已通过一次 nested-agent 删除重建、服务单实例检查和随后 workload 重建，但还未覆盖
+   v47 已通过 nested-agent 删除重建、服务单实例检查和随后 workload 重建，但还未覆盖
    多 CKM 并发、连续重启风暴或 24 小时以上运行。
 
-2. **L0 宿主 Sysbox 服务重启后的完整恢复尚未在 v46 重跑。**
+2. **L0 宿主 Sysbox 服务重启后的完整恢复尚未在 v47 重跑。**
 
    nested-agent 自身重建不会重启 CKM K3s且已通过；L0 mgr/fs/snapshotter 重启属于更大的
    故障范围，仍需单独保存事件与 seccomp 注册日志后验收。
@@ -132,7 +136,7 @@ CPU/内存边界仍必须生效。方案状态为 **功能继续支持，强隔�
 - snapshot/content-store 缺失 digest 导致 sandbox 创建失败的问题已通过恢复/重新拉取内容处理。
 - L1 K3s identity 在 chart 安装和 nested-agent rollout 前后保持不变。
 - cgroup 二次 delegation 的 CPU throttling、OOM 边界和子 cgroup 可写性已通过压力测试。
-- v46 的 `/var/lib/docker` 已确认使用 PVC-backed `ext4 idmapped` special mount，dockerd
+- v47 的 `/var/lib/docker` 已确认使用 PVC-backed `ext4 idmapped` special mount，dockerd
   使用 `overlay2`；Docker Pod 重建后构建镜像缓存保持。
 - CKM nginx Deployment 的 rootfs marker、inode、属主与 HTTP 已在 218 Pod 重建后通过。
 - nested-agent 生命周期清理已通过主动删除重建测试：单 launcher、单 snapshotter、socket
@@ -141,13 +145,13 @@ CPU/内存边界仍必须生效。方案状态为 **功能继续支持，强隔�
 ### 当前判断
 
 嵌套 userns、L2 CNI、Docker/overlay2、rootfs-rw-layer、实际 cgroup 资源边界和 nested-agent
-单次重建生命周期均已有 v46 实测通过证据。当前功能流程已跑通；剩余工作是长期/并发压力、
+单次重建生命周期均已有 v47 实测通过证据。当前功能流程已跑通；剩余工作是长期/并发压力、
 L0 宿主服务故障恢复和额外完整 CKM 三层业务场景，不能把这些未覆盖范围外推为已验证。
 
 该判断只覆盖功能和稳定性，不包含已经放弃的 `/proc` 强隔离与 Sysbox 系统视图隔离；
 后续回归继续验证实际 cgroup 边界、K3s、CNI、Docker、rootfs 和生命周期。
 
-## 2026-08-21 `ckm-bzhrq` 恢复后复测结果
+## 历史验证快照：2026-08-21 `ckm-bzhrq`
 
 CKM 新 Pod：
 
@@ -175,7 +179,7 @@ k3k-ckm-bzhrq-server-7788d8fbf6-lj89t
 > 上游 Sysbox 不支持 Sysbox nesting。本文分析的方案仅用于 218 实验性
 > PoC，不应作为生产能力或多租户隔离方案启用。
 
-## 结论
+## 早期 PoC 结论（2026-08-11，已被后续实现替代）
 
 Sysbox Pod 中再次运行 Sysbox，只能获得受限的嵌套容器能力，无法获得完整的
 “系统容器套系统容器”语义。主要障碍不是单个程序缺陷，而是 Linux user
@@ -217,7 +221,7 @@ mount 的内核限制，但 inner root 与 outer Sysbox Pod root 位于同一个
 namespace，失去了普通 Sysbox 最重要的一层隔离。因此该方案只能作为专用、
 受限的 nested runtime，不能视为完整 Sysbox。
 
-## 运行层级
+## 2026-08-11 PoC 运行层级（历史）
 
 ```text
 宿主机
@@ -238,7 +242,7 @@ Linux capability 不是全局布尔值。即使进程在容器中显示为 UID 0
 等资源如果由更高层 user namespace 拥有，inner root 仍会得到 `EPERM`。
 创建新的 mount 或 network namespace 也不会自动获得这些资源的管理权。
 
-## 核心局限
+## 2026-08-11 PoC 核心局限（历史）
 
 | 局限 | 根因 | PoC 处理 | 造成的损失 |
 | --- | --- | --- | --- |
@@ -252,7 +256,7 @@ Linux capability 不是全局布尔值。即使进程在容器中显示为 UID 0
 | seccomp notifier 层级冲突 | inner runc 与 outer Sysbox-FS 同时处理 mount，请求 capability 和代理 namespace 不匹配 | 专用模式绕过部分 seccomp 路径 | 安全模型弱于普通 Sysbox |
 | daemon 生命周期不完整 | inner mgr/fs 只是 outer Pod 内的后台命令，不是系统服务 | 启动脚本等待 Unix socket | 缺少标准重启、健康检查、升级及故障恢复 |
 
-## UID/GID mapping 问题
+## 问题根因：UID/GID mapping
 
 普通 Sysbox 通常需要至少 65536 个连续 subuid/subgid。outer Sysbox user
 namespace 只向 K3s 容器暴露 `0..65535`，因此存在以下冲突：
@@ -273,7 +277,7 @@ chown ...: invalid argument
 专用 handler 进一步取消第三层 user namespace、OCI UID/GID mappings 和
 rootfs UID shifting。
 
-## procfs mount 问题
+## 问题根因：procfs mount
 
 inner runc 创建第三层 user namespace 后执行：
 
@@ -301,7 +305,7 @@ ps -ef
 userns，才恢复可用 procfs。218 已验证 `/proc/meminfo` 和 PID 目录包含真实
 数据。
 
-## sysfs、cgroup 与 systemd
+## 问题根因：sysfs、cgroup 与 systemd
 
 systemd 镜像可以让 `/sbin/init` 成为 PID 1，但这不代表 systemd 已完成系统
 初始化。实测 Pod 状态为 `1/1 Running`、PID 1 为 systemd，同时：
@@ -322,7 +326,7 @@ System has not been booted with systemd as init system
 因此当前结果只能证明 `/sbin/init` 进程可以执行，不能证明 service manager、
 unit、journald、cgroup delegation 或服务自动拉起可用。
 
-## Docker daemon 问题
+## 问题根因：Docker daemon
 
 在正确使用 `runtimeClassName: sysbox-runc-inner` 的 systemd 测试 Pod 中，
 Docker daemon 不会自动启动。默认启动 dockerd 时实测出现：
@@ -357,7 +361,7 @@ dockerd \
 因此成功执行 `docker pull` 只证明 registry 访问和 content store 的最小路径
 可用，不能证明 DIND 已通过。
 
-## inner CNI、DNS 与外网问题
+## 问题根因：inner CNI、DNS 与外网
 
 inner K3s 使用的测试 CNI 配置为 `ipMasq:false`。Pod 地址位于
 `10.244.0.0/16`，如果 outer K3s network namespace 没有对应 SNAT，外部网络
@@ -386,7 +390,7 @@ sha256:29cf9892ca1103e0b8c97db86f819fac1d9457b176bc77dd4f18ed2da4dd159f
 DNS、CNI SNAT 和 registry 可达性属于测试环境问题，应与 inner runc 创建失败
 分开判断。
 
-## `/proc noexec` 与 inner CNI
+## 问题根因：`/proc noexec` 与 inner CNI
 
 outer Sysbox 默认将 `/proc` 挂为 `noexec`，inner CNI 创建 network namespace
 时需要执行 `/proc/self/exe`，因此会因外层 mount flag 失败。
@@ -403,7 +407,7 @@ containerd 必须把该 key 同时放入 `pod_annotations` 和
 `container_annotations`，否则注解可能只到达 sandbox，实际 K3s workload
 OCI spec 无法收到。该选项会降低 outer Pod 的 `/proc` 隔离，只能用于本 PoC。
 
-## 静态二进制与最小 K3s 镜像
+## 问题根因：静态二进制与最小 K3s 镜像
 
 K3s 镜像缺少普通发行版中的动态加载器和部分共享库。即使目标文件存在，执行
 动态 ELF 时也可能得到：
@@ -424,7 +428,7 @@ helper 必须提供静态构建的：
 此外，K3s `/etc/os-release` 可能没有 `ID`，Sysbox 选择发行版路径前还需写入
 generic distro ID。
 
-## exec FIFO 卡死
+## 问题根因：exec FIFO 卡死
 
 早期 nested handler 为绕过缺失 procfs，不能再通过 `/proc/self/fd` 重新打开
 `O_PATH` exec FIFO，因此改用 `O_RDWR` FIFO。一次修改过早关闭 writer，导致：
@@ -437,7 +441,7 @@ generic distro ID。
 恢复 FIFO writer 的短暂保留后，pause Pod 才重新启动成功。这属于专用 nested
 实现回归，不是网络或镜像拉取问题。
 
-## 交互式 exec 在附加终端前卡死
+## 问题根因：交互式 exec 在附加终端前卡死
 
 `v0.7.1-46` 中 nginx `/bin/sh` 和 systemd/Docker `/bin/bash` 均可执行非交互命令，
 但 `kubectl exec -it` 会在终端附加前永久等待。根因是 nested-identity 同时启用了
@@ -476,7 +480,7 @@ bash ./06-enter-ckm-shell.sh docker
 “构建成功”“outer Pod Running”或“镜像已拉取”单独作为 inner Sysbox 验收
 成功。
 
-## 当前已证明的能力
+## 2026-08-11 当时已证明的能力
 
 - outer Sysbox Pod 内可以命令方式启动 `sysbox-mgr` 和 `sysbox-fs`；
 - inner K3s、containerd 和基础 CNI 可以启动；
@@ -486,7 +490,7 @@ bash ./06-enter-ckm-shell.sh docker
 - 使用 `vfs + no iptables + no bridge` 的受限 dockerd 可以完成指定
   `docker pull`。
 
-## 尚未证明或当前不成立的能力
+## 2026-08-11 当时尚未证明的能力
 
 - 独立的第三层 user namespace；
 - 与普通 Sysbox 等价的 root 隔离；
@@ -499,21 +503,15 @@ bash ./06-enter-ckm-shell.sh docker
 - 多租户安全与生产可用性；
 - daemon 的标准生命周期、升级和故障恢复。
 
-## 生产判断
+## 当前生产判断
 
-当前实现本质上是运行在 outer Sysbox user namespace 中的专用 runc 模式：
-保留 pid、ipc、uts、mount、network、cgroup、time 等 namespace，但取消第三层
-user namespace，并跳过多项普通 Sysbox 初始化步骤。
-
-该模式适合验证特定技术路径，不适合作为生产系统容器 runtime。最大的结构性
-风险是 inner root 与 outer K3s 共享 user namespace；后续通过继续跳过 mount、
-seccomp、sysctl、cgroup 检查无法恢复普通 Sysbox 的安全边界。
-
-若目标只是让 CKM 内工作负载获得可用隔离，优先考虑直接使用宿主提供的
-Sysbox RuntimeClass，或重新设计 outer/inner runtime 边界，而不是继续扩展
-Sysbox-in-Sysbox 特例。
+v47 已恢复独立 child user namespace、`0 0 65536` 映射、Docker `overlay2` 和二次
+cgroup delegation，但仍主动放弃 `/proc noexec` 强隔离和 Pod 内资源视图隔离。
+因此当前方案可用于受控的功能性 CKM 工作负载，不能作为多租户或不可信负载的安全边界。
+正式扩大使用范围前仍需完成长时间并发重启、L0 服务恢复和大 rootfs rsync 生命周期压力测试。
 
 ## 相关文档
 
-- [sysbox-in-sysbot.md](./sysbox-in-sysbot.md)：218 PoC 实现和逐轮测试记录；
-- [README.md](./README.md)：w7panel 文档索引。
+- [README.md](./README.md)：当前人工验证流程；
+- [HISTORY.md](./HISTORY.md)：218 PoC 实现和逐轮测试记录；
+- [../README.md](../README.md)：w7panel 文档索引。

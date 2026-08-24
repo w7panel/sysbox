@@ -40,6 +40,7 @@ All notable changes to this project will be documented in this file.
   * Fix PVC subPath validation when kubelet uses a generated PVC directory name and CRI uses the logical volume name.
 
 ### Changed
+	* 整理 Sysbox-in-Sysbox 人工验证资料：脚本目录只保留 CKM 单 K3s 当前流程，移除旧 L2/L3 实验和兼容入口；文档统一归入 `w7panel-doc/sysbox-in-sysbox/`，按当前操作、已知问题和历史记录拆分，避免旧命令与当前验收结论混用。
 	* nested Chart 更新为 `0.7.1-15`，默认镜像切换到 `v0.7.1-47-nested-tty-exec`；修复 nested-identity exec 泄漏内部同步 socket，导致 `kubectl exec -it` 在终端附加前永久卡住的问题。
 	* nested Chart 更新为 `0.7.1-14`，默认 deploy 镜像切换到包含当前 sysbox-runc/mgr/fs 二进制的 `v0.7.1-46-current-binaries` digest。
 	* 明确 Sysbox-in-Sysbox 能力边界：方案继续保留并做功能验证，但放弃 `/proc` 强隔离和 Pod 内 Sysbox 资源视图隔离；218 实测 inner CNI 依赖可执行 `/proc/self/exe`，且 nested-identity 未挂载每个 L2 独立的 sysbox-fs 资源视图。

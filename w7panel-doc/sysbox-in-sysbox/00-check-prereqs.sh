@@ -4,9 +4,6 @@ set -euo pipefail
 source "$(dirname "$0")/_common.sh"
 
 check_common
-need_cmd docker
-need_cmd git
-need_cmd make
 log "outer context: $(outer_kubectl config current-context 2>/dev/null || true)"
 log "outer namespace: $OUTER_NAMESPACE"
 if configured_ckm_exists; then

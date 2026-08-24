@@ -8,7 +8,7 @@ discover_l1
 
 deployment="$CKM_DOCKER_TEST_DEPLOYMENT"
 pvc="$CKM_DOCKER_TEST_ROOTFS_PVC"
-namespace="$L2_NAMESPACE"
+namespace="$CHART_NAMESPACE"
 manifest="$(mktemp)"
 trap 'rm -f "$manifest"' EXIT
 

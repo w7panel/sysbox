@@ -14,6 +14,14 @@
 | [snapshot-test.md](./snapshot-test.md) | rootfs 持久化部署与端到端测试 |
 | [problem.md](./problem.md) | 已知问题与修复入口 |
 
+### Sysbox-in-Sysbox
+
+| 文档 | 用途 |
+|---|---|
+| [sysbox-in-sysbox/README.md](./sysbox-in-sysbox/README.md) | 当前人工验证流程与脚本入口 |
+| [sysbox-in-sysbox/KNOWN-ISSUES.md](./sysbox-in-sysbox/KNOWN-ISSUES.md) | 当前能力边界、未解决项和问题根因 |
+| [sysbox-in-sysbox/HISTORY.md](./sysbox-in-sysbox/HISTORY.md) | 218 旧镜像、旧 CKM 和 L2/L3 实验记录 |
+
 ### PVC rootfs 与特殊目录
 
 | 文档 | 用途 |
@@ -21,8 +29,6 @@
 | [rootfs-rw-layer-persistence.md](./rootfs-rw-layer-persistence.md) | PVC-backed rootfs 的组件契约和数据流 |
 | [persistent-rootfs-special-mounts.md](./persistent-rootfs-special-mounts.md) | 当前 PVC `special/` 方案；后半部分保留历史方案记录 |
 | [volume-init.md](./volume-init.md) | 空 PVC 自动复制镜像目录内容的使用、边界与验收 |
-| [sysbox-in-sysbot.md](./sysbox-in-sysbot.md) | CKM 内层 K3s command 启动 Sysbox 的实验性验证、限制与当前阻断 |
-| [sysbox-in-sysbox/README.md](./sysbox-in-sysbox/README.md) | 从创建 CKM、构建镜像到 L1/L2 Chart、L3 和 rootfs 持久化的分步人工流程 |
 | [sysbox-special-mounts-preload.svg](./sysbox-special-mounts-preload.svg) | 特殊目录、Pod 和 inner image preload 关系图 |
 | [sysbox-snapshotter-remap-ids-root-cause.md](./sysbox-snapshotter-remap-ids-root-cause.md) | snapshotter `remap-ids` 权限问题根因 |
 

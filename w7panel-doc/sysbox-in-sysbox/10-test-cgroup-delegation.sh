@@ -8,7 +8,7 @@ need_cmd jq
 discover_l1
 
 deployment="$CKM_DOCKER_TEST_DEPLOYMENT"
-namespace="$L2_NAMESPACE"
+namespace="$CHART_NAMESPACE"
 pod="$(l1_kubectl -n "$namespace" get pod -l "app=$deployment" \
   -o jsonpath='{.items[0].metadata.name}')"
 [ -n "$pod" ] || die "run 09-test-docker-rootfs.sh first; Deployment/$deployment has no Pod"
