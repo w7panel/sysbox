@@ -6,6 +6,25 @@
 > 等功能验证继续有效，但不能据此声称具备这两项隔离能力。详细边界见
 > `sysbox-in-sysbox-problem.md` 与 `sysbox-in-sysbox/README.md`。
 
+## 2026-08-24 CKM 单 K3s 最新回归
+
+当前默认流程以 `ckm-sysbox-manual` 为 L1，不再额外创建第二个 K3s。使用
+`sysbox-deploy-k3s:v0.7.1-46-current-binaries`（digest
+`sha256:0b85c10dad9599c407fc29b555377f615f398d07b3580e342ed50bb3b2b44423`，
+`sysbox-runc=8fbe8c1`）完成以下验证：
+
+- L1 K3s 安装 `w7panel-sysbox` chart `0.7.1-14`，`installMode=nested`，不重启 K3s。
+- L2 nginx 使用独立 child userns、`uid_map=0 0 65536`，CNI/HTTP 和 PVC rootfs 重建保持。
+- L2 systemd/Docker 使用 `overlay2`；`/var/lib/docker` 为 PVC 上 `ext4 idmapped` special
+  mount，Pod 重建后 marker、inode、构建镜像 ID 和镜像缓存保持。
+- L2 cgroup 实际位于 `sysbox.delegate/init.scope`；L1 父边界保持 1 CPU/2GiB。
+- nested-agent Pod 重建后 launcher/snapshotter 各一份、socket 正在监听，K3s identity
+  保持 `376:2996`，随后 Sysbox nginx 可重新创建。
+
+可重复执行的权威流程位于 `w7panel-doc/sysbox-in-sysbox/README.md`，新增检查为
+`09-test-docker-rootfs.sh`、`10-test-cgroup-delegation.sh` 和
+`11-test-nested-agent-lifecycle.sh`。本文件后续较早日期的镜像和结论保留为历史记录。
+
 ## 目标与层级
 
 目标是在一个 Sysbox Pod 中再次启动 Sysbox Pod，并继续验证内层 K3s、Docker
@@ -72,8 +91,8 @@ L0 和 L1 使用同一个 `w7panel-sysbox` chart，必须通过 `installMode` �
 当前 218 nested 验证镜像为：
 
 ```text
-docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-11-nested-proc-fallback
-digest: sha256:93192f52ce7c45cf455b67424c757a9f875ae4f235af07a0dfc723f53f69a472
+docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-46-current-binaries
+digest: sha256:0b85c10dad9599c407fc29b555377f615f398d07b3580e342ed50bb3b2b44423
 ```
 
 该镜像继承已扁平化的 base，避免复用旧 inner containerd overlay lower chain；正式
@@ -102,7 +121,7 @@ digest: sha256:758cab020bd6f41a9d5aa33bc2d50062a62bb96d7cb03b0ad51d9085878894ff
 helm upgrade --install w7panel-sysbox ./charts/w7panel-sysbox \
   -n sysbox-system --create-namespace \
   --set installMode=host \
-  --set installer.image.tag=v0.7.1-11-nested-proc-fallback
+  --set installer.image.tag=v0.7.1-46-current-binaries
 ```
 
 在 L1 内 K3s 安装：
@@ -111,7 +130,7 @@ helm upgrade --install w7panel-sysbox ./charts/w7panel-sysbox \
 helm upgrade --install w7panel-sysbox ./charts/w7panel-sysbox \
   -n sysbox-system --create-namespace \
   --set installMode=nested \
-  --set installer.image.tag=v0.7.1-11-nested-proc-fallback \
+  --set installer.image.tag=v0.7.1-46-current-binaries \
   --set admission.enabled=true
 ```
 

@@ -1,6 +1,6 @@
 # Sysbox-in-Sysbox 人工验证流程
 
-> **能力边界（2026-08-21）：Sysbox-in-Sysbox 方案继续保留，只放弃 `/proc` 强隔离和
+> **能力边界（2026-08-24）：Sysbox-in-Sysbox 方案继续保留，只放弃 `/proc` 强隔离和
 > Pod 内 Sysbox 系统视图隔离。** K3s、CNI、Docker、rootfs 和 child user namespace
 > 等功能链路继续测试和维护；该方案不承诺 `/proc noexec` 或按 Pod 限额虚拟化 CPU/内存
 > 视图，不能作为多租户或不可信负载的安全隔离边界。
@@ -52,7 +52,7 @@ bash ./08-check-isolation.sh
 该脚本在当前实现上应返回非零并打印两项不支持的证据。返回非零只代表隔离能力未提供，
 不代表 Sysbox-in-Sysbox 功能链路失败。脚本不会创建、删除或重启资源。
 
-## 当前功能验证状态（2026-08）
+## 当前功能验证状态（2026-08-24）
 
 当前默认执行的拓扑是 **L0 宿主 -> CKM Pod -> CKM 自有 K3s**。流程不会再创建
 第二个 K3s，也不会把历史 L2 Pod 当作当前 CKM。当前已验证的检查项如下：
@@ -64,12 +64,20 @@ bash ./08-check-isolation.sh
 - 已验证独立 user namespace、`uid_map=0 0 65536`、CNI 地址和 L1 到 nginx 的 HTTP 连通性；成功 smoke test 不会删除 Deployment。
 - `05-test-ckm-k3s.sh` 已接入 nginx 的 `sysbox/rootfs-rw-layer` 持久化测试：保留
   `ckm-k3s-nginx-rootfs` PVC，写入根文件系统 marker，删除 Pod 后由 Deployment 重建，
-  再校验 marker 内容、inode、属主和 HTTP。该新增步骤尚待确认后在 218 实机执行。
+  再校验 marker 内容、inode、属主和 HTTP；已在 218 连续通过。
+- `09-test-docker-rootfs.sh` 已验证 systemd、dockerd、腾讯云 nginx pull/run、Dockerfile build、
+  `overlay2`，以及 Docker Pod 重建后根文件 marker、inode 和镜像缓存保持。
+- `persistentSpecialMounts=true` 会把 `/var/lib/docker` 从 FUSE 根文件系统分离到 PVC 上的
+  `ext4 idmapped` mount；旧镜像回退 `vfs` 的问题已由当前 `sysbox-runc` 修复。
+- `10-test-cgroup-delegation.sh` 已验证 L2 位于 `sysbox.delegate/init.scope`，L1 所见父边界
+  保持 `cpu.max=100000 100000`、`memory.max=2147483648`，L2 只能管理可见子树。
+- `11-test-nested-agent-lifecycle.sh` 已验证 nested-agent 删除重建后只有一个 keepalive launcher、
+  一个 snapshotter 和一个监听 socket；CKM K3s identity 不变，随后新 Sysbox workload 可创建。
 
-当前仍需跟踪的稳定性问题：`w7panel-sysbox-nested-agent` 偶发 `CrashLoopBackOff`。典型日志为
-`timed out waiting for /run/sysbox/sysbox-snapshotter.sock`；socket 文件存在但没有监听进程，
-同时可能残留多个 `sysbox-inner-k3s.sh` launcher。该问题会阻塞新 Sysbox workload 的稳定创建，
-但不代表 nginx Deployment 配置错误。该问题仍属于功能稳定性待办，与已放弃的两项隔离能力分开处理。
+本轮使用镜像 `v0.7.1-46-current-binaries`，digest 为
+`sha256:0b85c10dad9599c407fc29b555377f615f398d07b3580e342ed50bb3b2b44423`；镜像内
+`sysbox-runc` commit 为 `8fbe8c1`。仍需跟踪的是长时间/并发重启压力、L0 宿主服务重启恢复，
+以及历史大目录 rsync 的限流与取消；它们不影响本轮单节点功能验收结论。
 
 ### 层级名称
 
@@ -97,6 +105,9 @@ bash ./08-check-isolation.sh
 | 5 | `05-test-ckm-k3s.sh` | 创建并验证保留的 nginx Deployment |
 | 6 | `06-enter-ckm-nginx-shell.sh` | 从真实 TTY 进入保留的 nginx shell |
 | 8 | `08-check-isolation.sh` | 只读审计两项已放弃的隔离能力；当前实现预期返回非零 |
+| 9 | `09-test-docker-rootfs.sh` | 验证 Docker overlay2、构建及 rootfs/special mount 重建持久性 |
+| 10 | `10-test-cgroup-delegation.sh` | 验证 L2 delegated 子树与 L1 的 1 CPU/2GiB 父边界 |
+| 11 | `11-test-nested-agent-lifecycle.sh` | 重建 nested-agent，检查服务单实例和新 workload 创建 |
 | 99 | `99-cleanup.sh` | 清理 chart/历史测试资源，默认保留 CKM |
 
 脚本不会自动跳过失败步骤。需要重建 CKM Server Pod 或删除资源时，应先人工确认；这些操作
@@ -110,6 +121,9 @@ bash ./00-check-prereqs.sh
 bash ./01-create-ckm.sh
 bash ./04-install-ckm-chart.sh
 bash ./05-test-ckm-k3s.sh
+bash ./09-test-docker-rootfs.sh
+bash ./10-test-cgroup-delegation.sh
+bash ./11-test-nested-agent-lifecycle.sh
 # 隔离能力审计（当前实现预期返回非零，不影响功能结论）：
 bash ./08-check-isolation.sh
 # 保留 Deployment 后，在真实终端进入 nginx：
@@ -366,7 +380,22 @@ spec:
 - 默认保留 Deployment 供人工进入 shell 和后续检查；设置 `KEEP_TEST_DEPLOYMENT=false` 时才会删除，
   并检查 CNI bridge/IPAM/iptables 状态回收，同时删除测试 PVC。
 
-## 5. 三层 L2/L3 实验（可选历史流程）
+## 5. Docker、cgroup 和 nested-agent 生命周期
+
+nginx smoke 通过后依次执行：
+
+```bash
+bash ./09-test-docker-rootfs.sh
+bash ./10-test-cgroup-delegation.sh
+bash ./11-test-nested-agent-lifecycle.sh
+```
+
+`09` 会保留 `default/nested-docker-rootfs-persistence` Deployment/PVC，主动删除并重建
+一次 Pod。`10` 依赖该资源，通过 L1 可见的 CRI PID 检查真实 cgroup 父路径，不能用
+L2 内被虚拟化为 `max` 的视图替代。`11` 会删除并重建 nested-agent 和 nginx Pod，
+但断言 CKM K3s server PID/starttime identity 不变；它不会重启 L1 Pod 或 L0 节点。
+
+## 6. 三层 L2/L3 实验（可选历史流程）
 
 `05-install-l2-chart.sh`、`06-test-l3.sh`、`07-test-rootfs-persistence.sh` 仍保留用于
 历史的 L2 K3s/L3 Sysbox 实验，但不属于“CKM Pod 内单个 K3s 安装 chart”的默认流程。
@@ -374,7 +403,7 @@ spec:
 `04-create-l2-k3s.sh` 仅作为旧文件名兼容入口，当前行为是转发到
 `04-install-ckm-chart.sh`，不会创建 L2 K3s。
 
-## 6. 清理
+## 7. 清理
 
 清理默认只删除当前测试 workload 和 chart，保留 CKM：
 
@@ -426,7 +455,6 @@ outer_kubectl -n "$OUTER_NAMESPACE" exec "$L1_POD" -c "$L1_CONTAINER" -- \
   '
 ```
 
-若日志出现 `timed out waiting for /run/sysbox/sysbox-snapshotter.sock`，不要仅删除
-`nested-agent` Pod 反复重试；先确认旧 launcher 和 snapshotter 的生命周期，再进行一次受控
-CKM Server Pod 重建，并重新运行 `04-install-ckm-chart.sh`。这类重建属于变更操作，必须由操作者
-逐步确认。
+若日志出现 `timed out waiting for /run/sysbox/sysbox-snapshotter.sock`，先运行
+`11-test-nested-agent-lifecycle.sh`。v46 会回收旧 launcher/snapshotter 并等待新 socket 真正监听；
+只有该脚本仍失败时才保存进程、socket 和 agent 日志，再判断是否需要受控重建 CKM Server Pod。

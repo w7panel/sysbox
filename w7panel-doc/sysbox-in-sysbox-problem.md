@@ -1,5 +1,44 @@
 # Sysbox Pod 内运行 Sysbox 的局限与问题分析
 
+## 2026-08-24 v46 当前结论
+
+当前权威测试对象为 218 的
+`k3k-console-164315/ckm-sysbox-manual`，CKM Server Pod 为
+`k3k-ckm-sysbox-manual-server-647fddbd67-gmfpp`。本轮使用：
+
+```text
+image: docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-46-current-binaries
+digest: sha256:0b85c10dad9599c407fc29b555377f615f398d07b3580e342ed50bb3b2b44423
+sysbox-runc commit: 8fbe8c1f1fd5ce95185b9e8ce38c6bff2e57f995
+chart: w7panel-sysbox 0.7.1-14, installMode=nested
+```
+
+已经实跑通过：
+
+- `05-test-ckm-k3s.sh`：独立 child userns、`uid_map=0 0 65536`、CNI、HTTP、nginx
+  rootfs PVC marker/inode/属主在 Pod 重建后保持。
+- `09-test-docker-rootfs.sh`：systemd/dockerd、腾讯云 nginx pull/run、Dockerfile build、
+  `overlay2` 均通过；`/var/lib/docker` 为 PVC 上 `ext4 idmapped` special mount，Pod 重建后
+  marker、inode、构建镜像 ID 和镜像层保持。
+- `10-test-cgroup-delegation.sh`：L2 实际路径以 `sysbox.delegate/init.scope` 结尾，L1
+  父边界为 `memory.max=2147483648`、`cpu.max=100000 100000`，Docker 子 cgroup 可创建，
+  父边界前后不变。
+- `11-test-nested-agent-lifecycle.sh`：nested-agent Pod 删除重建后 launcher=1、
+  snapshotter=1、socket=listening；CKM K3s identity 保持 `376:2996`，新 nginx Sysbox Pod
+  随后成功创建并可访问。
+
+当前未解决但不阻塞本轮功能验收：
+
+1. `/proc noexec` 强隔离已明确放弃；inner CNI 需要执行 `/proc/self/exe`。
+2. CPU/内存的 Pod 内系统视图隔离已明确放弃；L2 仍看到宿主 CPU/内存视图，真实父
+   cgroup 限制必须从 L1 验证。
+3. 尚未完成长时间并发 Pod/agent 重启压力和 L0 宿主 Sysbox 服务重启后的全量恢复测试。
+4. 历史大 rootfs 的 rsync single-flight、取消和 orphan 回收仍需单独压力验证。
+5. 因前两项隔离能力缺失，该模式不能作为多租户或不可信负载的安全边界。
+
+下方带更早日期的章节保留问题演进记录；其中“尚未验证”“只能使用 vfs”或“取消 child
+userns”等结论只描述当时旧镜像/旧 PoC，不代表 v46 当前状态。
+
 ## 2026-08-21 最终决定：保留方案，放弃两项隔离能力
 
 218 的 `k3k-console-164315/ckm-sysbox-manual` 实测无法提供 `/proc` 强隔离和 Pod 内
@@ -43,66 +82,35 @@ CPU/内存边界仍必须生效。方案状态为 **功能继续支持，强隔�
 
 ### 当前仍未解决或未闭环
 
-1. **最新 `ckm-bzhrq` Pod 的 Sysbox OCI 状态未恢复稳定。**
+1. **长时间及并发重启稳定性尚未完成。**
 
-   连续重建 CKM Pod 后出现：
+   v46 已通过一次 nested-agent 删除重建、服务单实例检查和随后 workload 重建，但还未覆盖
+   多 CKM 并发、连续重启风暴或 24 小时以上运行。
 
-   ```text
-   sysbox sidecar oci spec unavailable
-   ```
+2. **L0 宿主 Sysbox 服务重启后的完整恢复尚未在 v46 重跑。**
 
-   当前 Pod 仍可能 `CrashLoopBackOff`，需要清理宿主 Sysbox 旧容器/OCI 状态后，再做单 Pod 受控重建。
+   nested-agent 自身重建不会重启 CKM K3s且已通过；L0 mgr/fs/snapshotter 重启属于更大的
+   故障范围，仍需单独保存事件与 seccomp 注册日志后验收。
 
-2. **宿主 Sysbox 重启后的 seccomp 注册窗口尚未闭环。**
+3. **L2 内再次部署完整 CKM 业务工作负载尚未验收。**
 
-   部分旧 Pod 曾出现：
+   当前默认拓扑已经验证 CKM K3s 创建普通 nginx 与 systemd/Docker Sysbox workload；
+   “在该 workload 内再部署完整 CKM controller + K3s”属于额外三层业务场景，不是本轮默认流程。
 
-   ```text
-   Rejected seccomp session for unregistered container
-   Unable to receive expected seccomp-notif-ack
-   ```
-
-   `sysbox-mgr`、`sysbox-fs`、`sysbox-snapshotter` 已能恢复为 active，但还需确认重建后不会再次影响已有工作负载。
-
-3. **CKM socket bind 修复尚未完成全新 Pod 验证。**
-
-   `w7panel-ckm` 已提交启动模板修复，使 L1 在 K3s 启动前建立：
-
-   ```text
-   /run/k3s   -> /var/lib/rancher/k3s/agent/k3s-run
-   /run/sysbox -> /var/lib/rancher/k3s/agent/sysbox-run
-   ```
-
-   两个路径还必须是 shared mount。当前 CKM Pod 恰逢宿主 OCI 异常，尚未完成干净重建后的最终确认。
-
-4. **最新 CKM 版本的完整 L0 → L1 → L2 → L3 回归需要重跑。**
-
-   旧 CKM Pod 上的 v43 smoke 已通过，但最新 Pod 重建后还未重新确认 L1 identity、L2 chart、L3、CNI、Docker 和 rootfs-rw-layer 的完整组合。
-
-5. **L2 内再次部署完整 CKM 业务工作负载尚未验收。**
-
-   当前只验证了 L2 K3s、nested chart、Docker、L3 nginx、CNI 和 rootfs marker。
-
-6. **mgr 大目录 rsync 生命周期控制尚未完成。**
+4. **mgr 大目录 rsync 生命周期控制尚未完成。**
 
    `ckm-old4` CrashLoop 曾造成单次约 16.7GiB rsync 和并发写入。当前通过清理资源规避，但 rsync single-flight、取消、临时目录和 orphan 进程回收仍未完整实现或压力验证。
 
-7. **CKM pre-install RBAC 仍有权限缺口。**
+5. **CKM pre-install RBAC 仍有权限缺口。**
 
    `w7panel-ckmv3` ServiceAccount 曾缺少 `pods/exec` 权限。本轮只 skip 了已知历史 execution，正式部署仍需补齐最小 RBAC 并验证脚本范围。
 
-8. **L2 cgroup 资源显示与实际限制存在视图差异。**
+6. **L2 cgroup 资源显示与实际限制存在视图差异。**
 
    实际边界已通过压力测试：512MiB 内存 Pod 被 `OOMKilled`，500m CPU 压测出现 throttling；但 L2 内部仍显示 `cpu.max=max`、`memory.max=max`。如果要求 L2 视图准确反映父级限制，还需继续改进 Sysbox cgroup 视图。
 
    2026-08-21 决定放弃该视图隔离能力，不再继续改进显示；后续只验证真实 CPU、内存
    和子 cgroup 边界仍然生效。
-
-9. **CKM nginx Deployment 的 rootfs-rw-layer 重建验收待执行。**
-
-   `nested-chart-smoke.sh` 已加入 `ckm-k3s-nginx-rootfs` PVC、PVC-backed 根挂载检查、
-   marker 写入、Pod 删除重建、metadata/content 和重建后 HTTP 校验；尚未在 218 执行，
-   不能提前记录为通过。
 
 ### 曾经遇到、目前已解决或已验证通过
 
@@ -122,10 +130,17 @@ CPU/内存边界仍必须生效。方案状态为 **功能继续支持，强隔�
 - snapshot/content-store 缺失 digest 导致 sandbox 创建失败的问题已通过恢复/重新拉取内容处理。
 - L1 K3s identity 在 chart 安装和 nested-agent rollout 前后保持不变。
 - cgroup 二次 delegation 的 CPU throttling、OOM 边界和子 cgroup 可写性已通过压力测试。
+- v46 的 `/var/lib/docker` 已确认使用 PVC-backed `ext4 idmapped` special mount，dockerd
+  使用 `overlay2`；Docker Pod 重建后构建镜像缓存保持。
+- CKM nginx Deployment 的 rootfs marker、inode、属主与 HTTP 已在 218 Pod 重建后通过。
+- nested-agent 生命周期清理已通过主动删除重建测试：单 launcher、单 snapshotter、socket
+  监听，且 CKM K3s identity 不变。
 
 ### 当前判断
 
-嵌套 userns、L2 CNI、L3 userns、Docker/overlay2、rootfs-rw-layer 和实际 cgroup 资源边界均已有实测通过证据。当前阻塞点集中在真实 CKM Pod 重建后的宿主 Sysbox OCI/seccomp 状态恢复，以及 CKM 模板 socket bind 修复的全新 Pod 验证；这两项闭环前，不应宣称最新 CKM 已完成最终验收。
+嵌套 userns、L2 CNI、Docker/overlay2、rootfs-rw-layer、实际 cgroup 资源边界和 nested-agent
+单次重建生命周期均已有 v46 实测通过证据。当前功能流程已跑通；剩余工作是长期/并发压力、
+L0 宿主服务故障恢复和额外完整 CKM 三层业务场景，不能把这些未覆盖范围外推为已验证。
 
 该判断只覆盖功能和稳定性，不包含已经放弃的 `/proc` 强隔离与 Sysbox 系统视图隔离；
 后续回归继续验证实际 cgroup 边界、K3s、CNI、Docker、rootfs 和生命周期。
