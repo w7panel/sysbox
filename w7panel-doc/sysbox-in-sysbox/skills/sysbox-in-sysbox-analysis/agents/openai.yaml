@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sysbox In Sysbox Analysis"
+  short_description: "Compare Sysbox-in-Sysbox branches and document verified behavior"
+  default_prompt: "Analyze the current Sysbox-in-Sysbox branch against w7panel, including submodules, tests, and known limitations."

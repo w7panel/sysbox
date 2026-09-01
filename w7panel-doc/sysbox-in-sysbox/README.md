@@ -26,6 +26,7 @@ Helm 二进制塞进测试镜像，也能清楚区分当前操作落在哪一层
 | [README.md](./README.md) | 当前唯一操作手册和脚本顺序 |
 | [KNOWN-ISSUES.md](./KNOWN-ISSUES.md) | 当前能力边界、未解决项和问题根因 |
 | [HISTORY.md](./HISTORY.md) | 旧镜像、旧 CKM 和 L2/L3 实验时间线 |
+| [skills/sysbox-in-sysbox-analysis/SKILL.md](./skills/sysbox-in-sysbox-analysis/SKILL.md) | 分支差异、user namespace 实现、测试证据分析 Skill |
 
 ## 当前基线（2026-08-24）
 
@@ -247,6 +248,15 @@ node label sysbox.w7panel.io/nested-runtime=ready
 Chart 安装不应重启 L0 宿主。首次把一个已经运行的 CKM K3s 迁移到 nested
 handler 时，若 containerd 不能热加载，按已有 CKM 控制器做一次“只重建 L1 Pod”的
 受控迁移；不要重启物理节点，也不要并发删除多个 CKM Pod。
+
+### user namespace 与内嵌 containerd 的边界
+
+user namespace 的创建和 `0 0 65536` 映射由 `sysbox-mgr`、`sysbox-runc` 完成，containerd
+只负责 CRI/OCI 调度并调用 `io.containerd.runc.v2` 的 `BinaryName`。因此修改 nested identity
+逻辑不需要重新编译 containerd。只有首次新增 runtime handler 或 `sysbox` snapshotter 时，
+才需要重建 L1 K3s Pod，让 K3s 启动其内嵌 containerd 并重新读取
+`/var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.tmpl`；这仍然不是重新编译
+containerd。后续 handler 名和配置不变时，滚动 nested-agent/运行时二进制即可。
 
 ## 4. 在 CKM K3s 中运行 Sysbox workload
 
