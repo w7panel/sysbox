@@ -4,7 +4,7 @@ metadata:
   name: {{ include "w7panel-sysbox.runtimeClassName" . }}
   labels:
     {{- include "w7panel-sysbox.labels" . | nindent 4 }}
-handler: sysbox-runc
+handler: {{ include "w7panel-sysbox.runtimeClassName" . }}
 {{- with .Values.nodeSelector }}
 scheduling:
   nodeSelector:

@@ -62,5 +62,5 @@ func TestBuildMutatingWebhookConfiguration_setsExactRulesAndMatchCondition(t *te
 	require.Equal(t, []string{"pods"}, entry.Rules[0].Rule.Resources)
 	require.Len(t, entry.MatchConditions, 1)
 	require.Equal(t, "uses-sysbox-runtime", entry.MatchConditions[0].Name)
-	require.Equal(t, `has(object.spec.runtimeClassName) && object.spec.runtimeClassName == "sysbox-runc"`, entry.MatchConditions[0].Expression)
+	require.Equal(t, `has(object.spec.runtimeClassName) && (object.spec.runtimeClassName == "sysbox-runc" || object.spec.runtimeClassName == "runc-lite")`, entry.MatchConditions[0].Expression)
 }

@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Added
+  * Allow nested runc-lite test workloads without `hostUsers:false` so validation can bypass the CKM inner-containerd sandbox userns blocker.
   * sysbox-deploy-k8s: stop managing the `sysbox-runtime` node taint during installation and cleanup so deployment does not alter node scheduling; existing installer tolerations remain in place.
   * submodules: track the `w7panel` branch for the W7Panel-maintained `sysbox-fs`, `sysbox-runc`, and `sysbox-mgr` repositories; upstream-only modules remain on their default branch.
   * sysbox-deploy-k8s: run host service operations through the host PID 1 on all distributions; Ubuntu 24.04 installers previously treated the helper unit cleanup as a chroot operation and exited with code 1.

@@ -21,7 +21,7 @@ sysbox-snapshotter \
 
 All runtime paths are explicit. `--socket` must match the containerd proxy plugin address, `--root` stores sysbox-snapshotter metadata and snapshots, and `--containerd-socket` is used to read Kubernetes container labels and sidecar OCI specs from containerd.
 
-This project is intended to apply only to the `sysbox-runc` runtime path. The global CRI image snapshotter remains the host default, for example `overlayfs`.
+This project applies to the `sysbox-runc` and `runc-lite` runtime paths. The global CRI image snapshotter remains the host default, for example `overlayfs`.
 
 Configure containerd so only the `sysbox-runc` runtime uses this snapshotter. Also configure CRI to forward `sysbox/rootfs-rw-layer` into each container OCI spec. A matching annotation entry with `persistentSpecialMounts: true` makes the snapshotter write a root-only PVC handoff under `/run/sysbox/rootfs-pvc-handoff`; `sysbox-runc` consumes it to configure PVC-backed special directories without adding a PVC mount to the application Pod.
 

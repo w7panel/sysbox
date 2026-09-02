@@ -1,0 +1,25 @@
+This patch is maintained against containerd v2.2.5-k3s2. Apply the following
+changes to `pkg/sys/unshare_linux.go` when containerd runs inside a nested
+Sysbox user namespace:
+
+```diff
+@@ UnshareAfterEnterUserns
+-            Ptrace:    true,
++            // Sysbox's seccomp filter rejects PTRACE_TRACEME in L1. The
++            // pidfd below provides the required lifetime synchronization.
++            Ptrace:    false,
+@@ parseIDMapping, after validating IDs
++    if normalized, ok := normalizeHostID(hID); ok {
++        hID = normalized
++    }
+```
+
+Add `normalizeHostID` to parse `/proc/self/uid_map` and map a HostID outside
+the caller's container-ID ranges (for example kubelet's L0 `231072`) to local
+root `0`. The same normalization must be applied to GID mappings and to
+`WithRemapperLabels` in `internal/cri/server/helpers_linux.go` and
+`podsandbox/helpers_linux.go`; otherwise overlay snapshot ownership can still
+fail with EINVAL. This source-level patch has not yet been built into the
+K3s-embedded containerd; do not claim L2 `hostUsers:false` support until the
+patched binary is selected through `--container-runtime-endpoint` and the
+sandbox regression passes.

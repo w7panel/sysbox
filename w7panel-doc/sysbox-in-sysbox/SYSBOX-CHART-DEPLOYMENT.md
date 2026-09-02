@@ -1,0 +1,228 @@
+# w7panel-sysbox Chart 部署
+
+本文只说明 `sysbox/charts/w7panel-sysbox` 的安装。`w7panel-ckm` chart 不需要修改；
+它只负责创建/管理外层 CKM Server Pod。Sysbox chart 应安装在 CKM Server Pod 内部的
+唯一 K3s（L1）中。
+
+## 拓扑和职责
+
+```text
+L0 宿主 Kubernetes
+└─ w7panel-ckm 创建 CKM Server Pod（runtimeClass=sysbox-runc，hostUsers=false）
+   └─ L1 K3s
+      └─ w7panel-sysbox chart（installMode=nested）
+         ├─ runc-lite RuntimeClass
+         ├─ sysbox-admission webhook
+         └─ sysbox-snapshotter
+```
+
+本 chart 的当前目标是 `runc-lite + snapshotter + admission`。不安装 L2
+`sysbox-fs`/`sysbox-mgr`，也不提供 proc 强隔离、视图隔离或 system workload。
+L2 `hostUsers:false` 暂不作为本轮部署条件；L1 CKM 仍必须保持 `hostUsers:false`。
+
+## 前置条件
+
+在 L0 完成以下准备：
+
+```bash
+kubectl get runtimeclass sysbox-runc
+kubectl get pods -A | grep -E 'k3k|w7panel-ckm'
+kubectl get storageclass local-path
+```
+
+还需要：
+
+- 已部署 `w7panel-ckm` 和 K3k controller；
+- 已创建一个 `innerSysbox.enabled=true` 的 CKM；
+- CKM Server Pod 为 `runtimeClassName=sysbox-runc`、`hostUsers=false`；
+- L1 中可访问 `/dev/fuse`，并已准备 `/var/lib/rancher/k3s/runc-lite`；
+- `sysbox-deploy-k3s` 镜像可被 L1 节点拉取。
+
+检查 CKM Server Pod：
+
+```bash
+kubectl -n <ckm-namespace> get pod -l 'cluster=<ckm-name>,role=server' \
+  -o jsonpath='{range .items[*]}{.metadata.name}{" runtime="}{.spec.runtimeClassName}{" hostUsers="}{.spec.hostUsers}{"\n"}{end}'
+# 预期：runtime=sysbox-runc hostUsers=false
+```
+
+## 取得 L1 kubeconfig
+
+L1 K3s API 通常只在 CKM Server Pod 内监听。先找到 Server Pod 和普通 K3s 容器：
+
+```bash
+export OUTER_KUBECONFIG=/root/.kube/218.config
+export OUTER_NAMESPACE=k3k-console-164315
+export L1_POD="$(kubectl --kubeconfig "$OUTER_KUBECONFIG" -n "$OUTER_NAMESPACE" \
+  get pod -l 'cluster=ckm-6ur35,role=server' -o jsonpath='{.items[0].metadata.name}')"
+export L1_CONTAINER=k3k-ckm-6ur35-server
+
+kubectl --kubeconfig "$OUTER_KUBECONFIG" -n "$OUTER_NAMESPACE" \
+  exec "$L1_POD" -c "$L1_CONTAINER" -- \
+  /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml get nodes
+```
+
+后续命令有两种方式：
+
+1. 在 L0 使用仓库脚本，它会通过 `kubectl exec` 将渲染后的 YAML 送入 L1；
+2. 若已把 `/etc/rancher/k3s/k3s.yaml` 复制到 L0，则直接使用 `--kubeconfig` 安装。
+
+## 推荐安装：使用现有脚本
+
+编辑 `w7panel-doc/sysbox-in-sysbox/config.sh`：
+
+```bash
+KUBECONFIG_218=/root/.kube/218.config
+OUTER_NAMESPACE=k3k-console-164315
+CKM_NAMESPACE=k3k-console-164315
+CKM_NAME=ckm-6ur35
+CHART_NAMESPACE=default
+```
+
+执行：
+
+```bash
+cd /root/workspace/sysbox/w7panel-doc/sysbox-in-sysbox
+bash ./00-check-prereqs.sh
+bash ./01-create-ckm.sh
+bash ./04-install-ckm-chart.sh
+```
+
+脚本实际执行的是 Helm 等价配置：
+
+```text
+installMode=nested
+runtimeClassName=runc-lite
+installer.enabled=true
+admission.enabled=true
+snapshotter.enabled=true
+```
+
+默认 installer 镜像为 chart 的 `installer.image`。当前验证使用：
+
+```text
+docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-51-centos9-runc-lite-fuse
+digest sha256:9a4764e60c80282fa0804ee7545b3852030c612a018619d675ffd7df237f2ff8
+```
+
+如果使用其他镜像，运行脚本前覆盖：
+
+```bash
+export SYSBOX_IMAGE_REPO=docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s
+export SYSBOX_IMAGE_TAG=v0.7.1-51-centos9-runc-lite-fuse
+bash ./04-install-ckm-chart.sh
+```
+
+## 直接 Helm 安装
+
+已取得 L1 kubeconfig 时，在 L0 执行：
+
+```bash
+helm upgrade --install w7panel-sysbox \
+  /root/workspace/sysbox/charts/w7panel-sysbox \
+  --kubeconfig "$L1_KUBECONFIG" \
+  --namespace default \
+  --set installMode=nested \
+  --set runtimeClassName=runc-lite \
+  --set installer.enabled=true \
+  --set installer.image.repository=docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s \
+  --set installer.image.tag=v0.7.1-51-centos9-runc-lite-fuse \
+  --set installer.image.pullPolicy=Always \
+  --set admission.enabled=true \
+  --set snapshotter.enabled=true
+```
+
+如果 L1 没有 `default` namespace，先创建：
+
+```bash
+kubectl --kubeconfig "$L1_KUBECONFIG" create namespace default --dry-run=client -o yaml | \
+  kubectl --kubeconfig "$L1_KUBECONFIG" apply -f -
+```
+
+## 安装后检查
+
+```bash
+kubectl --kubeconfig "$L1_KUBECONFIG" get runtimeclass runc-lite \
+  -o jsonpath='handler={.handler}{"\n"}'
+kubectl --kubeconfig "$L1_KUBECONFIG" -n default \
+  rollout status deployment/w7panel-sysbox-admission --timeout=180s
+kubectl --kubeconfig "$L1_KUBECONFIG" get mutatingwebhookconfiguration \
+  sysbox-webhook-mutator
+kubectl --kubeconfig "$L1_KUBECONFIG" -n default get pods -o wide
+```
+
+预期：`RuntimeClass/runc-lite.handler=runc-lite`、admission 为 `1/1` Ready，且
+`sysbox-webhook-mutator` 存在。
+
+L1 containerd 的 `runc-lite` 配置必须包含：
+
+```toml
+[proxy_plugins."sysbox"]
+  type = "snapshot"
+  address = "/run/sysbox-snapshotter.sock"
+  capabilities = ["remap-ids"]
+
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runc-lite]
+  runtime_type = "io.containerd.runc.v2"
+  sandboxer = "podsandbox"
+  snapshotter = "sysbox"
+  pod_annotations = ["sysbox/rootfs-rw-layer", "sysbox/volume-init"]
+
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runc-lite.options]
+  BinaryName = "/var/lib/rancher/k3s/runc-lite"
+```
+
+不要把 runc-lite 复制覆盖 `/usr/bin/runc`；只通过 `RuntimeClass/runc-lite` 使用。
+
+## nginx 功能验证
+
+```bash
+cd /root/workspace/sysbox/w7panel-doc/sysbox-in-sysbox
+bash ./05-test-ckm-k3s.sh
+```
+
+成功输出：
+
+```text
+FUNCTIONAL PASS: rootfs persistence, empty-volume init and special bind mount verified
+```
+
+该测试验证：
+
+- 空 PVC 首次获得 nginx 镜像默认文件；
+- rootfs marker 在删除/重建 Pod 后保留；
+- `/srv/data` 作为 special bind 挂载存在；
+- runc-lite、snapshotter handoff 和 admission 链路正常。
+
+## 升级和卸载
+
+升级 chart 使用同一条 `helm upgrade --install` 命令。升级前确认 L1 中没有正在使用
+旧 snapshotter 的 workload：
+
+```bash
+helm upgrade --install w7panel-sysbox /root/workspace/sysbox/charts/w7panel-sysbox \
+  --kubeconfig "$L1_KUBECONFIG" -n default \
+  --set installMode=nested --set runtimeClassName=runc-lite \
+  --set installer.enabled=true --set admission.enabled=true --set snapshotter.enabled=true
+```
+
+卸载：
+
+```bash
+helm uninstall w7panel-sysbox --kubeconfig "$L1_KUBECONFIG" -n default
+```
+
+卸载 chart 前先删除使用 `runc-lite` 的 workload；不要删除 L0 的
+`RuntimeClass/sysbox-runc`，也不要直接删除 CKM 的数据 PVC。
+
+## 常见问题
+
+- `RuntimeClass runc-lite not found`：确认 chart 安装目标是 L1 kubeconfig，而不是 L0。
+- `fuse-overlayfs` 找不到 `/dev/fuse`：确认 CKM controller 使用含 `/dev/fuse` 的镜像并
+  重建 Server Pod。
+- handoff 不生成：检查 `snapshotter.enabled=true`、containerd proxy socket 和 Pod
+  annotation 是否存在。
+- marker 在重建后丢失：检查快照器是否使用稳定 PVC 路径，而不是
+  `/var/lib/kubelet/pods/<podUID>/...`。
+- `hostUsers:false` 的 L2 sandbox 报 `operation not permitted`：该特性按当前计划暂缓，
+  不属于本轮 chart 验收；详见 [KNOWN-ISSUES.md](./KNOWN-ISSUES.md)。

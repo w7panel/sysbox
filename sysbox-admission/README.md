@@ -1,5 +1,8 @@
 # sysbox-admission
 
+The webhook handles both the outer `sysbox-runc` runtime and the inner
+official-runc-based `runc-lite` runtime. `sysbox-runc` requires `hostUsers: false`; `runc-lite` can also run without a user namespace.
+
 `sysbox-admission` is the Kubernetes mutating admission webhook for Sysbox. It validates the `sysbox/rootfs-rw-layer` Pod annotation and injects a canonical `sysbox-rootfs` sidecar so `sysbox-snapshotter` can resolve PVC-backed rootfs upper/work directories safely. For every `sysbox-runc` Pod it also generates trusted `sysbox/volume-init` metadata for writable PVC mounts, allowing sysbox-runc to initialize an empty PVC from the container image without an init container. Application containers never receive the rootfs PVC mount directly.
 
 `sysbox/volume-init` is generated from ordinary application containers in the Pod spec and must not be configured by users. The webhook replaces any user-provided value. Init containers, read-only PVC mounts, block devices, and non-PVC volumes are excluded; file mounts are passed through unchanged by runc. For an empty directory PVC (allowing `lost+found`), runc copies the matching image directory once before mounting it. Existing data is never overwritten; when application containers share an empty PVC, the first one to initialize it supplies the data.

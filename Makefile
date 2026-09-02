@@ -4,7 +4,7 @@
 
 .PHONY: sysbox sysbox-debug sysbox-static \
 	sysbox-local sysbox-debug-local sysbox-static-local \
-	sysbox-runc sysbox-runc-static sysbox-runc-debug \
+	sysbox-runc sysbox-runc-static sysbox-runc-debug runc-lite \
 	sysbox-fs sysbox-fs-static sysbox-fs-debug \
 	sysbox-mgr sysbox-mgr-static sysbox-mgr-debug \
 	sysbox-snapshotter \
@@ -225,6 +225,13 @@ sysbox-runc: sysbox-ipc
 	@cd $(SYSRUNC_DIR) && make
 	@cd $(SYSRUNC_DIR) && chown -R $(HOST_UID):$(HOST_GID) build
 
+runc-lite:
+	@mkdir -p runc-lite/build/$(TARGET_ARCH)
+	# The CKM server image may not contain a compatible dynamic loader. Build
+	# runc-lite statically so it can execute from the persisted data volume.
+	@$(MAKE) -C runc-lite static
+	@cp runc-lite/runc runc-lite/build/$(TARGET_ARCH)/runc-lite
+
 sysbox-runc-debug: sysbox-ipc
 	@cd $(SYSRUNC_DIR) && make sysbox-runc-debug
 	@cd $(SYSRUNC_DIR) && chown -R $(HOST_UID):$(HOST_GID) build
@@ -279,6 +286,7 @@ install: ## Install all sysbox binaries (requires root privileges)
 	install -D -m0755 sysbox-fs/build/$(TARGET_ARCH)/sysbox-fs $(INSTALL_DIR)/sysbox-fs
 	install -D -m0755 sysbox-mgr/build/$(TARGET_ARCH)/sysbox-mgr $(INSTALL_DIR)/sysbox-mgr
 	install -D -m0755 sysbox-runc/build/$(TARGET_ARCH)/sysbox-runc $(INSTALL_DIR)/sysbox-runc
+	install -D -m0755 runc-lite/build/$(TARGET_ARCH)/runc-lite $(INSTALL_DIR)/runc-lite
 	install -D -m0755 sysbox-snapshotter/build/$(TARGET_ARCH)/sysbox-snapshotter $(INSTALL_DIR)/sysbox-snapshotter
 	install -D -m0755 sysbox-admission/build/$(TARGET_ARCH)/sysbox-admission $(INSTALL_DIR)/sysbox-admission
 	install -D -m0755 scr/sysbox $(INSTALL_DIR)/sysbox
@@ -288,6 +296,7 @@ uninstall: ## Uninstall all sysbox binaries (requires root privileges)
 	rm -f $(INSTALL_DIR)/sysbox-fs
 	rm -f $(INSTALL_DIR)/sysbox-mgr
 	rm -f $(INSTALL_DIR)/sysbox-runc
+	rm -f $(INSTALL_DIR)/runc-lite
 	rm -f $(INSTALL_DIR)/sysbox-snapshotter
 	rm -f $(INSTALL_DIR)/sysbox-admission
 
