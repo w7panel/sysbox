@@ -36,6 +36,18 @@ RELEASE_TAG="${RELEASE_TAG:-v${SYSBOX_VERSION_FULL}}"
 RELEASE_NAME="${RELEASE_NAME:-Sysbox ${RELEASE_TAG}}"
 RELEASE_BODY="${RELEASE_BODY:-Sysbox ${RELEASE_TAG} release artifacts.}"
 
+# Keep upstream services as the default. Set MIRROR_PROFILE=china to apply
+# domestic defaults; every individual variable below can still be overridden.
+MIRROR_PROFILE="${MIRROR_PROFILE:-foreign}"
+if [[ "${MIRROR_PROFILE}" == "china" ]]; then
+    IMAGE_REPO="${IMAGE_REPO:-docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s}"
+    K3S_BASE_IMAGE="${K3S_BASE_IMAGE:-docker.cnb.cool/i0358/docker-images-chrom/centos-centos:stream9}"
+    UBUNTU_MIRROR="${UBUNTU_MIRROR:-http://mirrors.aliyun.com/ubuntu}"
+    DOCKER_APT_MIRROR="${DOCKER_APT_MIRROR:-https://mirrors.aliyun.com/docker-ce/linux/ubuntu}"
+    GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
+    GITHUB_PROXY="${GITHUB_PROXY:-https://gh-proxy.org/}"
+fi
+
 # China mirror alternative:
 # IMAGE_REPO=docker.cnb.cool/i0358/docker-images-chrom/sysbox-deploy-k3s
 IMAGE_REPO="${IMAGE_REPO:-ghcr.io/w7panel/sysbox-deploy-k3s}"
@@ -57,6 +69,7 @@ RUNC_LITE_BINARY="${RUNC_LITE_BINARY:-}"
 UBUNTU_MIRROR="${UBUNTU_MIRROR:-http://archive.ubuntu.com/ubuntu}"
 DOCKER_APT_MIRROR="${DOCKER_APT_MIRROR:-https://download.docker.com/linux/ubuntu}"
 GOPROXY="${GOPROXY:-https://proxy.golang.org,direct}"
+GITHUB_PROXY="${GITHUB_PROXY:-https://gh-proxy.org/}"
 
 DOCKER="${DOCKER:-docker}"
 GIT="${GIT:-git}"
@@ -209,6 +222,7 @@ build_installer_image() {
             --build-arg BASE_IMAGE="${K3S_BASE_IMAGE}" \
             --build-arg sys_arch="${SYS_ARCH}" \
             --build-arg sysbox_version="${RELEASE_TAG}" \
+            --build-arg GITHUB_PROXY="${GITHUB_PROXY}" \
             -f "${K8S_DIR}/Dockerfile.sysbox-k3s" \
             "${K8S_DIR}"
     else
@@ -217,6 +231,7 @@ build_installer_image() {
             --build-arg BASE_IMAGE="${K3S_BASE_IMAGE}" \
             --build-arg sys_arch="${SYS_ARCH}" \
             --build-arg sysbox_version="${RELEASE_TAG}" \
+            --build-arg GITHUB_PROXY="${GITHUB_PROXY}" \
             -f "${K8S_DIR}/Dockerfile.sysbox-k3s" \
             "${K8S_DIR}"
     fi
