@@ -314,7 +314,7 @@ Running Pod，不应复用重启前记录。
 | Docker overlay2 | 已通过；不加 tmpfs 的 `/var/lib/docker` 自动使用 ext4-backed 现有 special mount，dockerd 自动选择 `overlay2` |
 | 腾讯云 Docker nginx | 已通过；实际 pull digest `sha256:29cf9892...dd159f`，容器 `172.17.0.2`，`-p 18080:80` 返回 HTTP 200 |
 | Docker 与 rootfs rw layer 组合 | 已通过；腾讯云 nginx pull/run、HTTP 200，L2 marker 经 L2 Pod 重建和整个 L1 Pod 重建后均保持 |
-| CKM `ckm-k3s-nginx` Deployment rootfs-rw-layer | 测试脚本已接入，待执行 | 使用 `ckm-k3s-nginx-rootfs` PVC，写入 `/rootfs-persistence-ckm-nginx`，删除 Deployment 管理的 Pod 后校验 marker 内容、inode、属主、大小和 HTTP；尚未在当前 CKM 轮次实机执行 |
+| CKM `ckm-k3s-nginx` Deployment rootfs-rw-layer | 2026-09-03 已通过 | `ckm-test` 中使用 `ccr.ccs.tencentyun.com/afan-public/nginx:latest`；空 PVC 初始化、marker/special bind 跨 Pod 重建、owner `0:0`、snapshotter handoff 和 webhook 均通过 |
 | 固化 L2 K3s 测试镜像 | 镜像已构建推送；本地 K3s 8 秒 Ready、CRI NetworkReady、腾讯云 nginx、HTTP 200 和 CNI 回收通过；仍需用当前最终 runtime 镜像做一次完整组合回归 |
 
 L3 procfs 原先通过继承的 `mount(2)` seccomp notify 路径，外层 helper 对更深层 userns

@@ -759,3 +759,18 @@ marker 在该 upper 中跨 Pod 重建保留。验证脚本不再使用 `kubectl 
 root 仍错误），而是以 Pod `containerID` 在 L1 `/proc/*/cgroup` 精确查找进程，再
 以 `nsenter -m -r/proc/<pid>/root` 检查真实 root；已确认 image `index.html`、marker
 `persisted-v2` 和 `/srv/data` bind 均存在。
+
+## CKM nginx rootfs 回归（2026-09-03）
+
+在外层 218（`/root/.kube/218.config`）的 `ckm-test` 中重新安装 host 模式
+`w7panel-sysbox` chart，并在其 K3s 内重新应用 nested chart。首次应用后发现
+`04-install-ckm-chart.sh` 生成的 `runc-lite.toml` 漏写
+`snapshotter = "sysbox"`，导致 rootfs workload 连续报
+`sysbox sidecar oci spec unavailable`；补写该字段并受控重建 CKM Server 后恢复。
+
+随后运行 `05-test-ckm-k3s.sh`（L2 不设置 `hostUsers:false`，按当前测试要求忽略该项），
+最终返回 `FUNCTIONAL PASS`：空 PVC 自动初始化 nginx 文件，marker 和特殊
+`/srv/data` bind 在 Pod 重建后保留；marker owner 为 `0:0`，snapshotter socket/handoff
+JSON 存在，`sysbox-webhook-mutator` 已 Ready。CKM Server 重建后 Agent、admission 和
+nginx 均恢复。首次启动偶发的 `sidecar oci spec unavailable` 按约定视为可接受竞态，
+未加入 retry 逻辑。
