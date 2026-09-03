@@ -313,6 +313,11 @@ rootfs marker inode `419653`、UID/GID `0:0`，以及 special bind 文件 inode
 `394106`、UID/GID `1234:2345` 均保持。CSI Driver 在新 Pod 就绪后为 `3/3 Running`；
 Higress gateway 短暂处于未就绪，约 20 秒后恢复 `Ready`，未发生数据丢失。
 
+移除 live CRD 不支持的 `spec.active` 后，将修正后的 `k3s.v1` 模板应用到 218，
+CKM 控制器完成一次模板重协调并重建 Server；新 Pod `2/2 Running`，live 模板同时
+确认包含 `mount --make-rshared /var/lib/kubelet`。重协调后的 `05-test-ckm-k3s.sh`
+再次输出 `FUNCTIONAL PASS`，CSI 为 `3/3 Running`，Higress 为 `1/1 Running`。
+
 ## 升级和卸载
 
 升级 chart 使用同一条 `helm upgrade --install` 命令。升级前确认 L1 中没有正在使用
