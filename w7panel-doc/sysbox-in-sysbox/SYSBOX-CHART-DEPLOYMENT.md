@@ -194,6 +194,21 @@ Sysbox/runc 拒绝；与 Agent 镜像或 `server:start` 进程无关。修复方
 `w7panel-ckm` Agent 的 runtime 目录挂载传播方式（或取消该不必要的传播要求），
 再重新创建 Agent Pod 验证。
 
+## cert-manager CSI Driver 启动故障记录
+
+`cert-manager/cert-manager-csi-driver-2z897` 在 CKM L1 中会出现主容器和
+`node-driver-registrar` 重启。事件显示：
+
+```text
+path "/tmp/cert-manager-csi-driver" is mounted on "/" but it is not a shared mount
+```
+
+该 DaemonSet 将 `/tmp/cert-manager-csi-driver` 和 `/var/lib/kubelet/pods`
+以 `mountPropagation: Bidirectional` 挂载。CKM Server 的 Sysbox mount namespace
+无法为这些 HostPath 提供 shared mount，因此 CSI 驱动无法创建容器。该问题属于
+需要双向 mount propagation 的系统组件兼容性限制，与 nginx rootfs 测试无关；在
+当前小型 runc 方案中应禁用该 CSI DaemonSet，或为 CKM 提供专门的 mount 传播实现。
+
 ```bash
 cd /root/workspace/sysbox/w7panel-doc/sysbox-in-sysbox
 bash ./05-test-ckm-k3s.sh
