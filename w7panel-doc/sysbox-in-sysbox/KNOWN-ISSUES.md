@@ -795,3 +795,10 @@ nginx 均恢复。首次启动偶发的 `sidecar oci spec unavailable` 按约定
 nginx 测试镜像为 BusyBox 变体，仅提供 `/bin/sh`，不包含 `/bin/bash`。因此使用
 `kubectl exec ... -- /bin/bash` 会得到 `stat /bin/bash: no such file or directory`；
 应改用 `/bin/sh`。这属于镜像内容，不是 OCI runtime exec 故障。
+
+`w7panel-k3k-agent-console-*` Pod 若未设置 `runtimeClassName`，会走默认
+`sysbox-runc` handler；当前该路径可能不创建 `/dev/ptmx`（仅有
+`/dev/pts/ptmx`），因此 `kubectl exec -it` 报 `open /dev/ptmx: no such file or
+directory`。显式设置 `runtimeClassName: runc-lite` 后可正常 exec；临时在容器内
+创建 `/dev/ptmx -> pts/ptmx` 也能验证这一点。后续应决定 agent 是否统一使用
+`runc-lite`，或修复默认 `sysbox-runc` 的 devpts/ptmx 初始化。
