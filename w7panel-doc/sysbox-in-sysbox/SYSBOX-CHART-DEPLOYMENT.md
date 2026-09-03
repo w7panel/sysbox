@@ -266,6 +266,11 @@ socket 自动恢复。该结果证明 CKM Server 重启不会丢失 rootfs PVC �
 随后连续两轮删除并重建 nginx Pod，marker inode 均保持 `419653`，special bind 文件
 inode 均保持 `394106`，内容和 UID/GID 每轮一致，未观察到 handoff 偶发丢失。
 
+删除内层 `sysbox-system/w7panel-sysbox-installer`（该副本持续因版本/RBAC 检查
+CrashLoop）后，Agent、admission、CSI、Higress 和 nginx 均保持运行；再次执行
+`05-test-ckm-k3s.sh` 仍通过。内层实际使用的 installer 位于 `default` 命名空间，
+不应重复部署到 `sysbox-system`。
+
 ## 升级和卸载
 
 升级 chart 使用同一条 `helm upgrade --install` 命令。升级前确认 L1 中没有正在使用
