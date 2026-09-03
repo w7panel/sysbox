@@ -236,6 +236,11 @@ Envoy exited with error: open /dev/null: no such file or directory
 Higress 还需要随机设备；同时挂载宿主 `/dev/random` 和 `/dev/urandom` 后，
 gateway 已恢复为 `1/1 Running`，重启次数为 0。
 
+CSI 实际证书挂载测试另发现 cert-manager 生成的 CertificateRequest 缺少
+`cert-manager.io/private-key-secret-name` annotation，导致 CSI volume 一直处于
+`ContainerCreating`。这是当前 cert-manager CSI 测试清单/版本兼容问题，和
+runc-lite 的 shared mount 或 rootfs 持久化无关。
+
 ```bash
 cd /root/workspace/sysbox/w7panel-doc/sysbox-in-sysbox
 bash ./05-test-ckm-k3s.sh
