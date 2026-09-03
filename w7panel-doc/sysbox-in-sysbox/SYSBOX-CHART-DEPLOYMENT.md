@@ -176,6 +176,24 @@ L1 containerd 的 `runc-lite` 配置必须包含：
 
 ## nginx 功能验证
 
+## CKM Agent 启动故障记录
+
+在 `ckm-test` 的 L1 集群中，`default/w7panel-k3k-agent-console-164315-hck5m` 的
+init 容器可以正常完成，但主容器停在 `CreateContainerError`。L1 事件的原始错误为：
+
+```text
+failed to generate spec: path "/run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io"
+is mounted on "/" but it is not a shared or slave mount
+```
+
+该 Pod 由 `w7panel-ckm` Agent DaemonSet 创建，并将宿主路径
+`/run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io` 以
+`mountPropagation: HostToContainer` 挂载到 Agent。CKM Server 本身运行在外层
+Sysbox 容器中，该路径在 L1 中不是 shared/slave mount，因此在容器创建阶段被
+Sysbox/runc 拒绝；与 Agent 镜像或 `server:start` 进程无关。修复方向是调整
+`w7panel-ckm` Agent 的 runtime 目录挂载传播方式（或取消该不必要的传播要求），
+再重新创建 Agent Pod 验证。
+
 ```bash
 cd /root/workspace/sysbox/w7panel-doc/sysbox-in-sysbox
 bash ./05-test-ckm-k3s.sh
