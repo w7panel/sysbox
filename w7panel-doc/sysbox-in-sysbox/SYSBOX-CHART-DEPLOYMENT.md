@@ -233,6 +233,9 @@ Envoy exited with error: open /dev/null: no such file or directory
 中无法创建或注入默认字符设备。通过 Pod `hostPath` 显式挂载宿主 `/dev/null`
 可验证性地绕过该限制。
 
+Higress 还需要随机设备；同时挂载宿主 `/dev/random` 和 `/dev/urandom` 后，
+gateway 已恢复为 `1/1 Running`，重启次数为 0。
+
 ```bash
 cd /root/workspace/sysbox/w7panel-doc/sysbox-in-sysbox
 bash ./05-test-ckm-k3s.sh
