@@ -233,6 +233,13 @@ Envoy exited with error: open /dev/null: no such file or directory
 中无法创建或注入默认字符设备。通过 Pod `hostPath` 显式挂载宿主 `/dev/null`
 可验证性地绕过该限制。
 
+本地执行 `go test ./...`（`runc-lite`）时，官方 integration 测试中的
+`TestUpdateDevices`、`TestUpdateDevicesSystemd` 和 checkpoint 测试也会因测试
+rootfs 缺少 `/dev/null` 而失败（例如 `cat: can't open '/dev/null'`）。这些失败
+与上述“嵌套 user namespace 中关闭默认设备初始化”的已知限制一致；在修复设备
+注入前不能将完整 runc integration suite 视为通过。核心 rootfs/snapshotter
+单测仍可单独通过。
+
 Higress 还需要随机设备；同时挂载宿主 `/dev/random` 和 `/dev/urandom` 后，
 gateway 已恢复为 `1/1 Running`，重启次数为 0。
 
