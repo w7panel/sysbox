@@ -802,3 +802,7 @@ nginx 测试镜像为 BusyBox 变体，仅提供 `/bin/sh`，不包含 `/bin/bas
 directory`。显式设置 `runtimeClassName: runc-lite` 后可正常 exec；临时在容器内
 创建 `/dev/ptmx -> pts/ptmx` 也能验证这一点。后续应决定 agent 是否统一使用
 `runc-lite`，或修复默认 `sysbox-runc` 的 devpts/ptmx 初始化。
+
+已在 `sysbox-runc` 提交 `24119f8` 修复：即使 `/dev` 为 bind mount，也会在
+缺失时创建 `/dev/ptmx -> pts/ptmx`；父仓库提交 `4687407` 已更新 submodule 指针。
+需重新构建并部署 CKM 镜像后复测。
