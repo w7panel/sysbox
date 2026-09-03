@@ -774,3 +774,12 @@ root 仍错误），而是以 Pod `containerID` 在 L1 `/proc/*/cgroup` 精确�
 JSON 存在，`sysbox-webhook-mutator` 已 Ready。CKM Server 重建后 Agent、admission 和
 nginx 均恢复。首次启动偶发的 `sidecar oci spec unavailable` 按约定视为可接受竞态，
 未加入 retry 逻辑。
+
+### `kubectl exec` root 视图限制
+
+同一 nginx Pod 使用内层 `kubectl exec` 可以启动 shell 并返回 `id`，但执行环境的
+`/` 仍是 L1 视图，`/usr/share/nginx/html` 等 workload rootfs 路径不可见。该行为在
+当前 `runc-lite` 初始实现中已存在；与后续合入 `sysbox-runc` 的 proc pressure/sysctl
+变更无关。功能验收继续使用 container ID 查找进程后执行
+`nsenter -m -r/proc/<pid>/root`，以检查真实 rootfs。交互式 `kubectl exec -it` 还必须
+从具有 TTY 的终端发起，经过另一层 `kubectl exec` 转发时需要同时保留外层 `-it`。
