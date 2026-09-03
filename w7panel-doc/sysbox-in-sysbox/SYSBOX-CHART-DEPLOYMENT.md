@@ -221,6 +221,18 @@ Mount failed: open /dev/null: no such file or directory
 shared bind 修复有效，剩余问题是 runc-lite 默认 `/dev` 设备初始化能力，不应通过
 禁用 CSI driver 规避。
 
+同一缺陷也会影响需要访问 `/dev/null` 的普通工作负载；例如 Higress gateway
+日志出现：
+
+```text
+/usr/local/bin/higress-proxy-start.sh: cannot redirect standard input from /dev/null
+Envoy exited with error: open /dev/null: no such file or directory
+```
+
+因此该问题不是 cert-manager 特有，而是当前 runc-lite 在嵌套 user namespace
+中无法创建或注入默认字符设备。通过 Pod `hostPath` 显式挂载宿主 `/dev/null`
+可验证性地绕过该限制。
+
 ```bash
 cd /root/workspace/sysbox/w7panel-doc/sysbox-in-sysbox
 bash ./05-test-ckm-k3s.sh
