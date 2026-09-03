@@ -791,3 +791,7 @@ nginx 均恢复。首次启动偶发的 `sidecar oci spec unavailable` 按约定
 变更无关。功能验收继续使用 container ID 查找进程后执行
 `nsenter -m -r/proc/<pid>/root`，以检查真实 rootfs。交互式 `kubectl exec -it` 还必须
 从具有 TTY 的终端发起，经过另一层 `kubectl exec` 转发时需要同时保留外层 `-it`。
+
+nginx 测试镜像为 BusyBox 变体，仅提供 `/bin/sh`，不包含 `/bin/bash`。因此使用
+`kubectl exec ... -- /bin/bash` 会得到 `stat /bin/bash: no such file or directory`；
+应改用 `/bin/sh`。这属于镜像内容，不是 OCI runtime exec 故障。
