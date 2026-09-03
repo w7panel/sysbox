@@ -280,6 +280,10 @@ failed to create containerd task: sysbox sidecar oci spec unavailable
 同一 Deployment 随后通常可重试成功，但这表明 snapshotter handoff/sidecar OCI
 spec 存在竞态，当前测试脚本只验证最终成功，尚未证明首次创建无重试即可稳定。
 
+对不带 `sysbox/rootfs-rw-layer` 的普通 `runc-lite` Pod 连续创建 5 次，均在随后
+事件中正常 `Created/Started`，未出现该错误；因此竞态目前可缩小到 rootfs
+snapshotter handoff 路径，而非 runc-lite handler 的通用启动失败。
+
 ## 升级和卸载
 
 升级 chart 使用同一条 `helm upgrade --install` 命令。升级前确认 L1 中没有正在使用
