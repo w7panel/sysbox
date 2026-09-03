@@ -782,9 +782,8 @@ nginx 均恢复。首次启动偶发的 `sidecar oci spec unavailable` 按约定
 此前 `sysbox-runc` 的 `w7panel-runc` 分支合并 `w7panel` 时遗漏了
 `5208ebb fix nested interactive exec fd cleanup`。该提交只修复 nested
 容器交互式 exec 的内部 FD 清理（TTY 附加/退出等待），不改变 rootfs 视图。
-直接合并会连带 nested-identity 分支的约 35 个文件；该合并已撤销，改由
-`sysbox-runc` 提交 `46d3ac5` 仅保留 3 个 exec 初始化文件的修复，并由父仓库
-提交 `f1d39a5` 更新 submodule 指针。重新构建 CKM 镜像后才会在集群生效。
+直接合并会连带 nested-identity 分支的约 35 个文件；该合并已撤销。当前仅保留
+`w7panel` → `w7panel-runc` 的目标合并内容；`5208ebb` 不属于 `w7panel`，未纳入。
 
 同一 nginx Pod 使用内层 `kubectl exec` 可以启动 shell 并返回 `id`，但执行环境的
 `/` 仍是 L1 视图，`/usr/share/nginx/html` 等 workload rootfs 路径不可见。该行为在
