@@ -25,6 +25,11 @@ gid_map: 0 3004104704 65536
 实际映射，不应与旧文档中 `0 0 65536` 的专用 inner-runtime 历史结果混用。当前
 验收仍只覆盖 nginx rootfs/snapshotter 路径；L2 `hostUsers:false` 测试继续暂缓。
 
+尝试将仓库中的 `k3s.v1.yaml` 直接 apply 到 218 外层集群时，被当前 CRD 严格解码
+拒绝：`unknown field "spec.active"`。这属于 live CRD schema 与仓库模板版本不一致，
+未改变现有 CKM；当前 CKM 仍为 `Ready`。新模板应通过匹配版本的 controller/chart
+升级流程发布，而不是直接套用不兼容的 YAML。
+
 ## 当前轻量 `runc-lite` 回归（2026-09-02，进行中）
 
 > 本节是当前权威状态，优先于下方 2026-08-24 的旧 `sysbox-runc`/inner
