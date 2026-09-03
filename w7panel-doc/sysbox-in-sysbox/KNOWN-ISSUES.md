@@ -777,6 +777,14 @@ nginx 均恢复。首次启动偶发的 `sidecar oci spec unavailable` 按约定
 
 ### `kubectl exec` root 视图限制
 
+#### 合并遗漏（2026-09-03）
+
+此前 `sysbox-runc` 的 `w7panel-runc` 分支合并 `w7panel` 时遗漏了
+`5208ebb fix nested interactive exec fd cleanup`。该提交只修复 nested
+容器交互式 exec 的内部 FD 清理（TTY 附加/退出等待），不改变 rootfs 视图。
+已在 `sysbox-runc` 合并提交 `9f49da6` 补回，并由父仓库提交 `2b31707`
+更新 submodule 指针；重新构建 CKM 镜像后才会在集群生效。
+
 同一 nginx Pod 使用内层 `kubectl exec` 可以启动 shell 并返回 `id`，但执行环境的
 `/` 仍是 L1 视图，`/usr/share/nginx/html` 等 workload rootfs 路径不可见。该行为在
 当前 `runc-lite` 初始实现中已存在；与后续合入 `sysbox-runc` 的 proc pressure/sysctl
