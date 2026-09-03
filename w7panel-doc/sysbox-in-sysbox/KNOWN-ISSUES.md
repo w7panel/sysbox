@@ -30,6 +30,10 @@ gid_map: 0 3004104704 65536
 未改变现有 CKM；当前 CKM 仍为 `Ready`。新模板应通过匹配版本的 controller/chart
 升级流程发布，而不是直接套用不兼容的 YAML。
 
+该问题已修复：`w7panel-ckm` 提交 `3b03f68` 从 `v1alpha2/k3s.v1.yaml` 删除
+不受支持的 `spec.active` 字段；删除后模板可通过 `kubectl apply --dry-run=client`
+并已成功应用到 218 外层集群，现有 CKM 未发生重启。
+
 ## 当前轻量 `runc-lite` 回归（2026-09-02，进行中）
 
 > 本节是当前权威状态，优先于下方 2026-08-24 的旧 `sysbox-runc`/inner
