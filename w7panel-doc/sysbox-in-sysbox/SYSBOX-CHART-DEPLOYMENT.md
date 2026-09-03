@@ -206,8 +206,20 @@ path "/tmp/cert-manager-csi-driver" is mounted on "/" but it is not a shared mou
 该 DaemonSet 将 `/tmp/cert-manager-csi-driver` 和 `/var/lib/kubelet/pods`
 以 `mountPropagation: Bidirectional` 挂载。CKM Server 的 Sysbox mount namespace
 无法为这些 HostPath 提供 shared mount，因此 CSI 驱动无法创建容器。该问题属于
-需要双向 mount propagation 的系统组件兼容性限制，与 nginx rootfs 测试无关；在
-当前小型 runc 方案中应禁用该 CSI DaemonSet，或为 CKM 提供专门的 mount 传播实现。
+需要双向 mount propagation 的系统组件兼容性限制，与 nginx rootfs 测试无关。CKM
+Server 启动命令预先建立 shared bind mount 后，原始 mount propagation 报错已消失。
+
+随后发现 runc-lite 在嵌套 user namespace 中不会创建默认设备节点，CSI driver
+容器内的 `/dev/null` 缺失，导致其执行 tmpfs mount 时退出：
+
+```text
+Mount failed: open /dev/null: no such file or directory
+```
+
+作为兼容性验证，给 CSI DaemonSet 的三个容器增加宿主 `/dev/null` 的 `hostPath`
+挂载后，`cert-manager-csi-driver` 稳定为 `3/3 Running`（重启次数为 0）。这说明
+shared bind 修复有效，剩余问题是 runc-lite 默认 `/dev` 设备初始化能力，不应通过
+禁用 CSI driver 规避。
 
 ```bash
 cd /root/workspace/sysbox/w7panel-doc/sysbox-in-sysbox
