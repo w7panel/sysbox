@@ -291,6 +291,11 @@ spec 存在竞态，当前测试脚本只验证最终成功，尚未证明首次
 事件中正常 `Created/Started`，未出现该错误；因此竞态目前可缩小到 rootfs
 snapshotter handoff 路径，而非 runc-lite handler 的通用启动失败。
 
+最新复测中，删除并重建 nginx Pod 后再次通过 UID/GID 校验，并临时创建 ClusterIP
+Service 由内层 busybox 访问 nginx，Service DNS/HTTP 请求成功（Pod `Running`
+后命令退出码为 0）。测试 Pod 和 Service 已清理；CKM Server 仍为 `Running`、
+`hostUsers=false`，内层 Agent、CSI Driver、Higress gateway 和 nginx 均保持就绪。
+
 ## 升级和卸载
 
 升级 chart 使用同一条 `helm upgrade --install` 命令。升级前确认 L1 中没有正在使用
