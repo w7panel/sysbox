@@ -308,6 +308,11 @@ shared bind。当前 CSI Driver 为 `3/3 Running`，最近事件未再出现
 `not a shared mount`；因此该命令确实解决了原先的 mount-propagation 阻塞。CSI
 容器仍需宿主 `/dev/null` 等设备，这是独立的 runc-lite 设备初始化限制。
 
+再次实际删除 CKM Server Pod 并等待重建后，新 L1 Pod `2/2 Running`；nginx
+rootfs marker inode `419653`、UID/GID `0:0`，以及 special bind 文件 inode
+`394106`、UID/GID `1234:2345` 均保持。CSI Driver 在新 Pod 就绪后为 `3/3 Running`；
+Higress gateway 短暂处于未就绪，约 20 秒后恢复 `Ready`，未发生数据丢失。
+
 ## 升级和卸载
 
 升级 chart 使用同一条 `helm upgrade --install` 命令。升级前确认 L1 中没有正在使用
