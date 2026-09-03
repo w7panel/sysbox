@@ -806,3 +806,18 @@ directory`。显式设置 `runtimeClassName: runc-lite` 后可正常 exec；临�
 已在 `sysbox-runc` 提交 `24119f8` 修复：即使 `/dev` 为 bind mount，也会在
 缺失时创建 `/dev/ptmx -> pts/ptmx`；父仓库提交 `4687407` 已更新 submodule 指针。
 需重新构建并部署 CKM 镜像后复测。
+
+### Bootstrap 镜像切换规则
+
+CKM 的 bootstrap 镜像不要直接 patch 单个 CKM Server Pod。应修改外层
+`w7panel-ckmv3` Operator Deployment 的环境变量
+`CKM_INNER_SYSBOX_BOOTSTRAP_IMAGE`（使用可被节点拉取的 tag），然后重启 Operator：
+
+```bash
+kubectl -n default set env deploy/w7panel-ckmv3 \
+  CKM_INNER_SYSBOX_BOOTSTRAP_IMAGE=docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:<tag>
+kubectl -n default rollout restart deploy/w7panel-ckmv3
+```
+
+Operator 重启后由 reconcile 更新 CKM Server 的 `sysbox-inner-bootstrap` initContainer；
+直接修改 CKM Server Deployment 可能被控制器覆盖。
