@@ -271,6 +271,15 @@ CrashLoop）后，Agent、admission、CSI、Higress 和 nginx 均保持运行；
 `05-test-ckm-k3s.sh` 仍通过。内层实际使用的 installer 位于 `default` 命名空间，
 不应重复部署到 `sysbox-system`。
 
+多轮重建期间事件中反复出现一次性错误：
+
+```text
+failed to create containerd task: sysbox sidecar oci spec unavailable
+```
+
+同一 Deployment 随后通常可重试成功，但这表明 snapshotter handoff/sidecar OCI
+spec 存在竞态，当前测试脚本只验证最终成功，尚未证明首次创建无重试即可稳定。
+
 ## 升级和卸载
 
 升级 chart 使用同一条 `helm upgrade --install` 命令。升级前确认 L1 中没有正在使用
