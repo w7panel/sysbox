@@ -12,6 +12,19 @@ Server 仍必须保持 `runtimeClassName=sysbox-runc` 与 `hostUsers:false`；L2
 以及 snapshotter/webhook 复用。明确放弃 proc 强隔离、视图隔离和 system workload；
 实现基于官方 runc/libcontainer 局部修改，不引入 L2 `sysbox-fs` 或 `sysbox-mgr`。
 
+### 2026-09-03 最新现场复测补充
+
+当前现场 `ckm-test` 的 nginx `runc-lite` 容器直接读取到：
+
+```text
+uid_map: 0 3004104704 65536
+gid_map: 0 3004104704 65536
+```
+
+这次 L2 workload 未设置 `hostUsers:false`，因此该结果是普通 nested userns 的
+实际映射，不应与旧文档中 `0 0 65536` 的专用 inner-runtime 历史结果混用。当前
+验收仍只覆盖 nginx rootfs/snapshotter 路径；L2 `hostUsers:false` 测试继续暂缓。
+
 ## 当前轻量 `runc-lite` 回归（2026-09-02，进行中）
 
 > 本节是当前权威状态，优先于下方 2026-08-24 的旧 `sysbox-runc`/inner
