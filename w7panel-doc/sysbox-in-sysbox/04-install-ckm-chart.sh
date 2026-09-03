@@ -22,6 +22,7 @@ base64 -w0 "$RUNC_LITE_BINARY" | outer_kubectl -n "$OUTER_NAMESPACE" exec -i "$L
 runtime_config='[plugins.'"'"'io.containerd.cri.v1.runtime'"'"'.containerd.runtimes.runc-lite]
   runtime_type = "io.containerd.runc.v2"
   sandboxer = "podsandbox"
+  snapshotter = "sysbox"
   pod_annotations = ["sysbox/*"]
 [plugins.'"'"'io.containerd.cri.v1.runtime'"'"'.containerd.runtimes.runc-lite.options]
   BinaryName = "/var/lib/rancher/k3s/runc-lite"
