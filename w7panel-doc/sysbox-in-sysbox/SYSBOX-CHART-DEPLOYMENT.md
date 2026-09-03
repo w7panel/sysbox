@@ -296,6 +296,13 @@ Service 由内层 busybox 访问 nginx，Service DNS/HTTP 请求成功（Pod `Ru
 后命令退出码为 0）。测试 Pod 和 Service 已清理；CKM Server 仍为 `Running`、
 `hostUsers=false`，内层 Agent、CSI Driver、Higress gateway 和 nginx 均保持就绪。
 
+CKM Server 当前启动命令已在启动 K3s 前执行
+`mount --make-rshared /var/lib/kubelet`（由 `w7panel-ckm/pkg/resources/k3s_deployment.go`
+的 server prelude 注入），并继续对 `/var/lib/kubelet/pods` 和 CSI 临时目录建立
+shared bind。当前 CSI Driver 为 `3/3 Running`，最近事件未再出现
+`not a shared mount`；因此该命令确实解决了原先的 mount-propagation 阻塞。CSI
+容器仍需宿主 `/dev/null` 等设备，这是独立的 runc-lite 设备初始化限制。
+
 ## 升级和卸载
 
 升级 chart 使用同一条 `helm upgrade --install` 命令。升级前确认 L1 中没有正在使用
