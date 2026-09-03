@@ -263,6 +263,9 @@ FUNCTIONAL PASS: rootfs persistence, empty-volume init and special bind mount ve
 special bind 文件属主 `1234:2345` 保持不变；CSI driver 仍为 `3/3 Running`，snapshotter
 socket 自动恢复。该结果证明 CKM Server 重启不会丢失 rootfs PVC 数据。
 
+随后连续两轮删除并重建 nginx Pod，marker inode 均保持 `419653`，special bind 文件
+inode 均保持 `394106`，内容和 UID/GID 每轮一致，未观察到 handoff 偶发丢失。
+
 ## 升级和卸载
 
 升级 chart 使用同一条 `helm upgrade --install` 命令。升级前确认 L1 中没有正在使用
