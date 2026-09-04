@@ -835,3 +835,7 @@ docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:v0.7.1-ptmx-24119f8-flat5
 当前 CKM Server 仍可能出现 `sysbox sidecar oci spec unavailable`，按测试约定忽略，
 不因该现象加入重试或阻断后续 nginx/rootfs 验证。`sysbox-inner-k3s.sh` 由 CKM
 initContainer 明确检查，bootstrap 镜像必须包含该脚本及 `/opt/sysbox/bin/generic/rsync`。
+该镜像还需包含实体 `fusermount3`；仅安装在 CentOS 基础层而不复制到工具目录时，
+K3s 主容器会报 `inner K3s Sysbox requires fusermount3 in PATH`。补齐后若出现
+`Sysbox daemon exited`，属于当前 sidecar/内层守护进程启动限制，按本轮测试约定继续
+记录，不作为 layer 验证失败。
