@@ -165,6 +165,9 @@ docker.cnb.cool/i0358/ai-cvm:runc-lite-inner-snapshotter-20260904
 - handoff JSON 已出现在 `/run/sysbox/rootfs-pvc-handoff/`，内层 admission Deployment
   为 `1/1`，nginx Deployment 为 `1/1`。
 
+随后在不改变 CKM、镜像 tag 或 chart 配置的情况下再次删除/重建 nginx Deployment，第二轮
+仍返回同一 `FUNCTIONAL PASS`；本次没有再出现 snapshotter socket timeout。
+
 因此本轮四项目标（rootfs 持久化、空目录初始化复制、special bind、snapshotter/webhook
 复用）已在同一 CKM/tag 组合下重新验证。L2 workload 不设置 `hostUsers:false`，该项仍
 不实现、不测试。`sysbox sidecar oci spec unavailable` 仍按约定忽略；后续只需继续做
