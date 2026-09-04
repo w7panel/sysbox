@@ -111,6 +111,15 @@ func prepareRootfs(pipe io.ReadWriter, iConfig *initConfig, mountFds []int) (err
 			return fmt.Errorf("error setting up /dev symlinks: %w", err)
 		}
 	}
+	// A bind-mounted /dev skips the device setup block above, but interactive
+	// exec still requires the conventional /dev/ptmx entry.
+	if _, err := os.Lstat(filepath.Join(config.Rootfs, "dev/ptmx")); os.IsNotExist(err) {
+		if err := os.Symlink("pts/ptmx", filepath.Join(config.Rootfs, "dev/ptmx")); err != nil {
+			return fmt.Errorf("error setting up ptmx symlink: %w", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("error checking ptmx: %w", err)
+	}
 
 	// Signal the parent to run the pre-start hooks.
 	// The hooks are run after the mounts are setup, but before we switch to the new
