@@ -255,6 +255,10 @@ bash ./05-test-ckm-k3s.sh
 
 成功输出：
 
+> 以下输出来自 2026-09-03 的旧 CKM/镜像组合，保留作回归证据；当前轻量分支是否通过
+> 必须以 `KNOWN-ISSUES.md` 的最新干净回归状态为准。特别是首次重试成功不等于
+> snapshotter handoff/FUSE rootfs 首次创建稳定。
+
 ```text
 FUNCTIONAL PASS: rootfs persistence, empty-volume init and special bind mount verified
 ```

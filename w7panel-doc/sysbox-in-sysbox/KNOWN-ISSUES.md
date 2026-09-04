@@ -34,7 +34,7 @@ gid_map: 0 3004104704 65536
 不受支持的 `spec.active` 字段；删除后模板可通过 `kubectl apply --dry-run=client`
 并已成功应用到 218 外层集群，现有 CKM 未发生重启。
 
-## 当前轻量 `runc-lite` 回归（2026-09-02，进行中）
+## 当前轻量 `runc-lite` 回归（2026-09-04 已通过，持续观察）
 
 > 本节是当前权威状态，优先于下方 2026-08-24 的旧 `sysbox-runc`/inner
 > `sysbox-fs` 验收基线。后者保留为历史证据，**不能**用来宣称下面的轻量路径已经
@@ -45,6 +45,25 @@ admission/CKM 注入；内层不再启动 `sysbox-fs` 或 `sysbox-mgr`。验收 
 缩小为 nginx，不测试 Docker 或 systemd。外层 CKM 仍是 Sysbox workload，因而
 `hostUsers: false` 仍由 CKM controller 设置；本轮 L2 nginx manifest 没有设置
 `hostUsers`。
+
+### 为什么“之前通过”后又出现问题（2026-09-04 文档审查）
+
+之前的 `FUNCTIONAL PASS` 不是同一运行基线上的稳定性结论，主要有以下差异：
+
+1. 通过记录来自旧 CKM/旧 deployment 镜像的一次或多次最终重试成功；随后测试切换到
+   新的 CentOS 9 扁平 bootstrap tag，并重新创建 CKM Server。镜像层、工具路径和
+   initContainer 时序变化会影响 `sysbox-inner-k3s.sh`、snapshotter handoff 及 FUSE
+   rootfs 的首次创建。
+2. `runc-lite` 后续合并了 snapshotter 配置、exec fd/ptmx 兼容处理和 w7panel 子模块
+   更新。direct workload 仍可启动，但 PVC rootfs 会依次暴露 pivot bind、child
+   procfd、handoff/socket 等更靠后的问题；这不是“已通过功能被随机破坏”，而是测试
+   路径和运行时输入已改变。
+3. 旧文档把“删除后重试成功”记为通过，同时记录了首次
+   `sysbox sidecar oci spec unavailable` 竞态；当前约定忽略该一次性 sidecar 错误，
+   但不能忽略 nginx 未进入 `Running`、snapshotter socket 超时或 handoff JSON 缺失。
+
+因此本轮必须用同一 CKM、同一镜像 tag、同一 chart 渲染结果执行一次干净回归；旧
+`HISTORY.md` 的成功输出只保留为历史证据，不覆盖本节的当前阻塞状态。
 
 当前对象：外层 218 集群（`/root/.kube/218.config`），CKM 为
 `k3k-console-164315/ckm-6ur35`，L1 server Pod 为该 CKM 当前的
@@ -105,7 +124,7 @@ admission mutation，故注入必须在 controller template 内完成。
    该问题对应 runc init 子进程建立 rootfs 后再经 `/proc/self/fd` 关闭 exec fd 的
    时机；已继续调整相关路径，但它说明 FUSE rootfs 上不能假定 child 的 procfd
    入口已经可用。
-3. **当前前置失败：父进程预绑定 procfd 为 ENOENT。** 为避开 child procfd，改为在
+3. **此前前置失败（已解决）：父进程预绑定 procfd 为 ENOENT。** 为避开 child procfd，改为在
    父进程预打开/预绑定 fd 后，当前错误变为预绑定目标/源不存在（`ENOENT`）。因此
    nginx 尚未 `Running`，不得声明 rootfs 持久化、空目录初始化复制或 `/srv/data`
    special bind mount 已全部验收。
@@ -124,7 +143,34 @@ admission mutation，故注入必须在 controller template 内完成。
 修改 template 后重建 L1，分别记录 L1 与 nginx mountinfo，避免将临时容器内
 `mount --make-rslave` 结果当作持久配置。
 
-### 本轮验收仍需满足
+### 2026-09-04 修复后回归结果
+
+现场修正了轻量模式的启动语义：`SYSBOX_INNER_START_DAEMONS=false` 现在只跳过
+inner `sysbox-mgr`/`sysbox-fs`，仍会启动 `sysbox-snapshotter`；CKM Server readiness
+只检查 K3s API 和 snapshotter socket。bootstrap 使用：
+
+```text
+docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:v0.7.1-ptmx-24119f8-flat9
+docker.cnb.cool/i0358/ai-cvm:runc-lite-inner-snapshotter-20260904
+```
+
+清理卡住的旧 `PreinstallExecution` 并重建 `ckm-test` Server 后，取得以下证据：
+
+- CKM `ckm-test` 为 `Ready`，L1 Server `2/2 Running`，保持 `runtimeClass=sysbox-runc`
+  和 `hostUsers=false`；
+- `/run/sysbox/sysbox-snapshotter.sock` 存在且可用，inner mgr/fs socket 不存在（符合
+  轻量范围）；
+- `05-test-ckm-k3s.sh` 返回
+  `FUNCTIONAL PASS: rootfs persistence, empty-volume init and special bind mount verified`；
+- handoff JSON 已出现在 `/run/sysbox/rootfs-pvc-handoff/`，内层 admission Deployment
+  为 `1/1`，nginx Deployment 为 `1/1`。
+
+因此本轮四项目标（rootfs 持久化、空目录初始化复制、special bind、snapshotter/webhook
+复用）已在同一 CKM/tag 组合下重新验证。L2 workload 不设置 `hostUsers:false`，该项仍
+不实现、不测试。`sysbox sidecar oci spec unavailable` 仍按约定忽略；后续只需继续做
+多轮重建和长时间稳定性观察。
+
+### 本轮验收门槛
 
 在一次干净的 `05-test-ckm-k3s.sh` 运行中，需要同时取得：nginx `Running`、空 PVC
 从 image rootfs 初始化后的预期内容、marker 在 Pod 重建后仍为 `persisted`、snapshotter
@@ -829,7 +875,7 @@ Operator 重启后由 reconcile 更新 CKM Server 的 `sysbox-inner-bootstrap` i
 `failed to extract layer`。将镜像导出/重新导入为单层后可正常下载；当前测试 tag 为：
 
 ```text
-docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:v0.7.1-ptmx-24119f8-flat5
+docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:v0.7.1-ptmx-24119f8-flat8
 ```
 
 当前 CKM Server 仍可能出现 `sysbox sidecar oci spec unavailable`，按测试约定忽略，

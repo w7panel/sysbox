@@ -16,6 +16,29 @@
 
 ## 2026-09-02 轻量 runc-lite nginx 回归记录
 
+> **证据范围说明（2026-09-04 修订）：** 本节的 `FUNCTIONAL PASS` 是 2026-09-03
+> 某一组 CKM、bootstrap 镜像和运行时配置下的成功轮次，属于历史现场证据，不是当前
+> 分支的持续保证。其后合并了 w7panel 子模块、切换了扁平化 CentOS 9 bootstrap 镜像、
+> 修正了 `runc-lite` snapshotter 配置并调整了 exec/rootfs 路径；这些变化会改变
+> containerd、sidecar handoff 和 FUSE rootfs 的启动顺序。当前状态、最新失败点和可复现
+> 验收门槛以 [KNOWN-ISSUES.md](./KNOWN-ISSUES.md) 为准。L2 workload 的
+> `hostUsers:false` 按范围决定不实现、不测试；L1 CKM Server 的 `hostUsers:false`
+> 仍是硬性要求。
+
+### 2026-09-04 轻量模式修复后复测
+
+将 `SYSBOX_INNER_START_DAEMONS=false` 改为“跳过 inner mgr/fs、保留 snapshotter”，并将
+Server readiness 收敛为 K3s API + snapshotter socket 后，使用 flat9 bootstrap 在
+`ckm-test` 重新创建 Server。`05-test-ckm-k3s.sh` 返回：
+
+```text
+FUNCTIONAL PASS: rootfs persistence, empty-volume init and special bind mount verified
+```
+
+本轮确认空 PVC 初始化、rootfs marker 重建持久化、special bind、snapshotter handoff 和
+admission webhook 均正常；L2 不设置 `hostUsers:false`。Server 保留 `hostUsers=false`，
+inner mgr/fs 未启动，仅 snapshotter socket 存在。
+
 新实验从完整 nested Sysbox 迁移到 `runc-lite + sysbox-snapshotter + admission`，
 不再把 inner `sysbox-fs`/`sysbox-mgr`、Docker 或 systemd 作为目标。CKM
 `k3k-console-164315/ckm-6ur35` 的 L1 已注入 `/dev/fuse`（`10,229`）；普通

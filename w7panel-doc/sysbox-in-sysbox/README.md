@@ -46,8 +46,11 @@ Helm 二进制塞进测试镜像，也能清楚区分当前操作落在哪一层
   `sha256:e10b0f5905fc1d0dbf913079fc396cea4a5984b69810ed1ce04d029555c946a2`。
 - Chart：`w7panel-sysbox 0.7.1-15`，`installMode=nested`；runtimeClass 统一为
   `sysbox-runc`。
-- 已通过：child userns `0 0 65536`、CNI/HTTP、nginx 和 Docker rootfs 持久化、
-  Docker `overlay2`、二次 cgroup delegation、nested-agent 重建、双层交互 exec。
+- 已验证（历史完整 nested Sysbox 基线）：child userns `0 0 65536`、CNI/HTTP、Docker
+  rootfs/`overlay2`、二次 cgroup delegation、nested-agent 重建和双层交互 exec。
+- 当前轻量 `runc-lite + sysbox-snapshotter` 分支：direct workload 已验证；带 PVC 的
+  nginx rootfs、空目录初始化和 special bind 必须以最近一次干净回归为准，不能引用旧
+  CKM/旧镜像的 `FUNCTIONAL PASS` 作为当前通过证据。
 - 明确不支持：`/proc noexec` 强隔离、Pod 内 CPU/内存视图隔离、多租户或不可信负载
   安全边界。运行 `08-check-isolation.sh` 预期返回非零。
 - 尚待验证：长时间并发重启、L0 Sysbox 服务重启恢复、大 rootfs rsync 生命周期压力。
@@ -74,10 +77,9 @@ Helm 二进制塞进测试镜像，也能清楚区分当前操作落在哪一层
 | 0 | `00-check-prereqs.sh` | 检查 kubeconfig、CRD、SystemTemplate 和本地工具 |
 | 1 | `01-create-ckm.sh` | 复用或按 `config.sh` 名称创建 CKM，并发现 Server Pod |
 | 2 | `04-install-ckm-chart.sh` | 在 CKM 自有 K3s 安装 snapshotter、admission 与 runc-lite 配置 |
-| 3 | `05-test-ckm-k3s.sh` | 创建并验证 runc-lite workload 与 rootfs 持久化 |
-| 4 | `09-test-docker-rootfs.sh` | 验证空 PVC 初始化、rootfs 和 special mount 持久性 |
+| 3 | `05-test-ckm-k3s.sh` | 创建并回归 runc-lite workload；rootfs 结果以最新现场状态为准 |
+| 4 | `09-test-docker-rootfs.sh` | 历史 Docker/rootfs 回归；当前轻量范围不作为验收 |
 | 5 | `99-cleanup.sh` | 清理测试资源，默认保留 CKM |
-| 99 | `99-cleanup.sh` | 清理 chart 和当前测试资源，默认保留 CKM |
 
 脚本不会自动跳过失败步骤。需要重建 CKM Server Pod 或删除资源时，应先人工确认；这些操作
 可能短暂中断 CKM 内 K3s，但不应重启 L0 宿主。
@@ -105,8 +107,8 @@ l1_kubectl -n default get deployment ckm-k3s-nginx -o yaml
 ```
 
 直接从 L0 进入 workload 必须给两层 `kubectl exec` 都分配 TTY；推荐使用
-`06-enter-ckm-shell.sh nginx|docker`，避免手工命令漏掉外层 `-it`。参数是 `-it`，
-不是 `-ut`。自动回归可执行 `12-test-interactive-exec.sh`。
+当前仓库未提供 `06-enter-ckm-shell.sh` 或 `12-test-interactive-exec.sh`；需要交互验证
+时按实际 Pod 手工执行两层 `kubectl exec -it`，不要把历史文档中的脚本名当作当前入口。
 
 ## 0. 准备工作
 
@@ -295,15 +297,15 @@ spec:
 
 nginx smoke 通过后依次执行：
 
+当前仓库只保留 `09-test-docker-rootfs.sh` 作为历史脚本；`10`、`11`、`12` 脚本在
+本分支不存在，相关结果只能查看 `HISTORY.md`，不能直接照文档命令复现。
+
 ```bash
 bash ./09-test-docker-rootfs.sh
-bash ./10-test-cgroup-delegation.sh
-bash ./11-test-nested-agent-lifecycle.sh
 ```
 
 `09` 会保留 `default/nested-docker-rootfs-persistence` Deployment/PVC，主动删除并重建
-一次 Pod。`10` 检查 workload 的运行时和 hostUsers 约束；`11` 检查 admission webhook
-与 RuntimeClass 就绪状态。proc/视图隔离及 cgroup delegation 不再验收。
+一次 Pod。L2 `hostUsers:false` 不实现、不测试；proc/视图隔离和 system workload 也不再验收。
 
 ## 6. 清理
 
