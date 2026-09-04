@@ -821,3 +821,17 @@ kubectl -n default rollout restart deploy/w7panel-ckmv3
 
 Operator 重启后由 reconcile 更新 CKM Server 的 `sysbox-inner-bootstrap` initContainer；
 直接修改 CKM Server Deployment 可能被控制器覆盖。
+
+### Bootstrap layer 与 sidecar 已知问题（2026-09-04）
+
+部分节点拉取 `sysbox-deploy-k3s-bootstrap` 时，CentOS Stream 9 基础层
+`sha256:28fce384...` 会在 containerd content store 中缺失，表现为
+`failed to extract layer`。将镜像导出/重新导入为单层后可正常下载；当前测试 tag 为：
+
+```text
+docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:v0.7.1-ptmx-24119f8-flat5
+```
+
+当前 CKM Server 仍可能出现 `sysbox sidecar oci spec unavailable`，按测试约定忽略，
+不因该现象加入重试或阻断后续 nginx/rootfs 验证。`sysbox-inner-k3s.sh` 由 CKM
+initContainer 明确检查，bootstrap 镜像必须包含该脚本及 `/opt/sysbox/bin/generic/rsync`。
