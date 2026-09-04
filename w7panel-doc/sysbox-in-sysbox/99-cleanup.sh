@@ -11,11 +11,6 @@ l1_kubectl -n "$CHART_NAMESPACE" delete deployment "$CKM_TEST_DEPLOYMENT" \
   --ignore-not-found --wait=true --timeout=120s || true
 l1_kubectl -n "$CHART_NAMESPACE" delete pvc "$CKM_TEST_ROOTFS_PVC" \
   --ignore-not-found --wait=true --timeout=120s || true
-log "deleting retained Docker persistence Deployment/PVC from $CHART_NAMESPACE"
-l1_kubectl -n "$CHART_NAMESPACE" delete deployment "$CKM_DOCKER_TEST_DEPLOYMENT" \
-  --ignore-not-found --wait=true --timeout=120s || true
-l1_kubectl -n "$CHART_NAMESPACE" delete pvc "$CKM_DOCKER_TEST_ROOTFS_PVC" \
-  --ignore-not-found --wait=true --timeout=120s || true
 log "deleting chart resources from CKM K3s namespace $CHART_NAMESPACE"
 l1_kubectl -n "$CHART_NAMESPACE" delete daemonset,deploy,service,serviceaccount,configmap,secret,role,rolebinding \
   -l app.kubernetes.io/instance=w7panel-sysbox --ignore-not-found >/dev/null 2>&1 || true

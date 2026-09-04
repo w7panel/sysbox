@@ -20,6 +20,33 @@ L0 宿主 Kubernetes
 `sysbox-fs`/`sysbox-mgr`，也不提供 proc 强隔离、视图隔离或 system workload。
 L2 `hostUsers:false` 暂不作为本轮部署条件；L1 CKM 仍必须保持 `hostUsers:false`。
 
+## CKM initContainer 镜像
+
+CKM Server 的 `sysbox-inner-bootstrap` initContainer 使用
+`sysbox-deploy-k3s-bootstrap` 镜像。对应 Dockerfile 位于：
+
+```text
+/root/workspace/sysbox/sysbox-pkgr/k8s/Dockerfile.sysbox-k3s
+```
+
+该 Dockerfile 构建 CentOS Stream 9 基础镜像，并打包 Sysbox、K3s 启动脚本、
+`runc-lite`、`rsync` 和 `fusermount3`。推荐使用 Sysbox 发布脚本构建并推送，完成后将
+同一个 tag 配置到 `CKM_INNER_SYSBOX_BOOTSTRAP_IMAGE`：
+
+```bash
+cd /root/workspace/sysbox
+MIRROR_PROFILE=china PUSH_IMAGE=true PACKAGE_CHART=false \
+IMAGE=docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:v0.7.1-ptmx \
+./w7panel-doc/release.sh
+```
+
+也可以在 `w7panel-ckm/charts/w7panel-ckm/values.yaml` 中通过
+`innerSysboxBootstrapImage` 覆盖默认镜像。当前默认值为：
+
+```text
+docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:v0.7.1-ptmx-24119f8-flat14
+```
+
 ## 前置条件
 
 在 L0 完成以下准备：
@@ -98,18 +125,12 @@ admission.enabled=true
 snapshotter.enabled=true
 ```
 
-默认 installer 镜像为 chart 的 `installer.image`。当前验证使用：
-
-```text
-docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-51-centos9-runc-lite-fuse
-digest sha256:9a4764e60c80282fa0804ee7545b3852030c612a018619d675ffd7df237f2ff8
-```
-
-如果使用其他镜像，运行脚本前覆盖：
+默认 installer 镜像由 `config.sh` 的 `SYSBOX_IMAGE_REPO` 和 `SYSBOX_IMAGE_TAG` 控制。
+使用其他镜像时，运行脚本前覆盖这两个变量；使用 tag，不要把 digest 固化到本文：
 
 ```bash
 export SYSBOX_IMAGE_REPO=docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s
-export SYSBOX_IMAGE_TAG=v0.7.1-51-centos9-runc-lite-fuse
+export SYSBOX_IMAGE_TAG=<已发布的镜像 tag>
 bash ./04-install-ckm-chart.sh
 ```
 
@@ -118,6 +139,7 @@ bash ./04-install-ckm-chart.sh
 已取得 L1 kubeconfig 时，在 L0 执行：
 
 ```bash
+source /root/workspace/sysbox/w7panel-doc/sysbox-in-sysbox/config.sh
 helm upgrade --install w7panel-sysbox \
   /root/workspace/sysbox/charts/w7panel-sysbox \
   --kubeconfig "$L1_KUBECONFIG" \
@@ -125,8 +147,8 @@ helm upgrade --install w7panel-sysbox \
   --set installMode=nested \
   --set runtimeClassName=runc-lite \
   --set installer.enabled=true \
-  --set installer.image.repository=docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s \
-  --set installer.image.tag=v0.7.1-51-centos9-runc-lite-fuse \
+  --set installer.image.repository="${SYSBOX_IMAGE_REPO}" \
+  --set installer.image.tag="${SYSBOX_IMAGE_TAG}" \
   --set installer.image.pullPolicy=Always \
   --set admission.enabled=true \
   --set snapshotter.enabled=true
@@ -175,6 +197,16 @@ L1 containerd 的 `runc-lite` 配置必须包含：
 不要把 runc-lite 复制覆盖 `/usr/bin/runc`；只通过 `RuntimeClass/runc-lite` 使用。
 
 ## nginx 功能验证
+
+安装完成后运行当前唯一的功能回归脚本：
+
+```bash
+cd /root/workspace/sysbox/w7panel-doc/sysbox-in-sysbox
+bash ./05-test-ckm-k3s.sh
+```
+
+该脚本验证 rootfs 持久化、空 PVC 初始化、特殊 bind mount，以及删除重建后的 UID/GID
+和 inode 保持。不要用历史 Docker/systemd 脚本替代本测试。
 
 ## CKM Agent 启动故障记录
 
@@ -247,11 +279,6 @@ CSI 实际证书挂载测试另发现 cert-manager 生成的 CertificateRequest 
 `cert-manager.io/private-key-secret-name` annotation，导致 CSI volume 一直处于
 `ContainerCreating`。这是当前 cert-manager CSI 测试清单/版本兼容问题，和
 runc-lite 的 shared mount 或 rootfs 持久化无关。
-
-```bash
-cd /root/workspace/sysbox/w7panel-doc/sysbox-in-sysbox
-bash ./05-test-ckm-k3s.sh
-```
 
 成功输出：
 

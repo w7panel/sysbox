@@ -78,8 +78,7 @@ Helm 二进制塞进测试镜像，也能清楚区分当前操作落在哪一层
 | 1 | `01-create-ckm.sh` | 复用或按 `config.sh` 名称创建 CKM，并发现 Server Pod |
 | 2 | `04-install-ckm-chart.sh` | 在 CKM 自有 K3s 安装 snapshotter、admission 与 runc-lite 配置 |
 | 3 | `05-test-ckm-k3s.sh` | 创建并回归 runc-lite workload；rootfs 结果以最新现场状态为准 |
-| 4 | `09-test-docker-rootfs.sh` | 历史 Docker/rootfs 回归；当前轻量范围不作为验收 |
-| 5 | `99-cleanup.sh` | 清理测试资源，默认保留 CKM |
+| 4 | `99-cleanup.sh` | 清理测试资源，默认保留 CKM |
 
 脚本不会自动跳过失败步骤。需要重建 CKM Server Pod 或删除资源时，应先人工确认；这些操作
 可能短暂中断 CKM 内 K3s，但不应重启 L0 宿主。
@@ -92,7 +91,6 @@ bash ./00-check-prereqs.sh
 bash ./01-create-ckm.sh
 bash ./04-install-ckm-chart.sh
 bash ./05-test-ckm-k3s.sh
-bash ./09-test-docker-rootfs.sh
 bash ./99-cleanup.sh
 ```
 
@@ -293,19 +291,11 @@ spec:
 - 默认保留 Deployment 供人工进入 shell 和后续检查；设置 `KEEP_TEST_DEPLOYMENT=false` 时才会删除，
   并检查 CNI bridge/IPAM/iptables 状态回收，同时删除测试 PVC。
 
-## 5. Docker、运行时和 webhook 生命周期
+## 5. 当前范围外的历史实验
 
-nginx smoke 通过后依次执行：
-
-当前仓库只保留 `09-test-docker-rootfs.sh` 作为历史脚本；`10`、`11`、`12` 脚本在
-本分支不存在，相关结果只能查看 `HISTORY.md`，不能直接照文档命令复现。
-
-```bash
-bash ./09-test-docker-rootfs.sh
-```
-
-`09` 会保留 `default/nested-docker-rootfs-persistence` Deployment/PVC，主动删除并重建
-一次 Pod。L2 `hostUsers:false` 不实现、不测试；proc/视图隔离和 system workload 也不再验收。
+当前流程只验证 CKM 内 K3s 的 `runc-lite` workload、rootfs 持久化、空目录初始化和
+特殊 bind mount。Docker/systemd、L3、proc/视图隔离以及 `hostUsers:false` 的 L2 场景
+不再作为验收步骤；历史结果仅供追溯，见 `HISTORY.md` 和 `KNOWN-ISSUES.md`。
 
 ## 6. 清理
 

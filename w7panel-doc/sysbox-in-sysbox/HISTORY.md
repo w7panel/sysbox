@@ -70,7 +70,7 @@ runc-lite；L1 CKM Pod 保持 `hostUsers=false`。完整限制见
 - nginx 和 systemd/Docker 容器的双层 `kubectl exec -it` 均获得真实 PTY，可交互并正常退出。
 
 可重复执行的权威流程见 [README.md](./README.md)，新增检查为
-`09-test-docker-rootfs.sh`、`10-test-cgroup-delegation.sh`、
+历史脚本（包括已移除的 `09-test-docker-rootfs.sh`、`10-test-cgroup-delegation.sh`）、
 `11-test-nested-agent-lifecycle.sh` 和 `12-test-interactive-exec.sh`。本文件后续较早日期的镜像和结论保留为历史记录。
 
 ## 目标与层级

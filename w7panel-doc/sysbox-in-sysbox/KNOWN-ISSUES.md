@@ -197,7 +197,7 @@ chart: w7panel-sysbox 0.7.1-15, installMode=nested
 
 - `05-test-ckm-k3s.sh`：独立 child userns、`uid_map=0 0 65536`、CNI、HTTP、nginx
   rootfs PVC marker/inode/属主在 Pod 重建后保持。
-- `09-test-docker-rootfs.sh`：systemd/dockerd、腾讯云 nginx pull/run、Dockerfile build、
+- 历史 `09-test-docker-rootfs.sh`（已从当前流程移除）：systemd/dockerd、腾讯云 nginx pull/run、Dockerfile build、
   `overlay2` 均通过；`/var/lib/docker` 为 PVC 上 `ext4 idmapped` special mount，Pod 重建后
   marker、inode、构建镜像 ID 和镜像层保持。
 - `10-test-cgroup-delegation.sh`：L2 实际路径以 `sysbox.delegate/init.scope` 结尾，L1
