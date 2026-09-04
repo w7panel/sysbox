@@ -647,6 +647,15 @@ containerd 无法完成 PTY 附加。
 
 `sysbox-runc` commit `5208ebb` 将 FD 清理策略与 special mount 策略分开：
 nested-identity 的标准 init 和 setns exec 始终关闭内部 FD，只有旧的非 nested PoC 保留原行为。
+
+## 默认 runtime 的 `/dev/ptmx` 回归（已修复）
+
+未设置 `runtimeClassName` 的 L2 Pod 使用 inner K3s 默认 `runc` handler 时，原生
+`runc` 不会在 nested rootfs 中建立 `/dev/ptmx`，因此交互式 `kubectl exec -it`
+会报 `open /dev/ptmx: no such file or directory`。修复后默认 handler 调用
+`runc-lite`（并保留 overlayfs 兼容普通 Pod），显式 `runc-lite` handler 继续使用
+sysbox snapshotter。`ckm-test` 中无 runtimeClass 的 nginx Pod 已验证
+`/dev/ptmx -> pts/ptmx` 和 exec 成功。
 该修复同时恢复了 nested init 的 FD 清理保护。镜像
 `v0.7.1-47-nested-tty-exec` 已在 nested-agent 删除重建前后验证：
 
