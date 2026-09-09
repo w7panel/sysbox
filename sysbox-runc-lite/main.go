@@ -29,7 +29,7 @@ const (
 	specConfig = "config.json"
 	usage      = `Open Container Initiative runtime
 
-runc is a command line client for running applications packaged according to
+sysbox-runc-lite is a command line client for running applications packaged according to
 the Open Container Initiative (OCI) format and is a compliant implementation of the
 Open Container Initiative specification.
 
@@ -44,7 +44,7 @@ The root filesystem contains the contents of the container.
 
 To start a new instance of a container:
 
-    # runc run [ -b bundle ] <container-id>
+    # sysbox-runc-lite run [ -b bundle ] <container-id>
 
 Where "<container-id>" is your name for the instance of the container that you
 are starting. The name you provide for the container instance must be unique on
@@ -54,7 +54,7 @@ value for "bundle" is the current directory.`
 
 func main() {
 	app := cli.NewApp()
-	app.Name = "runc"
+	app.Name = "sysbox-runc-lite"
 	app.Usage = usage
 
 	v := []string{version}
@@ -72,10 +72,10 @@ func main() {
 	app.Version = strings.Join(v, "\n")
 
 	xdgRuntimeDir := ""
-	root := "/run/runc"
+	root := "/run/sysbox-runc-lite"
 	if shouldHonorXDGRuntimeDir() {
 		if runtimeDir := os.Getenv("XDG_RUNTIME_DIR"); runtimeDir != "" {
-			root = runtimeDir + "/runc"
+		root = runtimeDir + "/sysbox-runc-lite"
 			xdgRuntimeDir = root
 		}
 	}

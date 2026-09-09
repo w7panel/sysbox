@@ -18,7 +18,7 @@ CKM_SELECTOR="cluster=${CKM_NAME},role=server"
 CKM_SELECTED=true
 export CKM_SELECTOR CKM_SELECTED
 outer_kubectl create namespace "$CKM_NAMESPACE" --dry-run=client -o yaml | outer_kubectl apply -f - >/dev/null
-log "creating CKM $CKM_NAMESPACE/$CKM_NAME without inner Sysbox"
+log "creating CKM $CKM_NAMESPACE/$CKM_NAME with inner Sysbox=$INNER_SYSBOX_ENABLED"
 outer_kubectl apply -f - <<EOF
 apiVersion: ckm.w7.cc/v1alpha2
 kind: Ckm
@@ -29,6 +29,8 @@ metadata:
     ckm.w7.cc/controller-version: v1alpha2
 spec:
   runtimeClass: ${OUTER_RUNTIME_CLASS}
+  innerSysbox:
+    enabled: ${INNER_SYSBOX_ENABLED}
   storageClassName: local-path
   workload:
     apiVersion: k3k.io/v1beta1

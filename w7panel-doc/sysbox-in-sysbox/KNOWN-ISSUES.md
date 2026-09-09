@@ -87,7 +87,7 @@ admission mutation，故注入必须在 controller template 内完成。
 - `runc-lite` 使用静态二进制构建；修改后的官方 libcontainer 单测已通过：
 
   ```sh
-  cd /root/workspace/sysbox/runc-lite
+  cd /root/workspace/sysbox/sysbox-runc-lite
   GOCACHE=/tmp/runc-lite-final-cache go test . ./libcontainer/specconv
   ```
 
@@ -897,3 +897,38 @@ initContainer 明确检查，bootstrap 镜像必须包含该脚本及 `/opt/sysb
 K3s 主容器会报 `inner K3s Sysbox requires fusermount3 in PATH`。补齐后若出现
 `Sysbox daemon exited`，属于当前 sidecar/内层守护进程启动限制，按本轮测试约定继续
 记录，不作为 layer 验证失败。
+
+## 无注解 volume-init 回归（2026-09-09）
+
+218 `default/w7panel-sysbox` 已升级到安装镜像
+`docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-volume-init-20260909`
+（`sha256:24e5d8d89142…acb56c01`），随后重建
+`k3k-console-164315/ckm-test` Server，使 L1 containerd 重新读取
+`sysbox-runc-lite` handler。以该 CKM 执行：
+
+```bash
+SYSBOX_IN_SYSBOX_CONFIG=w7panel-doc/sysbox-in-sysbox/config.sh \
+  bash w7panel-doc/sysbox-in-sysbox/05-test-ckm-k3s.sh
+```
+
+返回 `FUNCTIONAL PASS`。测试 Pod 没有 `sysbox/volume-init` 注解；普通空 CSI PVC
+`ckm-k3s-nginx-webroot` 首次挂载后有 nginx 的 `index.html` 与 `50x.html`，并在 Pod
+重建后保留 marker。独立 rootfs PVC 的 `/srv/data` special bind marker 也保留，两个
+marker 的 owner 均为 `0:0`。L2 仍未设置 `hostUsers:false`。
+
+旧 nested chart 的 installer DaemonSet 会因非 initial user namespace 拒绝 host install 而
+CrashLoop；已修复为 nested 模式不渲染该 host installer。本流程由 CKM bootstrap 提供既有
+snapshotter，再由 `04-install-ckm-chart.sh` 写入 lite 二进制和 handler。外层升级期间还观察到一次
+`sysbox sidecar oci spec unavailable`，CKM controller 自动重建后恢复为 `2/2 Ready`。
+
+## Nested installer 修复回归（2026-09-09）
+
+`installMode` 原先没有被 `sysbox-deploy-k8s.yaml` 使用，导致 nested chart 也渲染完整
+host installer DaemonSet。该 DaemonSet 在 L1 内执行 host 安装，因 `/proc/1/root` 不是
+真实宿主根而 CrashLoop。模板现仅在 `installMode != nested` 时生成它；nested 渲染仍保留
+admission Deployment 和 `RuntimeClass/sysbox-runc-lite`。
+
+在 218 新建 `k3k-console-164315/ckm-test1`（`innerSysbox.enabled=true`），安装修复后的
+chart 后确认 L1 没有 `w7panel-sysbox-installer` DaemonSet。重建 Server 加载 handler 后，
+`05-test-ckm-k3s.sh` 返回 `FUNCTIONAL PASS`：无注解 CSI volume-init、rootfs 持久化和
+special bind 全部通过。

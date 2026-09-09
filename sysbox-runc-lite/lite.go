@@ -14,13 +14,13 @@ import (
 )
 
 const (
-	liteVolumeInitAnnotation = "sysbox/volume-init"
-	liteRootfsAnnotation     = "sysbox/rootfs-rw-layer"
-	liteContainerName        = "io.kubernetes.cri.container-name"
-	liteHandoffDir           = "/run/sysbox/rootfs-pvc-handoff"
+	liteRootfsAnnotation = "sysbox/rootfs-rw-layer"
+	liteContainerName    = "io.kubernetes.cri.container-name"
+	liteSandboxUID       = "io.kubernetes.cri.sandbox-uid"
+	liteHandoffDir       = "/run/sysbox/rootfs-pvc-handoff"
+	liteKubeletPodsDir   = "/var/lib/kubelet/pods"
 )
 
-type liteVolumeInit struct{ Name, VolumeName, MountPath string }
 type liteRootfsEntry struct {
 	Name, VolumeName, Path  string
 	PersistentSpecialMounts bool     `json:"persistentSpecialMounts"`
@@ -36,38 +36,106 @@ func prepareLiteSpec(spec *specs.Spec, id string) error {
 }
 
 func initLiteVolumes(spec *specs.Spec) error {
-	raw := spec.Annotations[liteVolumeInitAnnotation]
-	if raw == "" || spec.Root == nil {
+	return initLiteVolumesAt(spec, liteKubeletPodsDir)
+}
+
+func initLiteVolumesAt(spec *specs.Spec, podsDir string) error {
+	if spec.Root == nil || spec.Root.Path == "" {
 		return nil
 	}
-	var entries []liteVolumeInit
-	if err := json.Unmarshal([]byte(raw), &entries); err != nil {
-		return fmt.Errorf("decode %s: %w", liteVolumeInitAnnotation, err)
-	}
 	name := spec.Annotations[liteContainerName]
-	for _, entry := range entries {
-		if entry.Name != name {
+	podUID := spec.Annotations[liteSandboxUID]
+	if name == "" || podUID == "" {
+		return nil
+	}
+	rootfs, err := filepath.Abs(spec.Root.Path)
+	if err != nil {
+		return fmt.Errorf("resolve container rootfs: %w", err)
+	}
+	for _, mount := range spec.Mounts {
+		if mount.Type != "bind" || liteMountReadOnly(mount) {
 			continue
 		}
-		for _, mount := range spec.Mounts {
-			if filepath.Clean(mount.Destination) != filepath.Clean(entry.MountPath) || mount.Type != "bind" {
-				continue
-			}
-			info, err := os.Stat(mount.Source)
-			if err != nil || !info.IsDir() {
-				continue
-			}
-			empty, err := dirEmpty(mount.Source)
-			if err != nil || !empty {
-				continue
-			}
-			imagePath := filepath.Join(spec.Root.Path, filepath.Clean(entry.MountPath))
-			if err := copyDir(imagePath, mount.Source); err != nil {
-				return fmt.Errorf("initialize PVC %s: %w", entry.VolumeName, err)
-			}
+		source, ok := detectLitePVCSourceAt(mount.Source, podUID, name, podsDir)
+		if !ok {
+			continue
+		}
+		info, err := os.Lstat(source)
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		empty, err := dirEmpty(source)
+		if err != nil || !empty {
+			continue
+		}
+		relative := strings.TrimPrefix(filepath.Clean(mount.Destination), string(filepath.Separator))
+		if relative == "." || relative == "" {
+			continue
+		}
+		imagePath := filepath.Join(rootfs, relative)
+		info, err = os.Lstat(imagePath)
+		if os.IsNotExist(err) || (err == nil && !info.IsDir()) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("inspect image volume path %s: %w", mount.Destination, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("image volume path %s is a symlink", mount.Destination)
+		}
+		if err := copyDir(imagePath, source); err != nil {
+			return fmt.Errorf("initialize PVC mount %s: %w", mount.Destination, err)
 		}
 	}
 	return nil
+}
+
+func liteMountReadOnly(mount specs.Mount) bool {
+	for _, option := range mount.Options {
+		if option == "ro" {
+			return true
+		}
+	}
+	return false
+}
+
+// detectLitePVCSource accepts only CSI kubelet paths for the current Pod.
+// It intentionally skips emptyDir, projected volumes, hostPath, and unknown
+// storage plugins because runc-lite has no Kubernetes API client.
+func detectLitePVCSource(source, podUID, containerName string) (string, bool) {
+	return detectLitePVCSourceAt(source, podUID, containerName, liteKubeletPodsDir)
+}
+
+func detectLitePVCSourceAt(source, podUID, containerName, podsDir string) (string, bool) {
+	cleanSource, err := filepath.Abs(source)
+	if err != nil {
+		return "", false
+	}
+	podRoot := filepath.Join(podsDir, podUID)
+	directRoot := filepath.Join(podRoot, "volumes", "kubernetes.io~csi")
+	if rel, err := filepath.Rel(directRoot, cleanSource); err == nil {
+		parts := strings.Split(rel, string(filepath.Separator))
+		if len(parts) == 2 && parts[0] != "" && parts[1] == "mount" {
+			return cleanSource, true
+		}
+	}
+	subpathRoot := filepath.Join(podRoot, "volume-subpaths")
+	if rel, err := filepath.Rel(subpathRoot, cleanSource); err == nil {
+		parts := strings.Split(rel, string(filepath.Separator))
+		if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+			return "", false
+		}
+		containerMatches := parts[1] == containerName || strings.HasPrefix(containerName, parts[1]+"-")
+		volumeMatches := strings.HasPrefix(parts[0], "pvc-")
+		if !volumeMatches {
+			_, err = os.Stat(filepath.Join(directRoot, parts[0], "mount"))
+			volumeMatches = err == nil
+		}
+		if containerMatches && volumeMatches {
+			return cleanSource, true
+		}
+	}
+	return "", false
 }
 
 func addLiteSpecialMounts(spec *specs.Spec, id string) error {

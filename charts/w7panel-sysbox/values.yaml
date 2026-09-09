@@ -1,5 +1,7 @@
 nodeSelector: {}
 
+installMode: host
+
 runtimeClassName: sysbox-runc
 
 installer:

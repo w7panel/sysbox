@@ -8,8 +8,8 @@ snapshotter/webhook 复用。L2 workload 的 `hostUsers:false`（原步骤 3）�
 和 system workload 明确放弃。运行时采用官方 runc/libcontainer 的局部修改，不依赖
 L2 `sysbox-fs`/`sysbox-mgr`。
 
-内层 K3s 如启用精简运行时，应将 RuntimeClass 设置为 `runc-lite`；外层 CKM
-仍使用 `sysbox-runc`。`runc-lite` 仅提供官方 runc 加 rootfs 持久化、空 PVC
+内层 K3s 如启用精简运行时，应将 RuntimeClass 设置为 `sysbox-runc-lite`；外层 CKM
+仍使用 `sysbox-runc`。`sysbox-runc-lite` 仅提供官方 runc 加 rootfs 持久化、空 PVC
 初始化和 special bind mount，不提供 proc/视图隔离或 system container 支持。
 
 > **能力边界（2026-08-24）：Sysbox-in-Sysbox 方案继续保留，只放弃 `/proc` 强隔离和
@@ -48,7 +48,7 @@ Helm 二进制塞进测试镜像，也能清楚区分当前操作落在哪一层
   `sysbox-runc`。
 - 已验证（历史完整 nested Sysbox 基线）：child userns `0 0 65536`、CNI/HTTP、Docker
   rootfs/`overlay2`、二次 cgroup delegation、nested-agent 重建和双层交互 exec。
-- 当前轻量 `runc-lite + sysbox-snapshotter` 分支：direct workload 已验证；带 PVC 的
+- 当前轻量 `sysbox-runc-lite + sysbox-snapshotter` 分支：direct workload 已验证；带 PVC 的
   nginx rootfs、空目录初始化和 special bind 必须以最近一次干净回归为准，不能引用旧
   CKM/旧镜像的 `FUNCTIONAL PASS` 作为当前通过证据。
 - 明确不支持：`/proc noexec` 强隔离、Pod 内 CPU/内存视图隔离、多租户或不可信负载
@@ -76,8 +76,8 @@ Helm 二进制塞进测试镜像，也能清楚区分当前操作落在哪一层
 | --- | --- | --- |
 | 0 | `00-check-prereqs.sh` | 检查 kubeconfig、CRD、SystemTemplate 和本地工具 |
 | 1 | `01-create-ckm.sh` | 复用或按 `config.sh` 名称创建 CKM，并发现 Server Pod |
-| 2 | `04-install-ckm-chart.sh` | 在 CKM 自有 K3s 安装 snapshotter、admission 与 runc-lite 配置 |
-| 3 | `05-test-ckm-k3s.sh` | 创建并回归 runc-lite workload；rootfs 结果以最新现场状态为准 |
+| 2 | `04-install-ckm-chart.sh` | 在 CKM 自有 K3s 安装 snapshotter、admission 与 sysbox-runc-lite 配置 |
+| 3 | `05-test-ckm-k3s.sh` | 创建并回归 sysbox-runc-lite workload；rootfs 结果以最新现场状态为准 |
 | 4 | `99-cleanup.sh` | 清理测试资源，默认保留 CKM |
 
 脚本不会自动跳过失败步骤。需要重建 CKM Server Pod 或删除资源时，应先人工确认；这些操作
@@ -228,7 +228,7 @@ L0 和 CKM 内 K3s 使用同一个 chart，但安装模式不同：
 | 层级 | Helm 值 | 作用 |
 | --- | --- | --- |
 | L0 | `installMode=host` | 安装宿主 Sysbox，提供 CKM Pod 的 `sysbox-runc` |
-| CKM 内 K3s | `runtimeClassName=runc-lite` | 使用官方 runc、snapshotter 和 admission，提供 rootfs/PVC 功能 |
+| CKM 内 K3s | `runtimeClassName=sysbox-runc-lite` | 使用官方 runc、snapshotter 和 admission，提供 rootfs/PVC 功能 |
 
 先在 CKM Pod 内的 K3s 安装：
 
@@ -236,11 +236,11 @@ L0 和 CKM 内 K3s 使用同一个 chart，但安装模式不同：
 bash ./04-install-ckm-chart.sh
 ```
 
-脚本会检查 CKM Pod 的 `runtimeClassName=sysbox-runc`、`hostUsers=false`，然后等待 admission 与 runc-lite：
+脚本会检查 CKM Pod 的 `runtimeClassName=sysbox-runc`、`hostUsers=false`，然后等待 admission 与 sysbox-runc-lite：
 
 ```text
 deployment/w7panel-sysbox-admission successfully rolled out
-RuntimeClass/runc-lite.handler=runc-lite
+RuntimeClass/sysbox-runc-lite.handler=sysbox-runc-lite
 ```
 
 Chart 安装不应重启 L0 宿主。首次把一个已经运行的 CKM K3s 迁移到 nested
@@ -293,7 +293,7 @@ spec:
 
 ## 5. 当前范围外的历史实验
 
-当前流程只验证 CKM 内 K3s 的 `runc-lite` workload、rootfs 持久化、空目录初始化和
+当前流程只验证 CKM 内 K3s 的 `sysbox-runc-lite` workload、rootfs 持久化、空目录初始化和
 特殊 bind mount。Docker/systemd、L3、proc/视图隔离以及 `hostUsers:false` 的 L2 场景
 不再作为验收步骤；历史结果仅供追溯，见 `HISTORY.md` 和 `KNOWN-ISSUES.md`。
 

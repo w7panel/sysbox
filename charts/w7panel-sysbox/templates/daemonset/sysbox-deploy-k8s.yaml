@@ -1,4 +1,4 @@
-{{- if .Values.installer.enabled }}
+{{- if and .Values.installer.enabled (ne .Values.installMode "nested") }}
 ---
 apiVersion: apps/v1
 kind: DaemonSet

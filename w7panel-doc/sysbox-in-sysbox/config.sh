@@ -7,17 +7,22 @@ export OUTER_NAMESPACE="${OUTER_NAMESPACE:-k3k-console-164315}"
 # CKM_NAME/CKM_NAMESPACE are authoritative. The scripts never pick a random
 # CKM when several clusters exist.
 export CKM_NAMESPACE="${CKM_NAMESPACE:-k3k-console-164315}"
-export CKM_NAME="${CKM_NAME:-ckm-6ur35}"
+export CKM_NAME="${CKM_NAME:-ckm-test}"
 export CKM_SELECTOR="${CKM_SELECTOR:-}"
 export CREATE_CKM="${CREATE_CKM:-false}"
+export INNER_SYSBOX_ENABLED="${INNER_SYSBOX_ENABLED:-true}"
 export CKM_SELECTED="${CKM_SELECTED:-false}"
 export OUTER_RUNTIME_CLASS="${OUTER_RUNTIME_CLASS:-sysbox-runc}"
 export SYSBOX_IMAGE_REPO="${SYSBOX_IMAGE_REPO:-docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s}"
-export SYSBOX_IMAGE_TAG="${SYSBOX_IMAGE_TAG:-v0.7.1-47-nested-tty-exec}"
+export SYSBOX_IMAGE_TAG="${SYSBOX_IMAGE_TAG:-v0.7.1-volume-init-20260909}"
 export L1_POD="${L1_POD:-}"
 export L1_CONTAINER="${L1_CONTAINER:-}"
 export CHART_NAMESPACE="${CHART_NAMESPACE:-default}"
 export CKM_TEST_DEPLOYMENT="${CKM_TEST_DEPLOYMENT:-ckm-k3s-nginx}"
 export CKM_TEST_ROOTFS_PVC="${CKM_TEST_ROOTFS_PVC:-ckm-k3s-nginx-rootfs}"
+# This is deliberately separate from the rootfs writable-layer PVC. It is a
+# normal CSI PVC mounted over a non-empty image directory, and validates that
+# sysbox-runc-lite initializes it without a sysbox/volume-init annotation.
+export CKM_TEST_VOLUME_INIT_PVC="${CKM_TEST_VOLUME_INIT_PVC:-ckm-k3s-nginx-webroot}"
 export ROOTFS_STORAGE_CLASS="${ROOTFS_STORAGE_CLASS:-local-path}"
 export TEST_IMAGE="${TEST_IMAGE:-ccr.ccs.tencentyun.com/afan-public/nginx:latest}"

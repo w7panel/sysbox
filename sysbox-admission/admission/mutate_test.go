@@ -182,12 +182,12 @@ func TestMutator_leavesPodUnchanged_whenRuntimeClassIsNotSysbox(t *testing.T) {
 	require.Empty(t, mutated.Spec.Containers[0].VolumeMounts)
 }
 
-func TestMutator_generatesVolumeInitAnnotationForWritablePVCMounts(t *testing.T) {
+func TestMutator_removesLegacyVolumeInitAnnotationForWritablePVCMounts(t *testing.T) {
 	mutator := newTestMutator()
 	runtimeClass := "sysbox-runc"
 	hostUsers := false
 	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{admission.AnnotationVolumeInit: `[{"name":"forged"}]`}},
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"sysbox/volume-init": `[{"name":"forged"}]`}},
 		Spec: corev1.PodSpec{
 			RuntimeClassName: &runtimeClass,
 			HostUsers:        &hostUsers,
@@ -208,9 +208,8 @@ func TestMutator_generatesVolumeInitAnnotationForWritablePVCMounts(t *testing.T)
 	mutated, err := mutator.Mutate(context.Background(), pod)
 
 	require.NoError(t, err)
-	require.JSONEq(t, `[
-		{"name":"app","volumeName":"data","mountPath":"/data"}
-	]`, mutated.Annotations[admission.AnnotationVolumeInit])
+	_, found := mutated.Annotations["sysbox/volume-init"]
+	require.False(t, found)
 	require.Len(t, mutated.Spec.Containers, 1)
 }
 
@@ -219,14 +218,14 @@ func TestMutator_removesForgedVolumeInitAnnotationWithoutWritablePVC(t *testing.
 	runtimeClass := "sysbox-runc"
 	hostUsers := false
 	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{admission.AnnotationVolumeInit: `[{"name":"forged"}]`}},
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"sysbox/volume-init": `[{"name":"forged"}]`}},
 		Spec:       corev1.PodSpec{RuntimeClassName: &runtimeClass, HostUsers: &hostUsers, Containers: []corev1.Container{{Name: "app"}}},
 	}
 
 	mutated, err := mutator.Mutate(context.Background(), pod)
 
 	require.NoError(t, err)
-	_, found := mutated.Annotations[admission.AnnotationVolumeInit]
+	_, found := mutated.Annotations["sysbox/volume-init"]
 	require.False(t, found)
 }
 

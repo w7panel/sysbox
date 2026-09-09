@@ -3,6 +3,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Added
+  * w7panel-sysbox: omit the host installer DaemonSet in nested mode; the CKM bootstrap and nested chart runtime configuration provide the required lightweight runtime instead.
+  * Release packaging excludes local Git metadata and generated `dist/` artifacts from the source archive so deployment-image builds package only source files.
+  * sysbox-runc-lite initializes eligible empty CSI PVC mounts without the removed `sysbox/volume-init` Pod annotation; the nested nginx regression now verifies initial copy and persistence after Pod recreation.
   * Allow nested runc-lite test workloads without `hostUsers:false` so validation can bypass the CKM inner-containerd sandbox userns blocker.
   * sysbox-deploy-k8s: stop managing the `sysbox-runtime` node taint during installation and cleanup so deployment does not alter node scheduling; existing installer tolerations remain in place.
   * submodules: track the `w7panel` branch for the W7Panel-maintained `sysbox-fs`, `sysbox-runc`, and `sysbox-mgr` repositories; upstream-only modules remain on their default branch.

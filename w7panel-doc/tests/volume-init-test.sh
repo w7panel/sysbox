@@ -103,19 +103,17 @@ EOF
 }
 
 main() {
-    local pod uid annotation replacement content
+    local pod uid legacy_annotation replacement content
 
     "${K[@]}" get runtimeclass sysbox-runc >/dev/null || die 'RuntimeClass sysbox-runc 不存在'
     create_workload
     pod="$(ready_pod)" || die "Pod 未在 ${TIMEOUT_SECONDS}s 内 Ready"
     uid="$("${K[@]}" get pod -n "${NAMESPACE}" "${pod}" -o jsonpath='{.metadata.uid}')"
 
-    annotation="$("${K[@]}" get pod -n "${NAMESPACE}" "${pod}" \
+    legacy_annotation="$("${K[@]}" get pod -n "${NAMESPACE}" "${pod}" \
         -o jsonpath='{.metadata.annotations.sysbox/volume-init}')"
-    grep -q '"name":"nginx"' <<<"${annotation}" || die 'admission 未写入 nginx volume-init intent'
-    grep -q '"volumeName":"webroot"' <<<"${annotation}" || die 'volume-init intent 未引用 webroot'
-    grep -q '"mountPath":"/usr/share/nginx/html"' <<<"${annotation}" || die 'volume-init intent 挂载路径错误'
-    pass 'admission 已写入 volume-init annotation'
+    [[ -z "${legacy_annotation}" ]] || die 'Pod 不应包含已移除的 sysbox/volume-init annotation'
+    pass '无 volume-init annotation，运行时将自动识别 CSI PVC'
 
     "${K[@]}" exec -n "${NAMESPACE}" "${pod}" -c nginx -- \
         sh -c 'test -f /usr/share/nginx/html/index.html && test -f /usr/share/nginx/html/50x.html'

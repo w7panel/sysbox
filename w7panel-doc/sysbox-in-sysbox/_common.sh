@@ -91,8 +91,8 @@ render_chart() {
   local output="$1" target_namespace="$2"
   helm template w7panel-sysbox "$REPO_DIR/charts/w7panel-sysbox" \
     --namespace "$target_namespace" --set installMode=nested \
-    --set runtimeClassName=runc-lite \
-    --set installer.enabled=true \
+    --set runtimeClassName=sysbox-runc-lite \
+    --set installer.enabled=false \
     --set admission.enabled=true \
     --set snapshotter.enabled=true \
     --set installer.image.repository="$SYSBOX_IMAGE_REPO" \

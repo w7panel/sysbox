@@ -11,12 +11,14 @@ l1_kubectl -n "$CHART_NAMESPACE" delete deployment "$CKM_TEST_DEPLOYMENT" \
   --ignore-not-found --wait=true --timeout=120s || true
 l1_kubectl -n "$CHART_NAMESPACE" delete pvc "$CKM_TEST_ROOTFS_PVC" \
   --ignore-not-found --wait=true --timeout=120s || true
+l1_kubectl -n "$CHART_NAMESPACE" delete pvc "$CKM_TEST_VOLUME_INIT_PVC" \
+  --ignore-not-found --wait=true --timeout=120s || true
 log "deleting chart resources from CKM K3s namespace $CHART_NAMESPACE"
 l1_kubectl -n "$CHART_NAMESPACE" delete daemonset,deploy,service,serviceaccount,configmap,secret,role,rolebinding \
   -l app.kubernetes.io/instance=w7panel-sysbox --ignore-not-found >/dev/null 2>&1 || true
 l1_kubectl -n "$CHART_NAMESPACE" delete daemonset w7panel-sysbox-installer --ignore-not-found >/dev/null 2>&1 || true
 l1_kubectl delete clusterrole,clusterrolebinding -l app.kubernetes.io/instance=w7panel-sysbox --ignore-not-found >/dev/null 2>&1 || true
-l1_kubectl delete runtimeclass sysbox-runc runc-lite --ignore-not-found >/dev/null 2>&1 || true
+l1_kubectl delete runtimeclass sysbox-runc sysbox-runc-lite --ignore-not-found >/dev/null 2>&1 || true
 if [ "${DELETE_CKM:-false}" = true ]; then
   log "deleting CKM $CKM_NAMESPACE/$CKM_NAME"
   outer_kubectl -n "$CKM_NAMESPACE" delete ckm "$CKM_NAME" --wait=false --ignore-not-found

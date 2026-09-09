@@ -60,7 +60,7 @@ USE_BUILDX="${USE_BUILDX:-false}"
 PACKAGE_CHART="${PACKAGE_CHART:-true}"
 CHART_VERSION="${CHART_VERSION:-${SYSBOX_VERSION_FULL}}"
 K3S_BASE_IMAGE="${K3S_BASE_IMAGE:-docker.cnb.cool/i0358/docker-images-chrom/centos-centos:stream9}"
-RUNC_LITE_BINARY="${RUNC_LITE_BINARY:-}"
+SYSBOX_RUNC_LITE_BINARY="${SYSBOX_RUNC_LITE_BINARY:-}"
 
 # China mirror alternatives:
 # UBUNTU_MIRROR=http://mirrors.aliyun.com/ubuntu
@@ -173,22 +173,22 @@ collect_deb_artifacts() {
     mkdir -p "${DIST_DIR}"
     cp "${deb}" "${DIST_DIR}/"
     cp "${PKGR_DIR}/deb/build/${SYS_ARCH}/ubuntu-jammy"/sysbox-ce_* "${DIST_DIR}/" 2>/dev/null || true
-    cp "${ROOT_DIR}/runc-lite/build/${SYS_ARCH}/runc-lite" "${DIST_DIR}/runc-lite-${RELEASE_TAG}-${SYS_ARCH}"
+    cp "${ROOT_DIR}/sysbox-runc-lite/build/${SYS_ARCH}/sysbox-runc-lite" "${DIST_DIR}/sysbox-runc-lite-${RELEASE_TAG}-${SYS_ARCH}"
 }
 
-build_runc_lite() {
-    local output="${ROOT_DIR}/runc-lite/build/${SYS_ARCH}/runc-lite"
+build_sysbox_runc_lite() {
+    local output="${ROOT_DIR}/sysbox-runc-lite/build/${SYS_ARCH}/sysbox-runc-lite"
 
-    info "Build static runc-lite for ${SYS_ARCH}"
-    mkdir -p "${ROOT_DIR}/runc-lite/build/${SYS_ARCH}"
-    if [[ -n "${RUNC_LITE_BINARY}" ]]; then
-        [[ -x "${RUNC_LITE_BINARY}" ]] || die "RUNC_LITE_BINARY is not executable: ${RUNC_LITE_BINARY}"
-        install -m 0755 "${RUNC_LITE_BINARY}" "${output}"
+    info "Build static sysbox-runc-lite for ${SYS_ARCH}"
+    mkdir -p "${ROOT_DIR}/sysbox-runc-lite/build/${SYS_ARCH}"
+    if [[ -n "${SYSBOX_RUNC_LITE_BINARY}" ]]; then
+        [[ -x "${SYSBOX_RUNC_LITE_BINARY}" ]] || die "SYSBOX_RUNC_LITE_BINARY is not executable: ${SYSBOX_RUNC_LITE_BINARY}"
+        install -m 0755 "${SYSBOX_RUNC_LITE_BINARY}" "${output}"
     else
-        [[ "${SYS_ARCH}" == "${HOST_SYS_ARCH}" ]] || die "cross-arch runc-lite build requires RUNC_LITE_BINARY"
-        make -C "${ROOT_DIR}" runc-lite TARGET_ARCH="${SYS_ARCH}"
+        [[ "${SYS_ARCH}" == "${HOST_SYS_ARCH}" ]] || die "cross-arch sysbox-runc-lite build requires SYSBOX_RUNC_LITE_BINARY"
+        make -C "${ROOT_DIR}" sysbox-runc-lite TARGET_ARCH="${SYS_ARCH}"
     fi
-    [[ -x "${output}" ]] || die "runc-lite binary not found: ${output}"
+    [[ -x "${output}" ]] || die "sysbox-runc-lite binary not found: ${output}"
 }
 
 extract_bins() {
@@ -206,8 +206,8 @@ extract_bins() {
 	    "${tmpdir}/usr/bin/sysbox-snapshotter" \
 	    "${tmpdir}/usr/bin/sysbox-admission" \
 	    "${K8S_DIR}/bin/sysbox-ce/generic/"
-	install -m 0755 "${ROOT_DIR}/runc-lite/build/${SYS_ARCH}/runc-lite" \
-	    "${K8S_DIR}/bin/sysbox-ce/generic/runc-lite"
+install -m 0755 "${ROOT_DIR}/sysbox-runc-lite/build/${SYS_ARCH}/sysbox-runc-lite" \
+	    "${K8S_DIR}/bin/sysbox-ce/generic/sysbox-runc-lite"
     rm -rf "${tmpdir}"
 }
 
@@ -248,7 +248,7 @@ verify_images() {
 	"${DOCKER}" run --rm "${IMAGE}" /opt/sysbox/bin/generic/sysbox-mgr --version
 	"${DOCKER}" run --rm "${IMAGE}" /opt/sysbox/bin/generic/sysbox-snapshotter --version
 	"${DOCKER}" run --rm "${IMAGE}" /usr/local/bin/sysbox-admission --version
-	"${DOCKER}" run --rm "${IMAGE}" /opt/sysbox/bin/generic/runc-lite --version
+	"${DOCKER}" run --rm "${IMAGE}" /opt/sysbox/bin/generic/sysbox-runc-lite --version
 }
 
 push_images() {
@@ -446,7 +446,7 @@ main() {
     need_cmd sha256sum
 
     build_deb
-    build_runc_lite
+    build_sysbox_runc_lite
 
     deb="$(find_deb)"
     [[ -n "${deb}" ]] || die "deb package not found"

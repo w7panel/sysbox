@@ -1,6 +1,6 @@
 # Sysbox PVC 首次目录初始化（volume-init）
 
-`runtimeClassName: sysbox-runc` 的 Pod 将可写 PVC 挂载到业务容器目录时，Sysbox 会在该 PVC **首次为空**时，把镜像中同一路径的目录内容复制到 PVC。之后 PVC 已有内容始终优先，不会因 Pod 重建或镜像更新而覆盖。
+`runtimeClassName: sysbox-runc` 或 `sysbox-runc-lite` 的 Pod 将可写 CSI PVC 挂载到业务容器目录时，Sysbox 会在该 PVC **首次为空**时，把镜像中同一路径的目录内容复制到 PVC。之后 PVC 已有内容始终优先，不会因 Pod 重建或镜像更新而覆盖。
 
 这相当于 Docker 将镜像目录初始化到空 named volume 的语义，可省去仅用于复制初始文件的 initContainer。
 
@@ -41,14 +41,14 @@ spec:
 
 ## 生效条件和边界
 
-- 仅处理 `runtimeClassName: sysbox-runc` 的 Pod。
-- 仅处理 `spec.containers` 中可写的 PVC `volumeMount`；`initContainers`、只读挂载、文件或 `subPath` 挂载不参与初始化。
-- Sysbox admission 会从 Pod 生成内部 `sysbox/volume-init` annotation；不要手写它，用户提供的同名 annotation 会被覆盖。
+- 处理 `sysbox-runc` 与 `sysbox-runc-lite` 的应用容器；Pod sandbox、`initContainers` 和只读挂载不参与初始化。
+- 支持 CSI PVC 根目录及 kubelet 可确认的目录 `subPath`；文件挂载不参与初始化。
+- 无需 `sysbox/volume-init` annotation。运行时从当前 Pod 的 kubelet CSI 挂载路径识别可写 PVC；未知存储驱动会安全跳过初始化。
 - runc 仅在 PVC 根目录为空时复制，允许文件系统自动创建的 `lost+found`。已有任意业务内容即视为已初始化。
 - 复制使用保留属性的 `rsync`，同一空卷的并发首次启动通过文件锁串行化；先成功初始化的容器内容成为该卷初始内容。
 - 目标路径在镜像中不存在时，PVC 保持空目录。该能力不创建 PVC/PV，也不负责多 Pod 共享卷的读写协调。
 
-部署脚本会将 `sysbox/volume-init` 加入 sysbox-runc 的 containerd `pod_annotations` 白名单。使用旧部署时需要重新执行 `sysbox-pkgr/k8s/scripts/sysbox-deploy-k8s.sh`，否则 admission 写入的内部 annotation 不会传递给 OCI spec。
+部署脚本不再向 containerd 转发 `sysbox/volume-init`。升级后重新执行 `sysbox-pkgr/k8s/scripts/sysbox-deploy-k8s.sh`，使运行时配置移除旧白名单。
 
 ## 验收
 
