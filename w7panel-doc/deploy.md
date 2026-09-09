@@ -28,7 +28,6 @@
 - `sysbox-pkgr/k8s/scripts/sysbox-deploy-k8s.sh`:
   - `SYSBOX_MGR_CONFIG` / `SYSBOX_FS_CONFIG` 默认空字符串，避免 `set -u` 退出。
 - K8s manifest:
-  - DaemonSet 增加 `sysbox-runtime` taint toleration。
   - RBAC 增加 pods `list/delete`，用于删除旧的 sysbox runtime Pod。
 
 ## 本地测试

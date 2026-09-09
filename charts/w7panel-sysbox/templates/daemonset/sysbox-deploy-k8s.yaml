@@ -25,11 +25,6 @@ spec:
     spec:
       hostPID: true
       serviceAccountName: {{ include "w7panel-sysbox.serviceAccountName" . }}
-      tolerations:
-      - key: sysbox-runtime
-        operator: Equal
-        value: not-running
-        effect: NoSchedule
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
