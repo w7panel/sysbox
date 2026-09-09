@@ -30,6 +30,19 @@ snapshotter 所需的 FUSE 设备，两条路径不可混用。
 重新部署后，临时 `sysbox-runc` Pod 已 `Running`；其规格仅含 Kubernetes
 service-account volume，未含 `sysbox-fuse` volume 或 `/dev/fuse` mount。
 
+### 2026-09-09：GitHub Release 静态 runtime 构建前置条件（已修复）
+
+首次 tag release 的 `sysbox-runc-lite` 静态构建在 GitHub Actions runner 上失败：Go 默认
+VCS stamping 会读取异常的 `.gitconfig`，随后 seccomp 构建又缺少 `libseccomp.pc`。
+静态构建现显式使用 `-buildvcs=false`，release workflow 也在构建前安装
+`libseccomp-dev`。`v0.7.1-11` 的 GitHub Actions 已成功完成。
+
+已下载并校验该 GitHub Release 的 `w7panel-sysbox-0.7.1-11.tgz`，以其而非工作区
+chart 安装到 218 外层，以及 `ckm-test` 的 L1 K3s。外层 `sysbox-runc` Pod 启动成功且
+无 FUSE 注入；L1 admission 使用
+`ghcr.io/w7panel/sysbox-deploy-k3s:v0.7.1-11`，`sysbox-runc-lite` nginx 回归通过
+rootfs 持久化、无注解 CSI 空目录初始化和 special bind mount。
+
 ### 2026-09-03 最新现场复测补充
 
 当前现场 `ckm-test` 的 nginx `runc-lite` 容器直接读取到：
