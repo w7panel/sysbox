@@ -54,10 +54,6 @@ spec:
         sysbox/rootfs-rw-layer: '[{"name":"nginx","volumeName":"rootfs","path":"nginx","persistentSpecialMounts":true,"specialPath":["/srv/data"]}]'
     spec:
       runtimeClassName: sysbox-runc-lite
-      tolerations:
-      - key: sysbox-runtime
-        operator: Exists
-        effect: NoSchedule
       containers:
       - name: nginx
         image: ${TEST_IMAGE}
