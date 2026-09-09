@@ -57,6 +57,12 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@v4
 
+      # sysbox-runc-lite is linked statically with the seccomp build tag.
+      # GitHub's base runner does not guarantee the pkg-config development
+      # metadata for libseccomp is present.
+      - name: Install static runtime build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libseccomp-dev
+
       - name: Build and publish release
         run: ./w7panel-doc/release.sh
 
