@@ -12,6 +12,24 @@ Server 仍必须保持 `runtimeClassName=sysbox-runc` 与 `hostUsers:false`；L2
 以及 snapshotter/webhook 复用。明确放弃 proc 强隔离、视图隔离和 system workload；
 实现基于官方 runc/libcontainer 局部修改，不引入 L2 `sysbox-fs` 或 `sysbox-mgr`。
 
+### 2026-09-09：外层 `/dev/fuse` 注入与 Service 环境变量冲突（已修复）
+
+外层普通 `runtimeClassName: sysbox-runc` workload 不需要 `/dev/fuse`。此前
+admission 对这类 Pod 自动追加 `sysbox-fuse` hostPath/mount；生成的 JSON Patch 在现场
+留下了没有对应 volume 的 mount 引用，API 因而拒绝创建 Pod（`volumeMounts[].name: Not
+found: "sysbox-fuse"`）。该注入已从 admission 移除。L1 CKM bootstrap 仍自行提供
+snapshotter 所需的 FUSE 设备，两条路径不可混用。
+
+修复后又发现名为 `sysbox-runtime-relay` 的 Kubernetes Service 会自动向 Pod 注入
+`SYSBOX_RUNTIME_RELAY_SERVICE_HOST` 等变量。`sysbox-runc` 过去将未知 `SYSBOX_*`
+变量一律视为非法运行时配置，导致 OCI create 失败。现仅解析明确支持的 Sysbox 配置键，
+其余同前缀变量原样交给 workload。
+
+在 218（`/root/.kube/218.config`）以
+`docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-service-env-20260909`
+重新部署后，临时 `sysbox-runc` Pod 已 `Running`；其规格仅含 Kubernetes
+service-account volume，未含 `sysbox-fuse` volume 或 `/dev/fuse` mount。
+
 ### 2026-09-03 最新现场复测补充
 
 当前现场 `ckm-test` 的 nginx `runc-lite` 容器直接读取到：

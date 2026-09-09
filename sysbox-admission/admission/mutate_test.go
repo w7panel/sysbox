@@ -77,7 +77,7 @@ func TestMutator_allowsHostUsersTrueForRuncLite(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestMutator_injectsFuseDeviceForPlainSysboxRuncPod(t *testing.T) {
+func TestMutator_doesNotInjectFuseDeviceForPlainSysboxRuncPod(t *testing.T) {
 	mutator := newTestMutator()
 	runtimeClass := admission.RuntimeClassSysboxRunc
 	pod := &corev1.Pod{Spec: corev1.PodSpec{
@@ -87,11 +87,8 @@ func TestMutator_injectsFuseDeviceForPlainSysboxRuncPod(t *testing.T) {
 
 	mutated, err := mutator.Mutate(context.Background(), pod)
 	require.NoError(t, err)
-	require.Len(t, mutated.Spec.Volumes, 1)
-	require.Equal(t, "sysbox-fuse", mutated.Spec.Volumes[0].Name)
-	require.Equal(t, "/dev/fuse", mutated.Spec.Volumes[0].HostPath.Path)
-	require.Equal(t, corev1.HostPathCharDev, *mutated.Spec.Volumes[0].HostPath.Type)
-	require.Equal(t, "/dev/fuse", mutated.Spec.Containers[0].VolumeMounts[0].MountPath)
+	require.Empty(t, mutated.Spec.Volumes)
+	require.Empty(t, mutated.Spec.Containers[0].VolumeMounts)
 }
 
 func TestMutator_rejectsOverlappingSpecialPath(t *testing.T) {
