@@ -12,6 +12,13 @@ Server 仍必须保持 `runtimeClassName=sysbox-runc` 与 `hostUsers:false`；L2
 以及 snapshotter/webhook 复用。明确放弃 proc 强隔离、视图隔离和 system workload；
 实现基于官方 runc/libcontainer 局部修改，不引入 L2 `sysbox-fs` 或 `sysbox-mgr`。
 
+### 2026-09-10：L0 双 RuntimeClass 发布待验证
+
+宿主安装器现同时安装 `sysbox-runc` 与 `sysbox-runc-lite`，并为两个 handler 写入相同的
+snapshotter、`sysbox/rootfs-rw-layer` annotation 与 systemd-cgroup 配置。host chart 创建
+两个 RuntimeClass；nested chart 保持只创建 lite，避免 L1 K3s 引用未安装的完整 runtime。
+该变更尚未经过下一次 GitHub Release 制品和 218 现场回归，不能替代已有验收记录。
+
 ### 2026-09-09：外层 `/dev/fuse` 注入与 Service 环境变量冲突（已修复）
 
 外层普通 `runtimeClassName: sysbox-runc` workload 不需要 `/dev/fuse`。此前

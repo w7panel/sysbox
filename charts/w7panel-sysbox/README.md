@@ -7,9 +7,11 @@ installer and admission backend.
 
 ### RuntimeClass
 
-The chart always creates the `sysbox-runc` RuntimeClass. This name is fixed
-because Sysbox admission only mutates Pods that use `runtimeClassName:
-sysbox-runc`.
+In host mode the chart creates both fixed RuntimeClasses: `sysbox-runc` and
+`sysbox-runc-lite`. Both use the Sysbox snapshotter/rootfs annotation contract
+and admission webhook; the only difference is the OCI runtime binary. Nested
+mode creates only `sysbox-runc-lite`, because its K3s bootstrap installs that
+binary and handler itself.
 
 ### Node Selector
 

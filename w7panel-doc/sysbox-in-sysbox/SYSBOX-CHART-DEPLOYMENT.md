@@ -13,6 +13,7 @@
 L0：218 外层 Kubernetes
 ├─ w7panel-sysbox（installMode=host）
 │  ├─ RuntimeClass: sysbox-runc
+│  ├─ RuntimeClass: sysbox-runc-lite
 │  ├─ sysbox-snapshotter
 │  └─ sysbox-admission
 └─ CKM Server Pod（L1）
@@ -111,7 +112,7 @@ export SYSBOX_IMAGE_TAG="$RELEASE_TAG"
 
 helm --kubeconfig "$KUBECONFIG_218" upgrade --install w7panel-sysbox \
   "$RELEASE_DIR/$CHART_FILE" --namespace default \
-  --set installMode=host --set runtimeClassName=sysbox-runc \
+  --set installMode=host \
   --set installer.enabled=true \
   --set installer.image.repository="$SYSBOX_IMAGE_REPO" \
   --set installer.image.tag="$SYSBOX_IMAGE_TAG" \
@@ -122,7 +123,7 @@ helm --kubeconfig "$KUBECONFIG_218" upgrade --install w7panel-sysbox \
   --set admission.image.pullPolicy=Always \
   --set snapshotter.enabled=true --wait --timeout 5m
 
-kubectl --kubeconfig "$KUBECONFIG_218" get runtimeclass sysbox-runc
+kubectl --kubeconfig "$KUBECONFIG_218" get runtimeclass sysbox-runc sysbox-runc-lite
 kubectl --kubeconfig "$KUBECONFIG_218" -n default get pods \
   -l app.kubernetes.io/instance=w7panel-sysbox -o wide
 kubectl --kubeconfig "$KUBECONFIG_218" -n default rollout status \

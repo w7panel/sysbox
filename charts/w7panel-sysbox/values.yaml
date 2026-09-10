@@ -2,6 +2,9 @@ nodeSelector: {}
 
 installMode: host
 
+# RuntimeClass names are standard and fixed. Host mode creates both
+# sysbox-runc and sysbox-runc-lite; nested mode creates sysbox-runc-lite only.
+# Kept only for compatibility with older callers; it does not rename handlers.
 runtimeClassName: sysbox-runc
 
 installer:
