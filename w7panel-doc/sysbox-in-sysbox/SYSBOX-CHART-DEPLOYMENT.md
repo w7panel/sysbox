@@ -146,6 +146,17 @@ bash ./02-test-l0-runtimeclasses.sh
 FUNCTIONAL PASS: L0 sysbox-runc and sysbox-runc-lite are runnable without automatic FUSE injection
 ```
 
+### L0 rootfs / local-path 功能回归
+
+`03-test-l0-rootfs.sh` 以 `sysbox-runc-lite` 验证 L0 的 rootfs PVC 重建持久化、无
+`sysbox/volume-init` 注解的 local-path 空卷初始化复制，以及 `/srv/data` special bind。
+
+```bash
+cd /root/workspace/sysbox/w7panel-doc/sysbox-in-sysbox
+export KUBECONFIG_218=/root/.kube/218.config
+bash ./03-test-l0-rootfs.sh
+```
+
 手动单个 handler 检查可使用：
 
 ```bash
