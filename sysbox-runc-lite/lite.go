@@ -112,11 +112,22 @@ func detectLitePVCSourceAt(source, podUID, containerName, podsDir string) (strin
 		return "", false
 	}
 	podRoot := filepath.Join(podsDir, podUID)
-	directRoot := filepath.Join(podRoot, "volumes", "kubernetes.io~csi")
-	if rel, err := filepath.Rel(directRoot, cleanSource); err == nil {
-		parts := strings.Split(rel, string(filepath.Separator))
-		if len(parts) == 2 && parts[0] != "" && parts[1] == "mount" {
-			return cleanSource, true
+	volumeRoots := []string{
+		filepath.Join(podRoot, "volumes", "kubernetes.io~csi"),
+		// k3s local-path exposes dynamically provisioned PVCs through the
+		// in-tree local-volume path. It has the same per-Pod, kubelet-owned
+		// layout as CSI and is safe to initialize without an API client.
+		filepath.Join(podRoot, "volumes", "kubernetes.io~local-volume"),
+	}
+	for _, directRoot := range volumeRoots {
+		if rel, err := filepath.Rel(directRoot, cleanSource); err == nil {
+			parts := strings.Split(rel, string(filepath.Separator))
+			if len(parts) == 1 && parts[0] != "" {
+				return cleanSource, true
+			}
+			if len(parts) == 2 && parts[0] != "" && parts[1] == "mount" {
+				return cleanSource, true
+			}
 		}
 	}
 	subpathRoot := filepath.Join(podRoot, "volume-subpaths")
@@ -128,8 +139,16 @@ func detectLitePVCSourceAt(source, podUID, containerName, podsDir string) (strin
 		containerMatches := parts[1] == containerName || strings.HasPrefix(containerName, parts[1]+"-")
 		volumeMatches := strings.HasPrefix(parts[0], "pvc-")
 		if !volumeMatches {
-			_, err = os.Stat(filepath.Join(directRoot, parts[0], "mount"))
-			volumeMatches = err == nil
+			for _, directRoot := range volumeRoots {
+				if _, err = os.Stat(filepath.Join(directRoot, parts[0], "mount")); err == nil {
+					volumeMatches = true
+					break
+				}
+				if _, err = os.Stat(filepath.Join(directRoot, parts[0])); err == nil {
+					volumeMatches = true
+					break
+				}
+			}
 		}
 		if containerMatches && volumeMatches {
 			return cleanSource, true

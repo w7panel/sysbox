@@ -84,6 +84,17 @@ func TestDetectLitePVCSourceSkipsNonCSIAndValidatesSubPath(t *testing.T) {
 	}
 }
 
+func TestDetectLitePVCSourceAcceptsK3sLocalPath(t *testing.T) {
+	podsDir := t.TempDir()
+	source := filepath.Join(podsDir, "pod-uid", "volumes", "kubernetes.io~local-volume", "pvc-uid")
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := detectLitePVCSourceAt(source, "pod-uid", "app", podsDir); !ok || got != source {
+		t.Fatalf("local-path PVC = %q, %v; want %q, true", got, ok, source)
+	}
+}
+
 func TestCopyDirPreservesSymlinkAndMode(t *testing.T) {
 	src, dst := t.TempDir(), filepath.Join(t.TempDir(), "dst")
 	if err := os.Mkdir(filepath.Join(src, "nested"), 0o750); err != nil {
