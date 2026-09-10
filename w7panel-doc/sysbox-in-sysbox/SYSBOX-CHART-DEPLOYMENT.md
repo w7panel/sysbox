@@ -130,7 +130,23 @@ kubectl --kubeconfig "$KUBECONFIG_218" -n default rollout status \
   deployment/w7panel-sysbox-admission --timeout=180s
 ```
 
-### L0 smoke：确认未注入 FUSE
+### L0 smoke：两个 RuntimeClass 均可用且不注入 FUSE
+
+仓库脚本会分别创建 `sysbox-runc` 和 `sysbox-runc-lite` Pod，并清理它们：
+
+```bash
+cd /root/workspace/sysbox/w7panel-doc/sysbox-in-sysbox
+export KUBECONFIG_218=/root/.kube/218.config
+bash ./02-test-l0-runtimeclasses.sh
+```
+
+预期末行：
+
+```text
+FUNCTIONAL PASS: L0 sysbox-runc and sysbox-runc-lite are runnable without automatic FUSE injection
+```
+
+手动单个 handler 检查可使用：
 
 ```bash
 kubectl --kubeconfig "$KUBECONFIG_218" -n default run sysbox-release-outer-check \

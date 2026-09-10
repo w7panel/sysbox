@@ -76,9 +76,10 @@ Helm 二进制塞进测试镜像，也能清楚区分当前操作落在哪一层
 | --- | --- | --- |
 | 0 | `00-check-prereqs.sh` | 检查 kubeconfig、CRD、SystemTemplate 和本地工具 |
 | 1 | `01-create-ckm.sh` | 复用或按 `config.sh` 名称创建 CKM，并发现 Server Pod |
-| 2 | `04-install-ckm-chart.sh` | 在 CKM 自有 K3s 安装 snapshotter、admission 与 sysbox-runc-lite 配置 |
-| 3 | `05-test-ckm-k3s.sh` | 创建并回归 sysbox-runc-lite workload；rootfs 结果以最新现场状态为准 |
-| 4 | `99-cleanup.sh` | 清理测试资源，默认保留 CKM |
+| 2 | `02-test-l0-runtimeclasses.sh` | 验证 L0 两个标准 RuntimeClass 都能启动且不自动注入 FUSE |
+| 3 | `04-install-ckm-chart.sh` | 在 CKM 自有 K3s 安装 snapshotter、admission 与 sysbox-runc-lite 配置 |
+| 4 | `05-test-ckm-k3s.sh` | 创建并回归 sysbox-runc-lite workload；rootfs 结果以最新现场状态为准 |
+| 5 | `99-cleanup.sh` | 清理测试资源，默认保留 CKM |
 
 脚本不会自动跳过失败步骤。需要重建 CKM Server Pod 或删除资源时，应先人工确认；这些操作
 可能短暂中断 CKM 内 K3s，但不应重启 L0 宿主。
@@ -89,6 +90,7 @@ Helm 二进制塞进测试镜像，也能清楚区分当前操作落在哪一层
 cd /root/workspace/sysbox/w7panel-doc/sysbox-in-sysbox
 bash ./00-check-prereqs.sh
 bash ./01-create-ckm.sh
+bash ./02-test-l0-runtimeclasses.sh
 bash ./04-install-ckm-chart.sh
 bash ./05-test-ckm-k3s.sh
 bash ./99-cleanup.sh

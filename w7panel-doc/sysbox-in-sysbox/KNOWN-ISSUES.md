@@ -12,12 +12,20 @@ Server 仍必须保持 `runtimeClassName=sysbox-runc` 与 `hostUsers:false`；L2
 以及 snapshotter/webhook 复用。明确放弃 proc 强隔离、视图隔离和 system workload；
 实现基于官方 runc/libcontainer 局部修改，不引入 L2 `sysbox-fs` 或 `sysbox-mgr`。
 
-### 2026-09-10：L0 双 RuntimeClass 发布待验证
+### 2026-09-10：L0 双 RuntimeClass 临时 tag 回归通过
 
 宿主安装器现同时安装 `sysbox-runc` 与 `sysbox-runc-lite`，并为两个 handler 写入相同的
 snapshotter、`sysbox/rootfs-rw-layer` annotation 与 systemd-cgroup 配置。host chart 创建
 两个 RuntimeClass；nested chart 保持只创建 lite，避免 L1 K3s 引用未安装的完整 runtime。
-该变更尚未经过下一次 GitHub Release 制品和 218 现场回归，不能替代已有验收记录。
+在 218 上以临时镜像
+`docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-13-dual-runtime-test`
+升级 host chart 后，`sysbox-runc` 和 `sysbox-runc-lite` smoke Pod 均达到 `Ready`，且
+未自动注入 `/dev/fuse`。随后在 `ckm-test` 的 L1 K3s 运行
+`05-test-ckm-k3s.sh`，通过 rootfs 持久化、无 `sysbox/volume-init` 注解的空 CSI PVC
+初始化复制及 `/srv/data` special bind mount 回归。
+
+已观察到 lite L0 smoke Pod 在删除后可能短暂/持续停于 `Terminating`，因此 smoke 脚本采用
+非阻塞删除；这不影响本次“可创建、可 Ready”的验收，需作为 runtime teardown 的后续观察项。
 
 ### 2026-09-09：外层 `/dev/fuse` 注入与 Service 环境变量冲突（已修复）
 
