@@ -99,7 +99,9 @@ func liteMountReadOnly(mount specs.Mount) bool {
 	return false
 }
 
-// detectLitePVCSource accepts only CSI kubelet paths for the current Pod.
+// detectLitePVCSource accepts only recognized PVC kubelet paths for the current Pod.
+// This comprises all CSI drivers (kubernetes.io~csi) and K3s local-path
+// (kubernetes.io~local-volume).
 // It intentionally skips emptyDir, projected volumes, hostPath, and unknown
 // storage plugins because runc-lite has no Kubernetes API client.
 func detectLitePVCSource(source, podUID, containerName string) (string, bool) {

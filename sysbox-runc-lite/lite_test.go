@@ -63,7 +63,7 @@ func TestInitLiteVolumesWithoutAnnotation(t *testing.T) {
 	}
 }
 
-func TestDetectLitePVCSourceSkipsNonCSIAndValidatesSubPath(t *testing.T) {
+func TestDetectLitePVCSourceSkipsNonPVCAndValidatesSubPath(t *testing.T) {
 	podsDir := t.TempDir()
 	emptyDir := filepath.Join(podsDir, "pod-uid", "volumes", "kubernetes.io~empty-dir", "cache")
 	if err := os.MkdirAll(emptyDir, 0o755); err != nil {

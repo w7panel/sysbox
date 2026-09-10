@@ -27,6 +27,23 @@ snapshotter、`sysbox/rootfs-rw-layer` annotation 与 systemd-cgroup 配置。ho
 已观察到 lite L0 smoke Pod 在删除后可能短暂/持续停于 `Terminating`，因此 smoke 脚本采用
 非阻塞删除；这不影响本次“可创建、可 Ready”的验收，需作为 runtime teardown 的后续观察项。
 
+### 2026-09-10：完整 `sysbox-runc` 的 PVC 初始化与低端口边界
+
+完整 handler 原有的 `initializePVCVolumes()` 仅识别
+`kubernetes.io~csi/<volume>/mount`，未识别 K3s `local-path` 的实际 kubelet 源
+`kubernetes.io~local-volume/<pvc>`。现已在同一受限、当前 Pod 所有的路径校验下补齐
+`local-volume`，不放宽至 `emptyDir`、`hostPath`、projected 或未知插件。单测覆盖两种
+路径；218 使用临时镜像
+`docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-14-runc-pvc-test` 实测完整
+`sysbox-runc` 的 local-path 和 Longhorn (`driver.longhorn.io`)：空 webroot PVC 获得
+nginx 镜像默认文件，Pod 重建后 webroot marker 及 `/srv/data` special bind marker 均保留。
+
+首次不设置 `hostUsers` 的 L0 完整 handler 中 nginx 绑定 `0.0.0.0:80` 返回 `EPERM`：
+Kubelet 已在初始 userns 建立 CNI netns，随后 sysbox-runc 的子 userns capability 不能
+授权该 netns 的低端口。现场随后以 `hostUsers:false` 重新创建 Pod，Kubernetes 在 CNI 前
+创建 Pod userns，nginx:80 成功 Ready 且 Service 可访问。故 L0 完整 handler 的 rootfs
+回归默认写入 `hostUsers:false`；这不改变本轮“L2 runc-lite 不设置 hostUsers”的约束。
+
 ### 2026-09-09：外层 `/dev/fuse` 注入与 Service 环境变量冲突（已修复）
 
 外层普通 `runtimeClassName: sysbox-runc` workload 不需要 `/dev/fuse`。此前

@@ -146,15 +146,28 @@ bash ./02-test-l0-runtimeclasses.sh
 FUNCTIONAL PASS: L0 sysbox-runc and sysbox-runc-lite are runnable without automatic FUSE injection
 ```
 
-### L0 rootfs / local-path 功能回归
+### L0 rootfs / PVC 功能回归
 
-`03-test-l0-rootfs.sh` 以 `sysbox-runc-lite` 验证 L0 的 rootfs PVC 重建持久化、无
-`sysbox/volume-init` 注解的 local-path 空卷初始化复制，以及 `/srv/data` special bind。
+`03-test-l0-rootfs.sh` 默认以 `sysbox-runc-lite` 验证 L0 的 rootfs PVC 重建持久化、无
+`sysbox/volume-init` 注解的空 PVC 初始化复制，以及 `/srv/data` special bind。运行时受限识别
+Kubelet 的 `kubernetes.io~csi`（所有标准 CSI 驱动）及 K3s `kubernetes.io~local-volume`
+（`local-path`）路径；不处理 `emptyDir`、`hostPath`、projected 或未知卷插件。将
+完整 `sysbox-runc` 同样执行上述 PVC 初始化逻辑，并且 L0 必须设置 `hostUsers: false`：
+Kubernetes 会在 CNI 前创建 Pod userns，使 nginx 的 `CAP_NET_BIND_SERVICE` 与 network
+namespace 对齐，故可以直接验证 nginx:80。脚本在 `L0_RUNTIME_CLASS=sysbox-runc` 时默认
+写入该字段；L2 `sysbox-runc-lite` workload 保持不设置。
 
 ```bash
 cd /root/workspace/sysbox/w7panel-doc/sysbox-in-sysbox
 export KUBECONFIG_218=/root/.kube/218.config
 bash ./03-test-l0-rootfs.sh
+
+# 例如使用 Longhorn CSI；替换为实际 StorageClass 即可验证其他 CSI。
+ROOTFS_STORAGE_CLASS=disk-default L0_TEST_SUFFIX=longhorn bash ./03-test-l0-rootfs.sh
+
+# 完整 sysbox-runc（自动写入 hostUsers:false）：local-path 与 Longhorn CSI 回归。
+L0_RUNTIME_CLASS=sysbox-runc L0_TEST_SUFFIX=full-local bash ./03-test-l0-rootfs.sh
+L0_RUNTIME_CLASS=sysbox-runc ROOTFS_STORAGE_CLASS=disk-default L0_TEST_SUFFIX=full-longhorn bash ./03-test-l0-rootfs.sh
 ```
 
 手动单个 handler 检查可使用：
