@@ -1,0 +1,3 @@
+interface:
+  display_name: "Sysbox 嵌套测试"
+  short_description: "验证 L0、CKM 与 L2 的 Sysbox 流程"

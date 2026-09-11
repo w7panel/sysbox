@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Added
+  * Add `skills/sysbox-in-sysbox-test`, with build/release and staged-test wrappers plus a reusable L0/L1/L2 regression workflow covering release artifacts, RuntimeClass handlers, local-path and CSI PVC initialization, rootfs persistence, special binds, CKM deployment, and IP-aware test cleanup.
   * sysbox-admission: stop injecting `/dev/fuse` into outer `sysbox-runc` Pods; L1 CKM bootstrap remains responsible for the fuse device required by its snapshotter.
   * w7panel-sysbox: omit the host installer DaemonSet in nested mode; the CKM bootstrap and nested chart runtime configuration provide the required lightweight runtime instead.
   * Release packaging excludes local Git metadata and generated `dist/` artifacts from the source archive so deployment-image builds package only source files.
