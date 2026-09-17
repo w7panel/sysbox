@@ -68,9 +68,7 @@ func prepareRootfs(pipe io.ReadWriter, iConfig *initConfig, mountFds []int) (err
 		rootlessCgroups: iConfig.RootlessCgroups,
 		cgroupns:        config.Namespaces.Contains(configs.NEWCGROUP),
 	}
-	// Device node bind/mount setup is not permitted in the nested user
-	// namespace; rely on the image's existing /dev entries instead.
-	setupDev := false
+	setupDev := needsSetupDev(config)
 	for i, m := range config.Mounts {
 		for _, precmd := range m.PremountCmds {
 			if err := mountCmd(precmd); err != nil {
