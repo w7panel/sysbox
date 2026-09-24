@@ -1,6 +1,6 @@
 # Sysbox-in-Sysbox 人工验证流程
 
-## 当前验收范围（2026-09-02）
+## 当前验收范围（2026-09-24）
 
 本轮先实现并验证 rootfs 持久化、空 PVC 初始化复制、特殊目录 bind 挂载，以及
 snapshotter/webhook 复用。L2 workload 的 `hostUsers:false`（原步骤 3）暂不实施，
@@ -40,17 +40,19 @@ Helm 二进制塞进测试镜像，也能清楚区分当前操作落在哪一层
 | [KNOWN-ISSUES.md](./KNOWN-ISSUES.md) | 当前能力边界、未解决项和问题根因 |
 | [HISTORY.md](./HISTORY.md) | 旧镜像、旧 CKM 和 L2/L3 实验时间线 |
 
-## 当前基线（2026-08-24）
+## 当前基线（2026-09-24）
 
-- 镜像：`v0.7.1-47-nested-tty-exec`，digest
-  `sha256:e10b0f5905fc1d0dbf913079fc396cea4a5984b69810ed1ce04d029555c946a2`。
-- Chart：`w7panel-sysbox 0.7.1-15`，`installMode=nested`；runtimeClass 统一为
-  `sysbox-runc`。
-- 已验证（历史完整 nested Sysbox 基线）：child userns `0 0 65536`、CNI/HTTP、Docker
-  rootfs/`overlay2`、二次 cgroup delegation、nested-agent 重建和双层交互 exec。
-- 当前轻量 `sysbox-runc-lite + sysbox-snapshotter` 分支：direct workload 已验证；带 PVC 的
-  nginx rootfs、空目录初始化和 special bind 必须以最近一次干净回归为准，不能引用旧
-  CKM/旧镜像的 `FUNCTIONAL PASS` 作为当前通过证据。
+- 当前源码基线：`w7panel` 的 `v0.7.1-20` tag。该 tag 的 GitHub 制品仍须按本目录的
+  release 验收步骤下载、校验并安装后，才可称为 release 验证。
+- 已完成的本地完整构建镜像：
+  `docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-buildcache-rootfs-webhook-20260924`
+  与相同 tag 的 `sysbox-deploy-k3s-bootstrap`。
+- 在一次全新 CKM `ckm-build2-20260924` 上，L0 的 full/lite RuntimeClass、rootfs
+  持久化、无注解空 PVC 初始化复制、special bind，以及 L2 admission/snapshotter
+  自动提升至 `sysbox-runc-lite` 都已通过。证据和环境限制见
+  [KNOWN-ISSUES.md](./KNOWN-ISSUES.md)。
+- 历史完整 nested Sysbox 的 child userns、CNI/HTTP、Docker、cgroup 和 L3 结果仅保留在
+  [HISTORY.md](./HISTORY.md)，不构成当前轻量交付的验收范围。
 - 明确不支持：`/proc noexec` 强隔离、Pod 内 CPU/内存视图隔离、多租户或不可信负载
   安全边界。运行 `08-check-isolation.sh` 预期返回非零。
 - 尚待验证：长时间并发重启、L0 Sysbox 服务重启恢复、大 rootfs rsync 生命周期压力。

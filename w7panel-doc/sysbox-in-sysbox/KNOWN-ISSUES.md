@@ -4,13 +4,39 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
-## 当前实施范围（2026-09-02）
+## 当前实施范围（2026-09-24）
 
 步骤 3（L2 workload 的 `hostUsers:false`）暂不实施，也不作为本轮验收门槛。L1 CKM
 Server 仍必须保持 `runtimeClassName=sysbox-runc` 与 `hostUsers:false`；L2 nginx 回归
 不设置该字段。当前验收覆盖 rootfs 持久化、空目录初始化复制、特殊目录 bind 挂载，
 以及 snapshotter/webhook 复用。明确放弃 proc 强隔离、视图隔离和 system workload；
 实现基于官方 runc/libcontainer 局部修改，不引入 L2 `sysbox-fs` 或 `sysbox-mgr`。
+
+### 2026-09-24：缓存构建与干净 L0/L2 回归（已通过）
+
+`BUILD_PROFILE=test` 现可将 `runc-lite`、snapshotter、admission 和 inner bootstrap
+script 增量写入指定的已验证 deploy/bootstrap 基线；Go 与 buildx 缓存位于仓库 `.cache`
+下。该模式不会隐式重启 CKM，操作者必须显式切换输出的 bootstrap tag 并走正常 Server
+rollout。Chart、打包或最终制品仍需 `BUILD_PROFILE=release`。
+
+一次完整 release 构建及随后的干净回归使用：
+
+```text
+deploy:    docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-buildcache-rootfs-webhook-20260924
+bootstrap: docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:v0.7.1-buildcache-rootfs-webhook-20260924
+```
+
+在 218 的新 CKM `k3k-console-164315/ckm-build2-20260924` 中，首次安装 nested handler
+后正常替换一次 Server，`05-test-ckm-k3s.sh` 输出：
+
+```text
+FUNCTIONAL PASS: rootfs persistence, annotation-free CSI empty-volume init and special bind mount verified
+```
+
+L0 full/lite RuntimeClass、full handler 的 `hostUsers:false` nginx:80、local-path 空 PVC
+初始化、rootfs marker 与 `/srv/data` marker 跨 Pod 重建也通过。L2 nginx 未设置
+`hostUsers:false`。这属于工作区完整构建验收；`v0.7.1-20` 的 GitHub Release 仍须下载
+chart、lite binary 与 `SHA256SUMS` 后独立验收。
 
 ### 2026-09-10：L0 双 RuntimeClass 临时 tag 回归通过
 

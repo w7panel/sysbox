@@ -39,11 +39,12 @@ CKM bootstrap/Server 路径提供，不能将它改为通用 webhook 注入规�
 
 ## 获取并校验发布制品
 
-以下使用已验证的 `v0.7.1-11` 示例。升级时替换 `RELEASE_TAG`；它同时对应 chart
-appVersion 和 deploy image tag。
+以下使用待验收的当前 tag 示例。只有 GitHub Actions 成功、制品 checksum 校验通过且本
+文 L0/L2 回归完成后，才可将该 tag 标记为 release 验证通过；本地构建镜像不能替代它。
+升级时替换 `RELEASE_TAG`；它同时对应 chart appVersion 和 deploy image tag。
 
 ```bash
-export RELEASE_TAG=v0.7.1-11
+export RELEASE_TAG=v0.7.1-20
 export CHART_VERSION="${RELEASE_TAG#v}"
 export RELEASE_DIR="/tmp/sysbox-${RELEASE_TAG}"
 export CHART_FILE="w7panel-sysbox-${CHART_VERSION}.tgz"
@@ -74,7 +75,8 @@ chmod 0755 "$RELEASE_DIR/$RUNC_LITE_FILE"
 "$RELEASE_DIR/$RUNC_LITE_FILE" --version
 ```
 
-发布 `image-metadata.txt` 是镜像来源的权威记录。`v0.7.1-11` 对应：
+发布 `image-metadata.txt` 是镜像来源的权威记录；不要根据 tag 猜测仓库地址。示例
+release 的 metadata 可为：
 
 ```text
 ghcr.io/w7panel/sysbox-deploy-k3s:v0.7.1-11
@@ -307,5 +309,6 @@ bash ./99-cleanup.sh
 - outer Pod 有 `sysbox-fuse`：这是过期 admission；升级 L0 chart 至当前 release。
 - L2 的 `hostUsers:false` 失败：该项不在本轮 nginx 验收范围内。
 
-本文流程已按 218 的 `v0.7.1-11` release chart 实测：L0 `sysbox-runc` smoke 成功且未
-注入 FUSE；`ckm-test` L1 使用发布 image 与发布静态二进制，L2 nginx 三项功能回归均通过。
+本地完整构建已在 218 上完成 L0/L2 回归；最新具体镜像、CKM 与结果见
+[KNOWN-ISSUES.md](./KNOWN-ISSUES.md)。每个 GitHub tag 均须重新执行“获取并校验发布制品”
+和本文 L0/L2 步骤，不能继承本地镜像的结果。

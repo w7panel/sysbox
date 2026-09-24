@@ -7,7 +7,7 @@ this Skill dispatch to it so a build or test always uses the current source.
 
 | Script | Role | Important inputs | Output / proof |
 | --- | --- | --- | --- |
-| `w7panel-doc/release.sh` | Builds generic deb, static lite binary, deploy image, chart and optional GitHub release | `RELEASE_TAG`, `IMAGE_REPO`, `IMAGE_TAG`, `PUSH_IMAGE`, `MIRROR_PROFILE`, `PACKAGE_CHART` | `dist/`, registry image, optional GitHub release |
+| `w7panel-doc/release.sh` | `release` builds deb, static lite binary, deploy image and chart; `test` incrementally patches selected binaries into explicit base images | `BUILD_PROFILE`, `TEST_COMPONENTS`, `TEST_TARGETS`, base/output images, `RELEASE_TAG`, `IMAGE_REPO`, `IMAGE_TAG`, `PUSH_IMAGE`, `MIRROR_PROFILE`, `PACKAGE_CHART` | `dist/`, registry image, optional GitHub release |
 | `skills/sysbox-in-sysbox-test/scripts/build-release.sh` | Skill entrypoint for the above script | Passes all environment and arguments through unchanged | Same as `release.sh` |
 
 Use a China mirror profile when appropriate:
@@ -23,6 +23,11 @@ directory that must be retained. A pushed temporary image must be tested
 before a tag release, but only the GitHub release chart/image/binary is the
 final release input.
 
+For an ordinary code iteration prefer cached test mode. Valid components are
+`runc-lite`, `snapshotter`, `admission`, and `inner-script`; valid targets are
+`deploy`, `bootstrap`, or both. `test` writes `dist/test-images.env`, including
+the bootstrap image that must be applied to CKM explicitly.
+
 ## Test stages
 
 | Stage | Authoritative script | What it validates |
@@ -33,6 +38,7 @@ final release input.
 | `l0-rootfs` | `03-test-l0-rootfs.sh` | PVC initialization, rootfs persistence and special bind |
 | `l1-install` | `04-install-ckm-chart.sh` | nested chart and persisted lite binary/config |
 | `l2` | `05-test-ckm-k3s.sh` | nested lite nginx rootfs/PVC regression |
+| `build-and-test` | `06-build-and-test.sh` | selected cached build plus 00/02/03/04/05 regression |
 | `cleanup` | `99-cleanup.sh` | destructive L2 chart/PVC cleanup; retains CKM by default |
 
 Invoke one stage through the Skill wrapper after exporting explicit values:

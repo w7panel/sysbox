@@ -37,6 +37,31 @@ Each `03` run must report `FUNCTIONAL PASS` and prove all of:
 3. A marker under `/srv/data` remains after Pod replacement.
 4. The Pod has no `sysbox/volume-init` annotation.
 
+## Fast source-build verification
+
+Use the flow driver after a focused runtime, snapshotter, admission, or inner
+bootstrap-script change. It uses a cached incremental image build and does not
+implicitly modify CKM state. Set every base and output image explicitly:
+
+```bash
+BUILD_PROFILE=test \
+TEST_COMPONENTS=runc-lite,snapshotter,admission,inner-script \
+TEST_TARGETS=deploy,bootstrap \
+TEST_BASE_IMAGE=<known-good-deploy-image> \
+TEST_IMAGE=<test-deploy-image> \
+TEST_BOOTSTRAP_BASE_IMAGE=<known-good-bootstrap-image> \
+TEST_BOOTSTRAP_IMAGE=<test-bootstrap-image> \
+PUSH_IMAGE=true \
+bash ./06-build-and-test.sh
+```
+
+Before the L2 stage, set the emitted `CKM_INNER_SYSBOX_BOOTSTRAP_IMAGE` on the
+CKM controller and let the selected Server perform its normal replacement.
+The required proof is the final `FUNCTIONAL PASS` from both `03` and `05`.
+For chart, packaging, or release changes, replace `BUILD_PROFILE=test` with
+`BUILD_PROFILE=release`; this is a source-artifact result, not GitHub-release
+verification.
+
 ## L1 CKM and L2 lite verification
 
 Set `CKM_NAME` and `CKM_NAMESPACE` to a known disposable, Ready CKM. Do not

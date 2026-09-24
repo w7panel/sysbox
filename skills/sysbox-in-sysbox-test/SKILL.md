@@ -45,6 +45,12 @@ the executable Skill wrappers.
 - Nested chart installation targets the selected L1 K3s only. It creates only
   `sysbox-runc-lite` there and writes its binary to the persistent L1 K3s data
   volume; it must not create a second K3s or replace `/usr/bin/runc`.
+- Use `BUILD_PROFILE=test` for an iterative source change. It patches only the
+  requested binaries into an explicit, known-good base image and writes the
+  resulting tags to `dist/test-images.env`; it never changes a CKM controller
+  or restarts a Server Pod. Apply the printed bootstrap tag deliberately, then
+  run the functional stages. Use `BUILD_PROFILE=release` for chart/release
+  changes and final source-artifact validation.
 
 ## Failure handling and cleanup
 
