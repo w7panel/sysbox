@@ -290,7 +290,6 @@ spec:
     metadata:
       annotations:
         sysbox/rootfs-rw-layer: '[{"name":"nginx","volumeName":"rootfs","path":"nginx"}]'
-        sysbox/allow-proc-exec: "true"
     spec:
       runtimeClassName: sysbox-runc
       enableServiceLinks: false

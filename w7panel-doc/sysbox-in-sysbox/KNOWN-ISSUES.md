@@ -39,6 +39,26 @@ full/lite rootfs 回归和 L2 `05-test-ckm-k3s.sh` 均返回 `FUNCTIONAL PASS`�
 cert-manager CSI、nested agent 均为 Running；未设置 RuntimeClass 的 L2 busybox Pod
 双层 `kubectl exec -it` 成功，`/dev/null` 与 `/dev/ptmx` 均为字符设备。
 
+### 2026-09-24：移除 retired proc/special 注解（已通过）
+
+`sysbox/skip-special-mounts` 和 `sysbox/allow-proc-exec` 是已回退的 command-mode
+兼容路径，当前轻量 nested runtime 不消费它们。CKM 不再向 L1 Server 注入
+`allow-proc-exec`；`sysbox-inner-k3s.sh` 的 default、lite、full handler 仅保留
+`sysbox/rootfs-rw-layer` annotation allow-list，nested wrapper 也不再设置
+`SYSBOX_ALLOW_PROC_EXEC`。
+
+218 使用以下制品重新创建同一 CKM Server：
+
+```text
+deploy:    docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-no-legacy-annotations-20260924
+bootstrap: docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:v0.7.1-no-legacy-annotations-20260924
+CKM:       docker.cnb.cool/i0358/ai-cvm:v1.1.270-no-legacy-annotations-20260924
+```
+
+L1 template、active inner containerd config、nested wrapper 与 L2 nginx annotations
+均不含 retired key。L2 `/proc` 仍为 `noexec`，但 CNI、rootfs persistence、无注解
+CSI 初始化、special bind、`kubectl exec -it` 全部通过。
+
 ### 2026-09-24：缓存构建与干净 L0/L2 回归（已通过）
 
 `BUILD_PROFILE=test` 现可将 `runc-lite`、snapshotter、admission 和 inner bootstrap
