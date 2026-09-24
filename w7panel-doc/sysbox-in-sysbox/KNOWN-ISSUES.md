@@ -12,6 +12,27 @@ Server 仍必须保持 `runtimeClassName=sysbox-runc` 与 `hostUsers:false`；L2
 以及 snapshotter/webhook 复用。明确放弃 proc 强隔离、视图隔离和 system workload；
 实现基于官方 runc/libcontainer 局部修改，不引入 L2 `sysbox-fs` 或 `sysbox-mgr`。
 
+### 2026-09-24：由 runc special mount 提供递归传播（已通过）
+
+`sysbox-runc` 现在为 `persistentSpecialMounts: true` 的 rootfs `specialPath` 生成
+`rbind,rshared`，不再使用 `rprivate`。CKM Server 启动 wrapper 和 K3s command 已移除所有
+`mount --make-*`、`mountpoint` 与 `mount --bind` 操作；不再把 `/`、`/run`、kubelet、K3s
+路径或 cert-manager/socket 路径在启动时改为 shared。
+
+变更前的 CKM 分支已推送回滚 tag
+`backup-before-ckm-mount-removal-20260924`。218 使用以下测试镜像：
+
+```text
+deploy:    docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-mountprop-20260924
+bootstrap: docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:v0.7.1-mountprop-20260924
+CKM:       docker.cnb.cool/i0358/ai-cvm:v1.1.269-mountprop-20260924
+```
+
+新建 `k3k-console-164315/ckm-mountprop-20260924` 并正常重建一次 L1 Server 后，L0
+full/lite rootfs 回归和 L2 `05-test-ckm-k3s.sh` 均返回 `FUNCTIONAL PASS`。内层
+cert-manager CSI、nested agent 均为 Running；未设置 RuntimeClass 的 L2 busybox Pod
+双层 `kubectl exec -it` 成功，`/dev/null` 与 `/dev/ptmx` 均为字符设备。
+
 ### 2026-09-24：缓存构建与干净 L0/L2 回归（已通过）
 
 `BUILD_PROFILE=test` 现可将 `runc-lite`、snapshotter、admission 和 inner bootstrap
