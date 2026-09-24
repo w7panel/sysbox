@@ -28,6 +28,39 @@ For an ordinary code iteration prefer cached test mode. Valid components are
 `deploy`, `bootstrap`, or both. `test` writes `dist/test-images.env`, including
 the bootstrap image that must be applied to CKM explicitly.
 
+### CKM bootstrap payload
+
+The CKM initContainer consumes the flattened bootstrap image, not the ordinary
+deploy image. Its Dockerfile is
+`sysbox-pkgr/k8s/Dockerfile.sysbox-k3s`; `release.sh` builds the deploy image
+first, then flattens it when `BUILD_BOOTSTRAP_IMAGE=true`. Build and push both
+images for a release candidate as follows:
+
+```bash
+MIRROR_PROFILE=china PUSH_IMAGE=true PACKAGE_CHART=false \
+BUILD_BOOTSTRAP_IMAGE=true \
+IMAGE_REPO=docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s IMAGE_TAG=<tag> \
+BOOTSTRAP_IMAGE_REPO=docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap \
+BOOTSTRAP_IMAGE_TAG=<tag> \
+skills/sysbox-in-sysbox-test/scripts/build-release.sh
+```
+
+For a bootstrap-only code iteration, patch a known-good flattened base image:
+
+```bash
+BUILD_PROFILE=test TEST_COMPONENTS=runc-lite,snapshotter,inner-script \
+TEST_TARGETS=bootstrap PUSH_IMAGE=true \
+TEST_BOOTSTRAP_BASE_IMAGE=<known-good-bootstrap-image> \
+TEST_BOOTSTRAP_IMAGE=<test-bootstrap-image> \
+skills/sysbox-in-sysbox-test/scripts/build-release.sh
+```
+
+Read `dist/test-images.env`, set its
+`CKM_INNER_SYSBOX_BOOTSTRAP_IMAGE` in the CKM chart, and allow the selected
+Server's normal rollout to recreate it. Do not overwrite `/usr/bin/runc` or
+restart an unrelated CKM. A bootstrap image alone does not update the L1
+admission image; include `deploy` when admission changed.
+
 ## Test stages
 
 | Stage | Authoritative script | What it validates |
