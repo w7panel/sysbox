@@ -95,3 +95,10 @@ LLM 经常默默选择一种解释然后执行。这个原则强制明确推理�
 - 涉及服务替换或重启时，应先构建并安装所有相关组件，避免版本不一致；验收前重建受影响实例，避免旧实例状态掩盖集成问题。
 - 验收后检查相关服务日志，重点确认无 `panic`、`fatal`、`OOM`、`ENOMEM` 或与本次改动相关的异常错误。
 - 临时测试 pod 验收完成后必须删除。
+
+## 本地构建与 Sysbox-in-Sysbox 验收
+
+- 日常功能回归使用 `BUILD_PROFILE=test`，并显式设置 `TEST_COMPONENTS`、基线镜像和输出镜像；它只替换变更的二进制到已验证镜像，不能替代发布验收。
+- `runc-lite`、snapshotter、admission 或内层启动脚本变更后，运行 `w7panel-doc/sysbox-in-sysbox/06-build-and-test.sh`；它按风险顺序执行 `00`、`02`、`03`、`04`、`05`。只有需要新建 CKM 时才设置 `CREATE_CKM=true`。
+- Chart、发布流程或多个组件同时变更后，使用 `BUILD_PROFILE=release` 完整构建，再执行同一验收流程。日常测试不要执行完整 release。
+- 保留 `.cache/sysbox` 和 Docker 构建缓存以复用 Go 编译与模块下载；仅在磁盘空间紧张且已获用户授权时设置 `CLEAR_BUILD_CACHE=true`。

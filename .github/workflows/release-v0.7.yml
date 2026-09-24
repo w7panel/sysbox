@@ -16,6 +16,10 @@ permissions:
 env:
   SYS_ARCH: amd64
   IMAGE_REPO: ghcr.io/${{ github.repository_owner }}/sysbox-deploy-k3s
+  # The CKM initContainer needs a single-layer payload image; release it from
+  # the exact same source and tag as the normal deploy image.
+  BUILD_BOOTSTRAP_IMAGE: "true"
+  BOOTSTRAP_IMAGE_REPO: ghcr.io/${{ github.repository_owner }}/sysbox-deploy-k3s-bootstrap
   PUSH_IMAGE: "true"
   VERIFY_IMAGE: "true"
   PACKAGE_CHART: "true"

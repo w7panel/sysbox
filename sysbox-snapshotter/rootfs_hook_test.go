@@ -170,6 +170,31 @@ func TestMountsWithRootfsHookRewritesOnlyActiveFuseMount(t *testing.T) {
 	}
 }
 
+func TestMaterializedRootfsPathsUsesRewrittenPVCPaths(t *testing.T) {
+	mounts := []mount.Mount{{
+		Type: "fuse3.fuse-overlayfs",
+		Options: []string{
+			"lowerdir=/snapshotter/snapshots/1/fs",
+			"workdir=/pvc/containers/app/work",
+			"upperdir=/pvc/containers/app/upper",
+		},
+	}}
+	upper, work, err := materializedRootfsPaths(mounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upper != "/pvc/containers/app/upper" || work != "/pvc/containers/app/work" {
+		t.Fatalf("paths = (%q, %q), want PVC upper/work", upper, work)
+	}
+}
+
+func TestMaterializedRootfsPathsRejectsIncompleteMount(t *testing.T) {
+	_, _, err := materializedRootfsPaths([]mount.Mount{{Type: "fuse3.fuse-overlayfs", Options: []string{"upperdir=/upper"}}})
+	if err == nil {
+		t.Fatal("expected incomplete mount error")
+	}
+}
+
 type fakeIdentityResolver struct {
 	request rootfs.RootfsRwLayerRequest
 	err     error

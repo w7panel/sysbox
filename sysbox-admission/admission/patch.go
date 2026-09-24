@@ -15,6 +15,13 @@ type jsonPatch struct {
 
 func patchForPod(original *corev1.Pod, mutated *corev1.Pod) ([]byte, error) {
 	patches := []jsonPatch{}
+	if !reflect.DeepEqual(original.Spec.RuntimeClassName, mutated.Spec.RuntimeClassName) {
+		op := "add"
+		if original.Spec.RuntimeClassName != nil {
+			op = "replace"
+		}
+		patches = append(patches, jsonPatch{Op: op, Path: "/spec/runtimeClassName", Value: mutated.Spec.RuntimeClassName})
+	}
 	if !reflect.DeepEqual(original.Spec.Containers, mutated.Spec.Containers) {
 		patches = append(patches, jsonPatch{Op: "replace", Path: "/spec/containers", Value: mutated.Spec.Containers})
 	}

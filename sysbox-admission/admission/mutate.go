@@ -48,6 +48,12 @@ func (m *Mutator) Mutate(ctx context.Context, pod *corev1.Pod) (*corev1.Pod, err
 
 func (m *Mutator) mutatePod(ctx context.Context, pod *corev1.Pod) ([]RootfsRwLayerEntry, bool, error) {
 	spec := &pod.Spec
+	// A rootfs annotation on a normal L2 Pod selects the lightweight handler.
+	// This keeps ordinary, unannotated Pods on the default overlayfs handler.
+	if (spec.RuntimeClassName == nil || *spec.RuntimeClassName == "") && pod.Annotations[AnnotationRootfsRwLayer] != "" {
+		runtimeClass := RuntimeClassRuncLite
+		spec.RuntimeClassName = &runtimeClass
+	}
 	if spec.RuntimeClassName == nil || !isManagedRuntime(*spec.RuntimeClassName) {
 		return nil, false, nil
 	}

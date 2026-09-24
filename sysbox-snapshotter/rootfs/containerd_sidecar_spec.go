@@ -2,7 +2,9 @@ package rootfs
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	containerdclient "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
@@ -25,6 +27,25 @@ func (s *ContainerdSidecarSpecStore) LoadSidecarSpec(ctx context.Context, reques
 	}
 	defer client.Close()
 	ctx = namespaces.WithNamespace(ctx, "k8s.io")
+	// containerd creates the app task immediately after the pause sidecar. The
+	// sidecar container record can lag that request by a few scheduler ticks.
+	// Wait only for this explicit transient condition; malformed/ambiguous
+	// specs and containerd failures remain fail-fast.
+	for attempt := 0; attempt < 20; attempt++ {
+		spec, err := s.loadOnce(ctx, client, request)
+		if !errors.Is(err, ErrSidecarSpecUnavailable) {
+			return spec, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return nil, ErrSidecarSpecUnavailable
+}
+
+func (s *ContainerdSidecarSpecStore) loadOnce(ctx context.Context, client *containerdclient.Client, request RootfsRwLayerRequest) (*runtimespec.Spec, error) {
 	containers, err := client.Containers(ctx, sidecarContainerFilters(request)...)
 	if err != nil {
 		return nil, fmt.Errorf("list containerd containers for sidecar spec lookup: %w", err)

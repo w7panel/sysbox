@@ -80,6 +80,7 @@ Helm 二进制塞进测试镜像，也能清楚区分当前操作落在哪一层
 | 3 | `03-test-l0-rootfs.sh` | 回归 L0 lite rootfs、无注解 local-path 初始化复制及 special bind |
 | 4 | `04-install-ckm-chart.sh` | 在 CKM 自有 K3s 安装 snapshotter、admission 与 sysbox-runc-lite 配置 |
 | 5 | `05-test-ckm-k3s.sh` | 创建并回归 sysbox-runc-lite workload；rootfs 结果以最新现场状态为准 |
+| 6 | `06-build-and-test.sh` | 快速增量构建或完整 release 后，按 00/02/03/04/05 运行验收 |
 | 6 | `99-cleanup.sh` | 清理测试资源，默认保留 CKM |
 
 脚本不会自动跳过失败步骤。需要重建 CKM Server Pod 或删除资源时，应先人工确认；这些操作
@@ -97,6 +98,22 @@ bash ./04-install-ckm-chart.sh
 bash ./05-test-ckm-k3s.sh
 bash ./99-cleanup.sh
 ```
+
+日常修改不要重建完整 release。以已验证 bootstrap 镜像为基线，仅编译并注入改动组件：
+
+```bash
+BUILD_PROFILE=test \
+TEST_COMPONENTS=runc-lite,snapshotter,inner-script \
+TEST_TARGETS=bootstrap \
+TEST_BOOTSTRAP_BASE_IMAGE=docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:<known-good> \
+TEST_BOOTSTRAP_IMAGE=docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:<test-tag> \
+PUSH_IMAGE=true \
+bash ./06-build-and-test.sh
+```
+
+脚本只构建、推送和执行验收，不会私自重启 CKM。它会输出需要设置到 CKM controller 的
+`CKM_INNER_SYSBOX_BOOTSTRAP_IMAGE`；完成正常的 CKM Server rollout 后再运行功能测试。
+Chart 或发布链路改动才使用 `BUILD_PROFILE=release bash ./06-build-and-test.sh`。
 
 查看 Deployment、标签和资源限制（命令在 CKM 内 K3s 执行）：
 
@@ -177,6 +194,9 @@ CKM_NAME=ckm-sysbox-manual-$(date +%s) \
 CKM_NAMESPACE=k3k-console-164315 \
 CREATE_CKM=true bash ./01-create-ckm.sh
 ```
+
+不要复用已删除 CKM 的名称。local-path PVC 若仍在 Terminating 状态，controller 会把它误作
+新 Server 磁盘并尝试扩容；`01-create-ckm.sh` 会拒绝这种情况，保留旧 PVC 不做修改。
 
 新建对象的关键字段是：
 

@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -520,11 +521,104 @@ func (o *snapshotter) mounts(ctx context.Context, key string, s storage.Snapshot
 			Options: options,
 		},
 	}
+	if s.Kind == snapshots.KindActive && runningInNestedUserNS() {
+		// A fuse-overlayfs mount created inside the L1 Sysbox user namespace
+		// cannot be used as a mount target by the L2 OCI runtime (proc, tmpfs,
+		// projected volumes, and PVC binds all fail with ENOENT). Materialize
+		// the merged lower+upper view once into the active snapshot directory,
+		// then hand containerd a normal bind mount. The active directory is the
+		// durable writable layer, so all subsequent L2 changes persist there.
+		// The rootfs hook must run before materialization: it may move the
+		// writable layer from the snapshot directory to a PVC. Materializing
+		// before the rewrite silently bypasses rootfs persistence.
+		rewritten, err := applyRootfsHook(ctx, o.rootfsHooks, key, mounts)
+		if err != nil {
+			return nil, err
+		}
+		upper, work, err := materializedRootfsPaths(rewritten)
+		if err != nil {
+			return nil, err
+		}
+		if err := o.materializeActiveSnapshot(ctx, s.ID, rewritten[0], upper, work); err != nil {
+			return nil, err
+		}
+		return []mount.Mount{{
+			Source:  upper,
+			Type:    "bind",
+			Options: []string{"rw", "rbind"},
+		}}, nil
+	}
 	if s.Kind != snapshots.KindActive {
 		return mounts, nil
 	}
 	return applyRootfsHook(ctx, o.rootfsHooks, key, mounts)
 
+}
+
+func runningInNestedUserNS() bool {
+	b, err := os.ReadFile("/proc/self/uid_map")
+	if err != nil {
+		return false
+	}
+	fields := strings.Fields(string(b))
+	if len(fields) < 3 || fields[0] != "0" {
+		return false
+	}
+	hostID, err := strconv.ParseUint(fields[1], 10, 32)
+	if err != nil {
+		return false
+	}
+	return hostID != 0
+}
+
+func materializedRootfsPaths(mounts []mount.Mount) (upper, work string, err error) {
+	if len(mounts) != 1 || mounts[0].Type != "fuse3."+fuseoverlayfsBinary {
+		return "", "", fmt.Errorf("expected one active fuse-overlayfs mount")
+	}
+	for _, option := range mounts[0].Options {
+		switch {
+		case strings.HasPrefix(option, "upperdir="):
+			upper = strings.TrimPrefix(option, "upperdir=")
+		case strings.HasPrefix(option, "workdir="):
+			work = strings.TrimPrefix(option, "workdir=")
+		}
+	}
+	if upper == "" || work == "" {
+		return "", "", fmt.Errorf("active fuse-overlayfs mount has no upperdir or workdir")
+	}
+	return upper, work, nil
+}
+
+func (o *snapshotter) materializeActiveSnapshot(ctx context.Context, snapshotID string, mergedMount mount.Mount, upper, work string) error {
+	// The marker lives in workdir, never in the container rootfs. The workdir
+	// is otherwise unused after this function returns a bind-mounted rootfs.
+	// This lets an existing PVC upperdir be converted once without treating a
+	// non-empty directory as proof that its lower image layers were copied.
+	marker := filepath.Join(work, ".sysbox-materialized-rootfs")
+	if _, err := os.Stat(marker); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat rootfs materialization marker: %w", err)
+	}
+	merged := filepath.Join(o.root, "snapshots", snapshotID, "merged")
+	if err := os.MkdirAll(merged, 0o755); err != nil {
+		return fmt.Errorf("create temporary merged rootfs: %w", err)
+	}
+	if err := mergedMount.Mount(merged); err != nil {
+		return fmt.Errorf("mount temporary merged rootfs: %w", err)
+	}
+	defer func() {
+		if err := mount.UnmountAll(merged, 0); err != nil {
+			log.G(ctx).WithError(err).Warn("failed to unmount temporary merged rootfs")
+		}
+	}()
+	if err := fs.CopyDir(upper, merged, fs.WithAllowXAttrErrors()); err != nil {
+		return fmt.Errorf("materialize active rootfs: %w", err)
+	}
+	if err := os.WriteFile(marker, []byte("materialized\n"), 0o600); err != nil {
+		return fmt.Errorf("write rootfs materialization marker: %w", err)
+	}
+	return nil
 }
 
 type RootfsHooks struct {

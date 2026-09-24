@@ -995,3 +995,18 @@ admission Deployment 和 `RuntimeClass/sysbox-runc-lite`。
 chart 后确认 L1 没有 `w7panel-sysbox-installer` DaemonSet。重建 Server 加载 handler 后，
 `05-test-ckm-k3s.sh` 返回 `FUNCTIONAL PASS`：无注解 CSI volume-init、rootfs 持久化和
 special bind 全部通过。
+
+## CKM 名称复用与遗留 PVC（2026-09-24）
+
+218 曾遗留 `varlibrancherk3s-k3k-ckm-test-server-0`：它属于已删除 CKM 的旧 UID，处于
+Terminating 状态且容量为 20Gi。新建同名 `ckm-test` 时，CKM controller 尝试将该 PVC
+扩容到 40Gi；local-path 不支持该操作，因此 CR 永远停在 `creating`，L1 Pod 不会出现。
+这不是 Sysbox 或 bootstrap 镜像故障。测试必须使用唯一的 `CKM_NAME`；
+`01-create-ckm.sh` 现在会检测同名 Server PVC 后失败，不会删除或修改旧数据。
+
+使用完整 release 测试镜像
+`docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-buildcache-rootfs-webhook-20260924`
+及对应 bootstrap 镜像新建 `ckm-build2-20260924` 后，重启一次 L1 以加载 lite handler，
+`05-test-ckm-k3s.sh` 返回 `FUNCTIONAL PASS`：webhook 自动提升 rootfs 注解 Pod 至
+`sysbox-runc-lite` 并注入 sidecar；无注解 CSI 初始化复制、rootfs 持久化和 special bind
+跨 Pod 重建均通过。

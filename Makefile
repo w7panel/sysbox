@@ -33,6 +33,9 @@ export EDITION := Community Edition (CE)
 export PACKAGE := sysbox-ce
 export HOST_UID ?= $(shell id -u)
 export HOST_GID ?= $(shell id -g)
+GOCACHE ?= $(CURDIR)/.cache/go-build
+GOMODCACHE ?= $(CURDIR)/.cache/go-mod
+GIT_CONFIG ?= /root/.gitconfig
 
 # Obtain the current system architecture.
 UNAME_M := $(shell uname -m)
@@ -153,9 +156,6 @@ export TEST_VOL3
 EGRESS_IFACE := $(shell ip route show | awk '/default via/ {print $$5}')
 EGRESS_IFACE_MTU := $(shell ip link show dev $(EGRESS_IFACE) | awk '/mtu/ {print $$5}')
 
-# Ensure that a gitconfig file is always present.
-$(shell touch $(HOME)/.gitconfig)
-
 #
 # build targets
 # TODO: parallelize building of runc, fs, and mgr; note that grpc must be built before these.
@@ -176,8 +176,9 @@ DOCKER_SYSBOX_BLD := docker run --privileged --rm --runtime=runc      \
 			-e SYS_ARCH=$(SYS_ARCH)                       \
 			-e TARGET_ARCH=$(TARGET_ARCH)                 \
 			-v $(CURDIR):$(PROJECT)                       \
-			-v $(GOPATH)/pkg/mod:/go/pkg/mod              \
-			-v $(HOME)/.gitconfig:/root/.gitconfig        \
+			-v $(GOMODCACHE):/go/pkg/mod                  \
+			-v $(GOCACHE):/root/.cache/go-build           \
+			-v $(GIT_CONFIG):/root/.gitconfig:ro          \
 			-v /lib/modules/$(KERNEL_REL):/lib/modules/$(KERNEL_REL):ro \
 			$(KERNEL_HEADERS_MOUNTS) \
 			$(TEST_IMAGE)
@@ -187,8 +188,9 @@ DOCKER_SYSBOX_BLD_FLATCAR := docker run --privileged --rm --runtime=runc      \
 			--name sysbox-build                           \
 			-e ARCH=$(ARCH)                               \
 			-v $(CURDIR):$(PROJECT)                       \
-			-v $(GOPATH)/pkg/mod:/go/pkg/mod              \
-			-v $(HOME)/.gitconfig:/root/.gitconfig        \
+			-v $(GOMODCACHE):/go/pkg/mod                  \
+			-v $(GOCACHE):/root/.cache/go-build           \
+			-v $(GIT_CONFIG):/root/.gitconfig:ro          \
 			$(TEST_IMAGE_FLATCAR)
 
 sysbox: ## Build sysbox (the build occurs inside a container, so the host is not polluted)
@@ -317,9 +319,10 @@ DOCKER_RUN := docker run --privileged --rm --runtime=runc             \
 			-v $(TEST_VOL1):/var/lib                      \
 			-v $(TEST_VOL2):/mnt/scratch                  \
 			-v $(TEST_VOL3):/var/run                      \
-			-v $(GOPATH)/pkg/mod:/go/pkg/mod              \
+			-v $(GOMODCACHE):/go/pkg/mod                  \
+			-v $(GOCACHE):/root/.cache/go-build           \
 			-v /lib/modules/$(KERNEL_REL):/lib/modules/$(KERNEL_REL):ro \
-			-v $(HOME)/.gitconfig:/root/.gitconfig        \
+			-v $(GIT_CONFIG):/root/.gitconfig:ro          \
 			$(KERNEL_HEADERS_MOUNTS) \
 			$(TEST_IMAGE)
 
@@ -333,9 +336,10 @@ DOCKER_RUN_TTY := docker run -it --privileged --rm --runtime=runc         \
 			-v $(TEST_VOL1):/var/lib                      \
 			-v $(TEST_VOL2):/mnt/scratch                  \
 			-v $(TEST_VOL3):/var/run                      \
-			-v $(GOPATH)/pkg/mod:/go/pkg/mod              \
+			-v $(GOMODCACHE):/go/pkg/mod                  \
+			-v $(GOCACHE):/root/.cache/go-build           \
 			-v /lib/modules/$(KERNEL_REL):/lib/modules/$(KERNEL_REL):ro \
-			-v $(HOME)/.gitconfig:/root/.gitconfig        \
+			-v $(GIT_CONFIG):/root/.gitconfig:ro          \
 			$(KERNEL_HEADERS_MOUNTS) \
 			$(TEST_IMAGE)
 
@@ -351,9 +355,10 @@ DOCKER_RUN_SYSTEMD := docker run -d --rm --runtime=runc --privileged  \
 			-v $(TEST_VOL1):/var/lib                      \
 			-v $(TEST_VOL2):/mnt/scratch                  \
 			-v $(TEST_VOL3):/var/run                      \
-			-v $(GOPATH)/pkg/mod:/go/pkg/mod              \
+			-v $(GOMODCACHE):/go/pkg/mod                  \
+			-v $(GOCACHE):/root/.cache/go-build           \
 			-v /lib/modules:/lib/modules:ro               \
-			-v $(HOME)/.gitconfig:/root/.gitconfig        \
+			-v $(GIT_CONFIG):/root/.gitconfig:ro          \
 			$(KERNEL_HEADERS_MOUNTS)                      \
 			--mount type=tmpfs,destination=/run           \
 			--mount type=tmpfs,destination=/run/lock      \

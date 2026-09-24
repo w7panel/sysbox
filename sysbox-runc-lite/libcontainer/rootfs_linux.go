@@ -42,7 +42,10 @@ type mountConfig struct {
 func needsSetupDev(config *configs.Config) bool {
 	for _, m := range config.Mounts {
 		if m.Device == "bind" && utils.CleanPath(m.Destination) == "/dev" {
-			return false
+			// The host /dev bind is rejected from the L1 user namespace. Fall
+			// back to runc's normal device setup after the failed bind instead
+			// of preserving copied regular files such as /dev/null.
+			return userns.RunningInUserNS()
 		}
 	}
 	return true
@@ -68,6 +71,10 @@ func prepareRootfs(pipe io.ReadWriter, iConfig *initConfig, mountFds []int) (err
 		rootlessCgroups: iConfig.RootlessCgroups,
 		cgroupns:        config.Namespaces.Contains(configs.NEWCGROUP),
 	}
+	// The nested snapshotter materializes FUSE rootfs into a normal bind mount
+	// before OCI create. Keep the upstream device setup enabled so /dev/null
+	// and the remaining standard device nodes retain their character-device
+	// semantics instead of becoming copied regular files.
 	setupDev := needsSetupDev(config)
 	for i, m := range config.Mounts {
 		for _, precmd := range m.PremountCmds {
@@ -732,6 +739,7 @@ func bindMountDeviceNode(rootfs, dest string, node *devices.Device) error {
 	if f != nil {
 		_ = f.Close()
 	}
+
 	return utils.WithProcfd(rootfs, dest, func(procfd string) error {
 		return mount(node.Path, dest, procfd, "bind", unix.MS_BIND, "")
 	})

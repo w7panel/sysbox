@@ -6,10 +6,10 @@ source "$(dirname "$0")/_common.sh"
 check_common
 discover_l1
 log "testing a sysbox-runc-lite workload directly in CKM K3s with ${TEST_IMAGE}"
-if ! l1_exec test -x /var/lib/rancher/k3s/sysbox-runc-lite && ! l1_exec test -x /usr/local/bin/sysbox-runc-lite; then
+if ! l1_exec test -x /var/lib/rancher/k3s/sysbox-runc-lite && ! l1_exec test -x /usr/local/bin/sysbox-runc-lite && ! l1_exec test -x /opt/sysbox/bin/generic/runc-lite; then
   die 'sysbox-runc-lite is not installed in the CKM server image/data volume; install it before running the workload test'
 fi
-l1_exec sh -c '(/var/lib/rancher/k3s/sysbox-runc-lite features 2>/dev/null || /usr/local/bin/sysbox-runc-lite features 2>/dev/null) | grep -q '"'"'"user_namespaces": true'"'"'' \
+l1_exec sh -c '(/var/lib/rancher/k3s/sysbox-runc-lite features 2>/dev/null || /usr/local/bin/sysbox-runc-lite features 2>/dev/null || /opt/sysbox/bin/generic/runc-lite features 2>/dev/null) | grep -q '"'"'"user_namespaces": true'"'"'' \
   || die 'sysbox-runc-lite does not advertise linux.user_namespaces=true'
 l1_kubectl -n "$CHART_NAMESPACE" delete deployment "$CKM_TEST_DEPLOYMENT" --ignore-not-found --wait=true
 l1_kubectl -n "$CHART_NAMESPACE" delete pvc "$CKM_TEST_VOLUME_INIT_PVC" --ignore-not-found --wait=true
@@ -53,7 +53,6 @@ spec:
       annotations:
         sysbox/rootfs-rw-layer: '[{"name":"nginx","volumeName":"rootfs","path":"nginx","persistentSpecialMounts":true,"specialPath":["/srv/data"]}]'
     spec:
-      runtimeClassName: sysbox-runc-lite
       containers:
       - name: nginx
         image: ${TEST_IMAGE}
@@ -72,7 +71,8 @@ EOF
 l1_kubectl -n "$CHART_NAMESPACE" rollout status "deployment/$CKM_TEST_DEPLOYMENT" --timeout=180s
 pod="$(l1_kubectl -n "$CHART_NAMESPACE" get pod -l "app=$CKM_TEST_DEPLOYMENT" --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')"
 [ -n "$pod" ] || die 'sysbox-runc-lite workload Pod was not created'
-[ "$(l1_kubectl -n "$CHART_NAMESPACE" get pod "$pod" -o jsonpath='{.spec.runtimeClassName}')" = sysbox-runc-lite ] || die 'workload runtime is not sysbox-runc-lite'
+[ "$(l1_kubectl -n "$CHART_NAMESPACE" get pod "$pod" -o jsonpath='{.spec.runtimeClassName}')" = sysbox-runc-lite ] || die 'rootfs annotation must be promoted to sysbox-runc-lite by admission'
+[ -n "$(l1_kubectl -n "$CHART_NAMESPACE" get pod "$pod" -o jsonpath='{.spec.containers[?(@.name=="sysbox-rootfs")].name}')" ] || die 'rootfs sidecar was not injected by admission'
 annotation="$(l1_kubectl -n "$CHART_NAMESPACE" get pod "$pod" -o jsonpath='{.metadata.annotations.sysbox\\/volume-init}')"
 [ -z "$annotation" ] || die 'sysbox/volume-init annotation must not be present; runtime discovery must initialize the CSI PVC'
 l1_rootfs_exec "$pod" nginx 'test -f /usr/share/nginx/html/index.html; test -f /usr/share/nginx/html/50x.html; mkdir -p /srv/data; echo volume-persisted > /usr/share/nginx/html/.sysbox-runc-lite-marker; echo rootfs-persisted > /srv/data/.sysbox-runc-lite-rootfs-marker'

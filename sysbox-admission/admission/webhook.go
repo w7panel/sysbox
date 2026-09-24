@@ -9,7 +9,7 @@ import (
 
 const WebhookName = "sysbox-webhook-mutator"
 
-const SysboxPodMatchConditionExpression = `has(object.spec.runtimeClassName) && (object.spec.runtimeClassName == "sysbox-runc" || object.spec.runtimeClassName == "sysbox-runc-lite")`
+const SysboxPodMatchConditionExpression = `(has(object.spec.runtimeClassName) && (object.spec.runtimeClassName == "sysbox-runc" || object.spec.runtimeClassName == "sysbox-runc-lite")) || (has(object.metadata.annotations) && "sysbox/rootfs-rw-layer" in object.metadata.annotations && object.metadata.annotations["sysbox/rootfs-rw-layer"] != "")`
 
 type WebhookConfig struct {
 	Name        string

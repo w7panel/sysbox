@@ -17,6 +17,13 @@ fi
 CKM_SELECTOR="cluster=${CKM_NAME},role=server"
 CKM_SELECTED=true
 export CKM_SELECTOR CKM_SELECTED
+# A deleted CKM can leave a local-path PVC in Terminating state. Reusing its
+# name makes the controller treat that PVC as the new server disk and attempt
+# an unsupported resize. Never modify such a volume from a test script.
+server_pvc="varlibrancherk3s-k3k-${CKM_NAME}-server-0"
+if outer_kubectl -n "$CKM_NAMESPACE" get pvc "$server_pvc" >/dev/null 2>&1; then
+  die "server PVC $CKM_NAMESPACE/$server_pvc already exists; choose a new CKM_NAME (the test will not alter an existing PVC)"
+fi
 outer_kubectl create namespace "$CKM_NAMESPACE" --dry-run=client -o yaml | outer_kubectl apply -f - >/dev/null
 log "creating CKM $CKM_NAMESPACE/$CKM_NAME with inner Sysbox=$INNER_SYSBOX_ENABLED"
 outer_kubectl apply -f - <<EOF

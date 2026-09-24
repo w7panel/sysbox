@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 #
-# Build a Sysbox release from the local source tree:
+# Build a Sysbox release from the local source tree. The default profile builds
+# all release artifacts. For a quick nested-runtime regression, patch only the
+# changed binaries into a known-good image, for example:
+# BUILD_PROFILE=test TEST_COMPONENTS=runc-lite,snapshotter,inner-script \
+# TEST_TARGETS=bootstrap TEST_BOOTSTRAP_BASE_IMAGE=repo/bootstrap:base \
+# TEST_BOOTSTRAP_IMAGE=repo/bootstrap:test ./w7panel-doc/release.sh
 #   1. build the generic sysbox-ce deb
 #   2. build and verify the K3s deploy image
 #   3. write release artifacts under dist/
@@ -13,6 +18,15 @@ PKGR_DIR="${ROOT_DIR}/sysbox-pkgr"
 K8S_DIR="${PKGR_DIR}/k8s"
 CHART_DIR="${CHART_DIR:-${ROOT_DIR}/charts/w7panel-sysbox}"
 DIST_DIR="${DIST_DIR:-${ROOT_DIR}/dist}"
+CACHE_DIR="${SYSBOX_CACHE_DIR:-${ROOT_DIR}/.cache/sysbox}"
+BUILD_PROFILE="${BUILD_PROFILE:-release}"
+TEST_COMPONENTS="${TEST_COMPONENTS:-}"
+TEST_TARGETS="${TEST_TARGETS:-bootstrap}"
+TEST_BASE_IMAGE="${TEST_BASE_IMAGE:-}"
+TEST_BOOTSTRAP_BASE_IMAGE="${TEST_BOOTSTRAP_BASE_IMAGE:-}"
+TEST_IMAGE="${TEST_IMAGE:-}"
+TEST_BOOTSTRAP_IMAGE="${TEST_BOOTSTRAP_IMAGE:-}"
+CLEAR_BUILD_CACHE="${CLEAR_BUILD_CACHE:-false}"
 
 detect_sys_arch() {
     case "$(uname -m)" in
@@ -53,6 +67,13 @@ fi
 IMAGE_REPO="${IMAGE_REPO:-ghcr.io/w7panel/sysbox-deploy-k3s}"
 IMAGE_TAG="${IMAGE_TAG:-${RELEASE_TAG}}"
 IMAGE="${IMAGE:-${IMAGE_REPO}:${IMAGE_TAG}}"
+# The bootstrap image is consumed by CKM's initContainer before its nested K3s
+# starts. It is intentionally flattened: some nested containerd versions fail
+# while extracting the normal multi-layer deploy image.
+BUILD_BOOTSTRAP_IMAGE="${BUILD_BOOTSTRAP_IMAGE:-false}"
+BOOTSTRAP_IMAGE_REPO="${BOOTSTRAP_IMAGE_REPO:-${IMAGE_REPO}-bootstrap}"
+BOOTSTRAP_IMAGE_TAG="${BOOTSTRAP_IMAGE_TAG:-${IMAGE_TAG}}"
+BOOTSTRAP_IMAGE="${BOOTSTRAP_IMAGE:-${BOOTSTRAP_IMAGE_REPO}:${BOOTSTRAP_IMAGE_TAG}}"
 PUSH_IMAGE="${PUSH_IMAGE:-false}"
 SAVE_IMAGE_TAR="${SAVE_IMAGE_TAR:-false}"
 VERIFY_IMAGE="${VERIFY_IMAGE:-true}"
@@ -86,6 +107,25 @@ GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 info() { printf '[INFO] %s\n' "$*"; }
 warn() { printf '[WARN] %s\n' "$*" >&2; }
 die() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
+
+setup_build_cache() {
+    [[ "${CLEAR_BUILD_CACHE}" == true ]] && rm -rf "${CACHE_DIR}"
+    mkdir -p "${CACHE_DIR}/go-build" "${CACHE_DIR}/go-mod" "${CACHE_DIR}/go-path"
+    export GOCACHE="${GOCACHE:-${CACHE_DIR}/go-build}"
+    export GOMODCACHE="${GOMODCACHE:-${CACHE_DIR}/go-mod}"
+    export GOPATH="${GOPATH:-${CACHE_DIR}/go-path}"
+    if [[ -z "${DOCKER_CONFIG:-}" ]]; then
+        export DOCKER_CONFIG="${CACHE_DIR}/docker"
+        mkdir -p "${DOCKER_CONFIG}"
+        # Buildx writes activity state below DOCKER_CONFIG. Preserve an
+        # existing login when available, but never modify its read-only source.
+        if [[ -r /root/.docker/config.json && ! -e "${DOCKER_CONFIG}/config.json" ]]; then
+            cp /root/.docker/config.json "${DOCKER_CONFIG}/config.json"
+        fi
+    fi
+}
+
+contains_csv() { [[ ",$1," == *",$2,"* ]]; }
 
 need_cmd() {
     command -v "$1" >/dev/null 2>&1 || die "missing command: $1"
@@ -206,6 +246,11 @@ extract_bins() {
 	    "${tmpdir}/usr/bin/sysbox-snapshotter" \
 	    "${tmpdir}/usr/bin/sysbox-admission" \
 	    "${K8S_DIR}/bin/sysbox-ce/generic/"
+# sysbox-inner-k3s.sh uses sysbox-runc-lite for K3s' default runc handler,
+# while the generic payload also exposes runc-lite. Keep both aliases in sync
+# so a release cannot silently leave the configured runtime stale.
+install -m 0755 "${ROOT_DIR}/sysbox-runc-lite/build/${SYS_ARCH}/sysbox-runc-lite" \
+	    "${K8S_DIR}/bin/sysbox-ce/generic/runc-lite"
 install -m 0755 "${ROOT_DIR}/sysbox-runc-lite/build/${SYS_ARCH}/sysbox-runc-lite" \
 	    "${K8S_DIR}/bin/sysbox-ce/generic/sysbox-runc-lite"
     rm -rf "${tmpdir}"
@@ -237,6 +282,64 @@ build_installer_image() {
     fi
 }
 
+build_test_components() {
+    [[ -n "${TEST_COMPONENTS}" ]] || die 'BUILD_PROFILE=test requires TEST_COMPONENTS (runc-lite,snapshotter,admission,inner-script)'
+    [[ "${SYS_ARCH}" == "${HOST_SYS_ARCH}" ]] || die 'BUILD_PROFILE=test supports only the host architecture'
+    contains_csv "${TEST_COMPONENTS}" runc-lite && make -C "${ROOT_DIR}" sysbox-runc-lite TARGET_ARCH="${SYS_ARCH}"
+    contains_csv "${TEST_COMPONENTS}" snapshotter && make -C "${ROOT_DIR}" sysbox-snapshotter TARGET_ARCH="${SYS_ARCH}"
+    contains_csv "${TEST_COMPONENTS}" admission && make -C "${ROOT_DIR}" sysbox-admission TARGET_ARCH="${SYS_ARCH}"
+    for component in ${TEST_COMPONENTS//,/ }; do
+        case "${component}" in runc-lite|snapshotter|admission|inner-script) ;; *) die "unknown TEST_COMPONENTS entry: ${component}" ;; esac
+    done
+}
+
+patch_test_image() {
+    local base="$1" output="$2" kind="$3" container
+    [[ -n "${base}" && -n "${output}" ]] || die "BUILD_PROFILE=test requires ${kind} base and output images"
+    container="$("${DOCKER}" create "${base}" /bin/true)"
+    if contains_csv "${TEST_COMPONENTS}" runc-lite; then
+        "${DOCKER}" cp "${ROOT_DIR}/sysbox-runc-lite/build/${SYS_ARCH}/sysbox-runc-lite" "${container}:/opt/sysbox/bin/generic/runc-lite"
+        "${DOCKER}" cp "${ROOT_DIR}/sysbox-runc-lite/build/${SYS_ARCH}/sysbox-runc-lite" "${container}:/opt/sysbox/bin/generic/sysbox-runc-lite"
+    fi
+    contains_csv "${TEST_COMPONENTS}" snapshotter && "${DOCKER}" cp "${ROOT_DIR}/sysbox-snapshotter/build/${SYS_ARCH}/sysbox-snapshotter" "${container}:/opt/sysbox/bin/generic/sysbox-snapshotter"
+    if contains_csv "${TEST_COMPONENTS}" admission && [[ "${kind}" == deploy ]]; then
+        "${DOCKER}" cp "${ROOT_DIR}/sysbox-admission/build/${SYS_ARCH}/sysbox-admission" "${container}:/usr/local/bin/sysbox-admission"
+        "${DOCKER}" cp "${ROOT_DIR}/sysbox-admission/build/${SYS_ARCH}/sysbox-admission" "${container}:/opt/sysbox/bin/generic/sysbox-admission"
+    fi
+    contains_csv "${TEST_COMPONENTS}" inner-script && "${DOCKER}" cp "${K8S_DIR}/scripts/sysbox-inner-k3s.sh" "${container}:/opt/sysbox/scripts/sysbox-inner-k3s.sh"
+    "${DOCKER}" commit "${container}" "${output}" >/dev/null
+    "${DOCKER}" rm "${container}" >/dev/null
+    if [[ "${PUSH_IMAGE}" == true ]]; then
+        "${DOCKER}" push "${output}"
+    fi
+}
+
+build_test_images() {
+    build_test_components
+    mkdir -p "${DIST_DIR}"
+    case "${TEST_TARGETS}" in
+        deploy|bootstrap|deploy,bootstrap|bootstrap,deploy) ;;
+        *) die 'BUILD_PROFILE=test TEST_TARGETS must be deploy, bootstrap, or deploy,bootstrap' ;;
+    esac
+    if contains_csv "${TEST_TARGETS}" deploy; then
+        patch_test_image "${TEST_BASE_IMAGE}" "${TEST_IMAGE}" deploy
+    fi
+    if contains_csv "${TEST_TARGETS}" bootstrap; then
+        patch_test_image "${TEST_BOOTSTRAP_BASE_IMAGE}" "${TEST_BOOTSTRAP_IMAGE}" bootstrap
+    fi
+    {
+        if contains_csv "${TEST_TARGETS}" deploy; then
+            printf 'export SYSBOX_IMAGE_REPO=%q\n' "${TEST_IMAGE%:*}"
+            printf 'export SYSBOX_IMAGE_TAG=%q\n' "${TEST_IMAGE##*:}"
+        fi
+        if contains_csv "${TEST_TARGETS}" bootstrap; then
+            printf 'export CKM_INNER_SYSBOX_BOOTSTRAP_IMAGE=%q\n' "${TEST_BOOTSTRAP_IMAGE}"
+        fi
+        printf 'export SYSBOX_RUNC_LITE_BINARY=%q\n' "${ROOT_DIR}/sysbox-runc-lite/build/${SYS_ARCH}/sysbox-runc-lite"
+    } > "${DIST_DIR}/test-images.env"
+    info "Fast test artifacts: ${DIST_DIR}/test-images.env"
+}
+
 verify_images() {
     [[ "${VERIFY_IMAGE}" == "true" ]] || return 0
 
@@ -248,7 +351,30 @@ verify_images() {
 	"${DOCKER}" run --rm "${IMAGE}" /opt/sysbox/bin/generic/sysbox-mgr --version
 	"${DOCKER}" run --rm "${IMAGE}" /opt/sysbox/bin/generic/sysbox-snapshotter --version
 	"${DOCKER}" run --rm "${IMAGE}" /usr/local/bin/sysbox-admission --version
+	"${DOCKER}" run --rm "${IMAGE}" /opt/sysbox/bin/generic/runc-lite --version
 	"${DOCKER}" run --rm "${IMAGE}" /opt/sysbox/bin/generic/sysbox-runc-lite --version
+}
+
+build_bootstrap_image() {
+    local container_id
+
+    [[ "${BUILD_BOOTSTRAP_IMAGE}" == "true" ]] || return 0
+
+    info "Flatten bootstrap image ${BOOTSTRAP_IMAGE} from ${IMAGE}"
+    container_id="$("${DOCKER}" create "${IMAGE}")"
+    # docker import intentionally makes one filesystem layer. The bootstrap is
+    # invoked explicitly as /bin/sh by the CKM initContainer, so it needs the
+    # payload filesystem rather than the deploy-image CMD or ENTRYPOINT.
+    "${DOCKER}" export "${container_id}" | "${DOCKER}" import - "${BOOTSTRAP_IMAGE}"
+    "${DOCKER}" rm "${container_id}" >/dev/null
+
+    info "Verify flattened bootstrap payload"
+    "${DOCKER}" run --rm "${BOOTSTRAP_IMAGE}" /bin/sh -ec '
+        test -x /opt/sysbox/scripts/sysbox-inner-k3s.sh
+        test -x /opt/sysbox/bin/generic/sysbox-runc
+        test -x /opt/sysbox/bin/generic/runc-lite
+	    test -x /opt/sysbox/bin/generic/sysbox-runc-lite
+    '
 }
 
 push_images() {
@@ -256,6 +382,11 @@ push_images() {
 
     info "Push deploy image ${IMAGE}"
     "${DOCKER}" push "${IMAGE}"
+
+    if [[ "${BUILD_BOOTSTRAP_IMAGE}" == "true" ]]; then
+        info "Push bootstrap image ${BOOTSTRAP_IMAGE}"
+        "${DOCKER}" push "${BOOTSTRAP_IMAGE}"
+    fi
 }
 
 write_image_artifacts() {
@@ -269,6 +400,11 @@ write_image_artifacts() {
         echo "installer_image=${IMAGE}"
         "${DOCKER}" image inspect "${IMAGE}" --format 'installer_image_id={{.Id}}'
         "${DOCKER}" image inspect "${IMAGE}" --format 'installer_repo_digests={{json .RepoDigests}}'
+        if [[ "${BUILD_BOOTSTRAP_IMAGE}" == "true" ]]; then
+            echo "bootstrap_image=${BOOTSTRAP_IMAGE}"
+            "${DOCKER}" image inspect "${BOOTSTRAP_IMAGE}" --format 'bootstrap_image_id={{.Id}}'
+            "${DOCKER}" image inspect "${BOOTSTRAP_IMAGE}" --format 'bootstrap_repo_digests={{json .RepoDigests}}'
+        fi
     } > "${DIST_DIR}/image-metadata.txt"
 
     if [[ "${SAVE_IMAGE_TAR}" == "true" ]]; then
@@ -439,8 +575,16 @@ main() {
     local deb
 
     validate_arch
+    case "${BUILD_PROFILE}" in release|test) ;; *) die 'BUILD_PROFILE must be release or test' ;; esac
     need_cmd make
     need_cmd "${DOCKER}"
+    setup_build_cache
+
+    if [[ "${BUILD_PROFILE}" == test ]]; then
+        build_test_images
+        return
+    fi
+
     need_cmd "${DPKG}"
     need_cmd "${GIT}"
     need_cmd sha256sum
@@ -456,6 +600,7 @@ main() {
     extract_bins "${deb}"
     build_installer_image
     verify_images
+    build_bootstrap_image
     push_images
     write_image_artifacts
     package_chart
@@ -465,6 +610,9 @@ main() {
     info "Release complete: ${RELEASE_TAG}"
     info "Artifacts: ${DIST_DIR}"
     info "Installer image: ${IMAGE}"
+    if [[ "${BUILD_BOOTSTRAP_IMAGE}" == "true" ]]; then
+        info "Bootstrap image: ${BOOTSTRAP_IMAGE}"
+    fi
 }
 
 main "$@"
