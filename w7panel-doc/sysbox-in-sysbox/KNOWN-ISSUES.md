@@ -19,6 +19,12 @@ Server 仍必须保持 `runtimeClassName=sysbox-runc` 与 `hostUsers:false`；L2
 `mount --make-*`、`mountpoint` 与 `mount --bind` 操作；不再把 `/`、`/run`、kubelet、K3s
 路径或 cert-manager/socket 路径在启动时改为 shared。
 
+`libcontainer/specconv` 对该 OCI 选项的解析由单测锁定为
+`MS_SHARED|MS_REC`；`persistent_special_mounts_test.go` 同时锁定 special mount 的
+`rbind,rshared` 选项。L2 非特权 user namespace 的 mountinfo 不一定显示 shared peer group，
+因此本轮以 runc 实际参数、解析标志和业务 special-bind 回归为验收依据，不将该 mountinfo
+显示差异误报为 CKM 启动脚本回退。
+
 变更前的 CKM 分支已推送回滚 tag
 `backup-before-ckm-mount-removal-20260924`。218 使用以下测试镜像：
 
