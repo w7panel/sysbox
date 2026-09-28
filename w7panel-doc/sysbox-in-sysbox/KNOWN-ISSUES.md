@@ -12,6 +12,46 @@ Server 仍必须保持 `runtimeClassName=sysbox-runc` 与 `hostUsers:false`；L2
 以及 snapshotter/webhook 复用。明确放弃 proc 强隔离、视图隔离和 system workload；
 实现基于官方 runc/libcontainer 局部修改，不引入 L2 `sysbox-fs` 或 `sysbox-mgr`。
 
+### 2026-09-28：同版本 bootstrap 与 CKM 无启动挂载验收（已通过）
+
+218 宿主 Helm chart 与运行时为 `v0.7.1-24`。CKM bootstrap 从同一 Release 的
+`sysbox-deploy-k3s-bootstrap:v0.7.1-24` 文件系统在本地重新压平、校验关键二进制
+SHA256 后推送为
+`docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:v0.7.1-24-local-flat-20260928`
+（digest `sha256:def033806802801fd138322fea3fff408babd246084d3eebb7d737751395ddb3`）。
+该镜像内 `sysbox-runc`、snapshotter、admission 均自报 `0.7.1-24`；lite 二进制
+SHA256 与 Release 静态产物相同。先前 `native-default-20260928` bootstrap 的
+snapshotter 自报 `0.7.1-1`，不能用于同版本验收。
+
+复测发现 `w7panel-ckm` 的 README 与默认命令测试虽已声明/检查无挂载命令，实际
+`SystemTemplate/k3s.v1` 仍含 `mount --make-*`、`mountpoint`、`mount --bind`，会被
+controller 原样带进 CKM Server。直接删去后，cert-manager CSI 报
+`/tmp/cert-manager-csi-driver ... not a shared mount`，Agent 的旧
+`.../agent/k3s-run/...` hostPath 也不存在。这不是 bootstrap 版本问题，而是旧模板和
+挂载传播路径遗漏。现已备份模板，在 `w7panel-ckm` 中删除启动挂载命令，CKM rootfs
+注解增加 `/run/k3s`、`/tmp/cert-manager-csi-driver` specialPath（由 runc 以
+`rbind,rshared` 挂载），Agent 改为直接使用 `/run/k3s`。
+
+218 的 `k3k-console-164315/ckm-release24-disk-0928` Server PVC 为 `disk-default`
+80Gi，外层 `hostUsers:false`、内层 workload 未设置该字段。测试 Pod 启动命令中已无
+上述挂载操作；`/run/k3s`、CSI 临时目录、kubelet、K3s 目录的 mountinfo 均显示
+`shared`。cert-manager CSI 与 Agent DaemonSet 均 1/1；`05-test-ckm-k3s.sh` 通过
+rootfs 持久化、无注解空 PVC 初始化和 special bind。默认 runtime nginx HTTP 200，
+默认与 lite `kubectl exec` 均成功；重建 CKM Server 后这些 DaemonSet 和持久标记仍正常。
+随后用校验通过的 `w7panel-sysbox-0.7.1-24.tgz` 在该 CKM 内层 K3s 以
+`installMode=nested` 重新应用 chart，资源均显示 `unchanged`，admission `1/1`，
+`sysbox-runc-lite` RuntimeClass 存在，snapshotter 自报 `0.7.1-24`。独立测试
+`ckm-chart24-verify` 的 rootfs 持久化、无注解空 PVC 初始化复制、special bind
+均通过；测试 Deployment/PVC 已清理，原 chart 资源保留。
+同一 Release 下，L0 `sysbox-runc`（`hostUsers:false`）与 `sysbox-runc-lite` 均通过
+`disk-default` 的 rootfs/空 PVC/special bind 回归，临时 Deployment 与 PVC 已清理。
+测试 controller 镜像为
+`docker.cnb.cool/i0358/ai-cvm:v1.1.271-nomount-v24-20260928`。
+旧 CKM `k3k-console-117057/ckm-abi9n` 的 Deployment 仍固定在旧模板，启动命令保留
+挂载操作；它未参与上述验收，需走显式模板升级才会迁移。另一既有 CKM
+`k3k-console-164315/ckm-3dxvl` 仍因其 10Gi PVC 报 `No space left on device`，
+与本次无挂载测试不同。
+
 ### 2026-09-28：CKM 内默认使用原生 runc（已通过）
 
 bootstrap 生成的内层 containerd 配置不再为默认 `runc` handler 指定
@@ -41,9 +81,9 @@ special bind 均通过。
 ### 2026-09-24：由 runc special mount 提供递归传播（已通过）
 
 `sysbox-runc` 现在为 `persistentSpecialMounts: true` 的 rootfs `specialPath` 生成
-`rbind,rshared`，不再使用 `rprivate`。CKM Server 启动 wrapper 和 K3s command 已移除所有
-`mount --make-*`、`mountpoint` 与 `mount --bind` 操作；不再把 `/`、`/run`、kubelet、K3s
-路径或 cert-manager/socket 路径在启动时改为 shared。
+`rbind,rshared`，不再使用 `rprivate`。当时只检查了 CKM 默认生成命令与 wrapper，
+遗漏已保存的 `SystemTemplate/k3s.v1`；其旧挂载命令于 2026-09-28 的验收中被发现并移除，
+见上节。
 
 `libcontainer/specconv` 对该 OCI 选项的解析由单测锁定为
 `MS_SHARED|MS_REC`；`persistent_special_mounts_test.go` 同时锁定 special mount 的
