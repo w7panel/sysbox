@@ -110,7 +110,8 @@ die() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
 
 setup_build_cache() {
     [[ "${CLEAR_BUILD_CACHE}" == true ]] && rm -rf "${CACHE_DIR}"
-    mkdir -p "${CACHE_DIR}/go-build" "${CACHE_DIR}/go-mod" "${CACHE_DIR}/go-path"
+    mkdir -p "${CACHE_DIR}/go-build" "${CACHE_DIR}/go-mod" "${CACHE_DIR}/go-path" \
+        "${CACHE_DIR}/container-go-build" "${CACHE_DIR}/container-go-mod"
     export GOCACHE="${GOCACHE:-${CACHE_DIR}/go-build}"
     export GOMODCACHE="${GOMODCACHE:-${CACHE_DIR}/go-mod}"
     export GOPATH="${GOPATH:-${CACHE_DIR}/go-path}"
@@ -194,8 +195,12 @@ build_deb() {
     make -C "${PKGR_DIR}/deb" clean EDITION=ce \
         ARCH="${SYS_ARCH}"
     make_local_source_link
+    # The deb builder runs as root in Docker; do not let it own the host Go
+    # caches used by the subsequent sysbox-runc-lite build.
     make -C "${PKGR_DIR}/deb" generic EDITION=ce \
         ARCH="${SYS_ARCH}" \
+        GOCACHE="${CACHE_DIR}/container-go-build" \
+        GOMODCACHE="${CACHE_DIR}/container-go-mod" \
         UBUNTU_MIRROR="${UBUNTU_MIRROR}" \
         DOCKER_APT_MIRROR="${DOCKER_APT_MIRROR}" \
         GOPROXY="${GOPROXY}"
