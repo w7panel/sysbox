@@ -53,6 +53,7 @@ spec:
       annotations:
         sysbox/rootfs-rw-layer: '[{"name":"nginx","volumeName":"rootfs","path":"nginx","persistentSpecialMounts":true,"specialPath":["/srv/data"]}]'
     spec:
+      runtimeClassName: sysbox-runc-lite
       containers:
       - name: nginx
         image: ${TEST_IMAGE}
@@ -71,7 +72,7 @@ EOF
 l1_kubectl -n "$CHART_NAMESPACE" rollout status "deployment/$CKM_TEST_DEPLOYMENT" --timeout=180s
 pod="$(l1_kubectl -n "$CHART_NAMESPACE" get pod -l "app=$CKM_TEST_DEPLOYMENT" --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')"
 [ -n "$pod" ] || die 'sysbox-runc-lite workload Pod was not created'
-[ "$(l1_kubectl -n "$CHART_NAMESPACE" get pod "$pod" -o jsonpath='{.spec.runtimeClassName}')" = sysbox-runc-lite ] || die 'rootfs annotation must be promoted to sysbox-runc-lite by admission'
+[ "$(l1_kubectl -n "$CHART_NAMESPACE" get pod "$pod" -o jsonpath='{.spec.runtimeClassName}')" = sysbox-runc-lite ] || die 'rootfs workload must explicitly select sysbox-runc-lite'
 [ -n "$(l1_kubectl -n "$CHART_NAMESPACE" get pod "$pod" -o jsonpath='{.spec.containers[?(@.name=="sysbox-rootfs")].name}')" ] || die 'rootfs sidecar was not injected by admission'
 annotation="$(l1_kubectl -n "$CHART_NAMESPACE" get pod "$pod" -o jsonpath='{.metadata.annotations.sysbox\\/volume-init}')"
 [ -z "$annotation" ] || die 'sysbox/volume-init annotation must not be present; runtime discovery must initialize the CSI PVC'

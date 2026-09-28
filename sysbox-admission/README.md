@@ -10,7 +10,9 @@ Empty writable CSI PVCs are initialized directly by `sysbox-runc` and `sysbox-ru
 The webhook handles Pods that meet both of these conditions:
 
 - The request is a Pod `CREATE` admission request.
-- `spec.runtimeClassName` is `sysbox-runc`.
+- `spec.runtimeClassName` is `sysbox-runc` or `sysbox-runc-lite`.
+
+The webhook never selects a RuntimeClass. Pods without one use the cluster's default runtime, even when they carry `sysbox/rootfs-rw-layer`.
 
 The PVC initialization metadata is generated without requiring `sysbox/rootfs-rw-layer`. The rootfs sidecar is injected only when that annotation exists and is non-empty.
 

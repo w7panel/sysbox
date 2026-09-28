@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Added
+  * Inner K3s now leaves its default `runc` handler on the native runtime and overlayfs; the webhook no longer chooses lite from a rootfs annotation. Set `runtimeClassName: sysbox-runc-lite` explicitly for Sysbox rootfs workloads. Previously the bootstrap routed ordinary Pods through lite and the webhook could select lite without a RuntimeClass.
   * Added cached fast-path builds for Sysbox-in-Sysbox regressions. Changed Go components are patched into a known-good deploy or bootstrap image, avoiding a full package/image rebuild for each test while retaining the complete release path for final acceptance.
   * Added the `06-build-and-test.sh` nested-runtime acceptance entry point and documented the required L0/L1/L2 regression sequence.
   * Prevented the CKM test helper from reusing a retained Server PVC under the same CKM name; local-path does not support the resize attempted by the controller, so the helper now requires a unique name without modifying existing data.

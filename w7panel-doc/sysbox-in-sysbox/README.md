@@ -8,8 +8,9 @@ snapshotter/webhook 复用。L2 workload 的 `hostUsers:false`（原步骤 3）�
 和 system workload 明确放弃。运行时采用官方 runc/libcontainer 的局部修改，不依赖
 L2 `sysbox-fs`/`sysbox-mgr`。
 
-内层 K3s 如启用精简运行时，应将 RuntimeClass 设置为 `sysbox-runc-lite`；外层 CKM
-仍使用 `sysbox-runc`。`sysbox-runc-lite` 仅提供官方 runc 加 rootfs 持久化、空 PVC
+内层 K3s 的普通 Pod 不设置 RuntimeClass，使用原生 `runc` 和 overlayfs；需使用精简
+运行时的 Pod 显式设置 `runtimeClassName: sysbox-runc-lite`。外层 CKM 仍使用
+`sysbox-runc`。`sysbox-runc-lite` 仅提供官方 runc 加 rootfs 持久化、空 PVC
 初始化和 special bind mount，不提供 proc/视图隔离或 system container 支持。
 
 > **能力边界（2026-08-24）：Sysbox-in-Sysbox 方案继续保留，只放弃 `/proc` 强隔离和
@@ -254,7 +255,8 @@ L0 和 CKM 内 K3s 使用同一个 chart，但安装模式不同：
 | 层级 | Helm 值 | 作用 |
 | --- | --- | --- |
 | L0 | `installMode=host` | 安装宿主 Sysbox，提供 CKM Pod 的 `sysbox-runc` |
-| CKM 内 K3s | `runtimeClassName=sysbox-runc-lite` | 使用官方 runc、snapshotter 和 admission，提供 rootfs/PVC 功能 |
+| CKM 内 K3s 普通 Pod | 不设置 RuntimeClass | 使用原生 runc 和 overlayfs |
+| CKM 内 K3s rootfs Pod | `runtimeClassName=sysbox-runc-lite` | 使用精简 runtime、snapshotter 和 admission，提供 rootfs/PVC 功能 |
 
 先在 CKM Pod 内的 K3s 安装：
 
@@ -291,7 +293,7 @@ spec:
       annotations:
         sysbox/rootfs-rw-layer: '[{"name":"nginx","volumeName":"rootfs","path":"nginx"}]'
     spec:
-      runtimeClassName: sysbox-runc
+      runtimeClassName: sysbox-runc-lite
       enableServiceLinks: false
       containers:
       - name: nginx
@@ -307,7 +309,7 @@ spec:
 
 必须同时满足：
 
-- CKM K3s `default` namespace 中的 chart 资源和 `RuntimeClass/sysbox-runc.handler=sysbox-runc`；
+- CKM K3s `default` namespace 中的 chart 资源和 `RuntimeClass/sysbox-runc-lite.handler=sysbox-runc-lite`；
 - Deployment、selector 和 Pod labels 都包含 `w7.cc/group-name: ckm-k3s-nginx`；
 - workload 使用独立 user namespace，`uid_map=0 0 65536`；
 - nginx Deployment 的 Pod 获得 CNI IP，CKM K3s 能访问 HTTP；

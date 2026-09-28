@@ -179,6 +179,17 @@ func TestMutator_leavesPodUnchanged_whenRuntimeClassIsNotSysbox(t *testing.T) {
 	require.Empty(t, mutated.Spec.Containers[0].VolumeMounts)
 }
 
+func TestMutator_doesNotSelectRuncLiteFromRootfsAnnotation(t *testing.T) {
+	pod := validRootfsPod()
+	pod.Spec.RuntimeClassName = nil
+
+	mutated, err := newTestMutator().Mutate(context.Background(), pod)
+
+	require.NoError(t, err)
+	require.Nil(t, mutated.Spec.RuntimeClassName)
+	require.Len(t, mutated.Spec.Containers, 2)
+}
+
 func TestMutator_removesLegacyVolumeInitAnnotationForWritablePVCMounts(t *testing.T) {
 	mutator := newTestMutator()
 	runtimeClass := "sysbox-runc"

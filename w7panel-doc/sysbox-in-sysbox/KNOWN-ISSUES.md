@@ -12,6 +12,32 @@ Server 仍必须保持 `runtimeClassName=sysbox-runc` 与 `hostUsers:false`；L2
 以及 snapshotter/webhook 复用。明确放弃 proc 强隔离、视图隔离和 system workload；
 实现基于官方 runc/libcontainer 局部修改，不引入 L2 `sysbox-fs` 或 `sysbox-mgr`。
 
+### 2026-09-28：CKM 内默认使用原生 runc（已通过）
+
+bootstrap 生成的内层 containerd 配置不再为默认 `runc` handler 指定
+`sysbox-runc-lite` 二进制；普通 Pod 使用原生 runc 和 overlayfs。admission 也不再因
+`sysbox/rootfs-rw-layer` 注解自动选择 RuntimeClass；需要 rootfs 功能时须显式设置
+`runtimeClassName: sysbox-runc-lite`。
+
+218 测试镜像：
+
+```text
+deploy:    docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-native-default-20260928
+bootstrap: docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:v0.7.1-native-default-20260928
+```
+
+`ckm-mountprop-20260924` 重建后，内层 config 的 `runc` handler 只有
+`runtime_type=io.containerd.runc.v2`、`snapshotter=overlayfs` 和 `SystemdCgroup=false`，
+不再包含 lite `BinaryName`。未指定 RuntimeClass 的 BusyBox Pod 达到 Ready，
+`/dev/null`、`/dev/ptmx` 和双层 `kubectl exec -it` 正常。只有 rootfs 注解而未指定
+RuntimeClass 的 server dry-run 保持 RuntimeClass 为空且不注入 sidecar。显式 lite 的
+`05-test-ckm-k3s.sh` 返回 `FUNCTIONAL PASS`，rootfs 持久化、CSI 空卷初始化和
+special bind 均通过。
+
+复测时 nginx 首次启动仍偶发 `sysbox sidecar oci spec unavailable`，重试后正常；
+内层 kubelet 还持续记录 `Failed to get the info of the filesystem with mountpoint`
+（空 mountpoint）统计错误。这两项不影响本次 Pod 启动及功能验收，需另行跟踪。
+
 ### 2026-09-24：由 runc special mount 提供递归传播（已通过）
 
 `sysbox-runc` 现在为 `persistentSpecialMounts: true` 的 rootfs `specialPath` 生成
