@@ -116,12 +116,13 @@ setup_build_cache() {
     export GOMODCACHE="${GOMODCACHE:-${CACHE_DIR}/go-mod}"
     export GOPATH="${GOPATH:-${CACHE_DIR}/go-path}"
     if [[ -z "${DOCKER_CONFIG:-}" ]]; then
+        local docker_login_config="${HOME}/.docker/config.json"
         export DOCKER_CONFIG="${CACHE_DIR}/docker"
         mkdir -p "${DOCKER_CONFIG}"
         # Buildx writes activity state below DOCKER_CONFIG. Preserve an
         # existing login when available, but never modify its read-only source.
-        if [[ -r /root/.docker/config.json && ! -e "${DOCKER_CONFIG}/config.json" ]]; then
-            cp /root/.docker/config.json "${DOCKER_CONFIG}/config.json"
+        if [[ -r "${docker_login_config}" && ! -e "${DOCKER_CONFIG}/config.json" ]]; then
+            cp "${docker_login_config}" "${DOCKER_CONFIG}/config.json"
         fi
     fi
 }
