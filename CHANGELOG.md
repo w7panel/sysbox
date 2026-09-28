@@ -3,6 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Added
+  * Inner K3s bootstrap no longer creates the retired `sysbox-runc-nested` wrapper or advertises a full `sysbox-runc` containerd handler. The lightweight nested chart exposes only `sysbox-runc-lite`; ordinary Pods keep native `runc`. Existing wrapper files are removed on launcher startup so an upgraded CKM cannot accidentally use the abandoned full runtime.
+  * Nested CKM chart installation now creates a real Helm release inside the selected CKM K3s. The test flow copies Helm and the selected chart into the Server temporarily, while bootstrap remains the sole owner of the lite binary and containerd config; skills and deployment docs now enforce this topology and distinguish the historical full nested runtime from current lite acceptance.
   * Preserved the GitHub runner user's Docker login when `release.sh` switches to its build cache config; the release had built and verified both images but GHCR push failed with `unauthorized` because it previously copied credentials only from `/root/.docker`.
   * Isolated the root-run deb builder's Go caches from the host Go caches in `release.sh`; GitHub Actions previously failed to build `sysbox-runc-lite` with `permission denied` after the deb container wrote root-owned cache files.
   * Inner K3s now leaves its default `runc` handler on the native runtime and overlayfs; the webhook no longer chooses lite from a rootfs annotation. Set `runtimeClassName: sysbox-runc-lite` explicitly for Sysbox rootfs workloads. Previously the bootstrap routed ordinary Pods through lite and the webhook could select lite without a RuntimeClass.

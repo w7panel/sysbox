@@ -64,6 +64,12 @@ l1_kubectl_input() {
   outer_kubectl -n "$OUTER_NAMESPACE" exec -i "$L1_POD" -c "$L1_CONTAINER" -- \
     /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml "$@"
 }
+l1_copy_file() {
+  local source="$1" destination="$2"
+  tar cf - -C "$(dirname "$source")" "$(basename "$source")" | \
+    outer_kubectl -n "$OUTER_NAMESPACE" exec -i "$L1_POD" -c "$L1_CONTAINER" -- \
+      /bin/tar xf - -C "$destination"
+}
 l1_rootfs_exec() {
   local pod="$1" container="$2" script="$3" container_id
   container_id="$(l1_kubectl -n "$CHART_NAMESPACE" get pod "$pod" -o jsonpath="{.status.containerStatuses[?(@.name=='$container')].containerID}")"
@@ -85,17 +91,4 @@ check_common() {
   need_cmd helm
   [ -r "$KUBECONFIG_218" ] || die "kubeconfig is not readable: $KUBECONFIG_218"
   outer_kubectl version --request-timeout=5s >/dev/null
-}
-
-render_chart() {
-  local output="$1" target_namespace="$2"
-  helm template w7panel-sysbox "$REPO_DIR/charts/w7panel-sysbox" \
-    --namespace "$target_namespace" --set installMode=nested \
-    --set runtimeClassName=sysbox-runc-lite \
-    --set installer.enabled=false \
-    --set admission.enabled=true \
-    --set snapshotter.enabled=true \
-    --set installer.image.repository="$SYSBOX_IMAGE_REPO" \
-    --set-string installer.image.tag="$SYSBOX_IMAGE_TAG" \
-    --set installer.image.digest="" --set admission.image.digest="" > "$output"
 }

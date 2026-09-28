@@ -28,9 +28,9 @@ L0 宿主 Kubernetes
             └── Sysbox workload Pod（腾讯云 nginx）
 ```
 
-脚本不会假设 `helm` 可以连接到内层 API。Chart 统一在操作者机器上用
-`helm template` 渲染，再通过 `kubectl exec` 把 YAML 送进 CKM Pod 内的 K3s；这样不需要把
-Helm 二进制塞进测试镜像，也能清楚区分当前操作落在哪一层。
+`04-install-ckm-chart.sh` 会把本机 Helm CLI 与 chart 包临时复制到选定的 CKM Server，
+再连接 `/etc/rancher/k3s/k3s.yaml` 执行真实的 `helm upgrade --install`。因此内层 K3s
+保留可查询、可升级的 `w7panel-sysbox` release，不再使用 `helm template + kubectl apply`。
 
 ## 文档导航
 
@@ -41,17 +41,15 @@ Helm 二进制塞进测试镜像，也能清楚区分当前操作落在哪一层
 | [KNOWN-ISSUES.md](./KNOWN-ISSUES.md) | 当前能力边界、未解决项和问题根因 |
 | [HISTORY.md](./HISTORY.md) | 旧镜像、旧 CKM 和 L2/L3 实验时间线 |
 
-## 当前基线（2026-09-24）
+## 当前基线（2026-09-28）
 
-- 当前源码基线：`w7panel` 的 `v0.7.1-20` tag。该 tag 的 GitHub 制品仍须按本目录的
-  release 验收步骤下载、校验并安装后，才可称为 release 验证。
-- 已完成的本地完整构建镜像：
-  `docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-buildcache-rootfs-webhook-20260924`
-  与相同 tag 的 `sysbox-deploy-k3s-bootstrap`。
-- 在一次全新 CKM `ckm-build2-20260924` 上，L0 的 full/lite RuntimeClass、rootfs
-  持久化、无注解空 PVC 初始化复制、special bind，以及 L2 admission/snapshotter
-  自动提升至 `sysbox-runc-lite` 都已通过。证据和环境限制见
-  [KNOWN-ISSUES.md](./KNOWN-ISSUES.md)。
+- 当前发布基线是 `v0.7.1-24`。增量验证 bootstrap 为
+  `docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:v0.7.1-24-no-nested-runc-20260928`
+  （digest `sha256:ca82b8949da8f0d8f593bbcdb9dc90f91b7001ec626b8716bd4e6db70fd656bb`）。
+- `ckm-4ss8n` 内层以 Helm release `w7panel-sysbox` 安装 `0.7.1-24`；bootstrap 只配置
+  原生 `runc` 与显式 `sysbox-runc-lite`，不生成 `sysbox-runc-nested` 或完整 handler。
+- 保留的 `ckm-4ss8n-no-nested-check` 已通过 rootfs 持久化、无注解空 PVC 初始化复制和
+  special bind，Deployment 与两个 PVC 按要求保留现场。
 - 历史完整 nested Sysbox 的 child userns、CNI/HTTP、Docker、cgroup 和 L3 结果仅保留在
   [HISTORY.md](./HISTORY.md)，不构成当前轻量交付的验收范围。
 - 明确不支持：`/proc noexec` 强隔离、Pod 内 CPU/内存视图隔离、多租户或不可信负载
@@ -81,7 +79,7 @@ Helm 二进制塞进测试镜像，也能清楚区分当前操作落在哪一层
 | 1 | `01-create-ckm.sh` | 复用或按 `config.sh` 名称创建 CKM，并发现 Server Pod |
 | 2 | `02-test-l0-runtimeclasses.sh` | 验证 L0 两个标准 RuntimeClass 都能启动且不自动注入 FUSE |
 | 3 | `03-test-l0-rootfs.sh` | 回归 L0 lite rootfs、无注解 local-path 初始化复制及 special bind |
-| 4 | `04-install-ckm-chart.sh` | 在 CKM 自有 K3s 安装 snapshotter、admission 与 sysbox-runc-lite 配置 |
+| 4 | `04-install-ckm-chart.sh` | 在 CKM 自有 K3s 创建/升级真实 Helm release；runtime 配置由 bootstrap 提供 |
 | 5 | `05-test-ckm-k3s.sh` | 创建并回归 sysbox-runc-lite workload；rootfs 结果以最新现场状态为准 |
 | 6 | `06-build-and-test.sh` | 快速增量构建或完整 release 后，按 00/02/03/04/05 运行验收 |
 | 6 | `99-cleanup.sh` | 清理测试资源，默认保留 CKM |

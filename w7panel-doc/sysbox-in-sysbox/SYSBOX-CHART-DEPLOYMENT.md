@@ -208,51 +208,31 @@ kubectl --kubeconfig "$KUBECONFIG_218" -n "$OUTER_NAMESPACE" exec "$L1_POD" \
 预期第一条输出 `runtimeClass=sysbox-runc hostUsers=false`。不满足时先修复 CKM template，
 不要继续 nested 安装。
 
-在 L0 渲染发布 chart，再通过 exec 安装到 L1；`installer.enabled=false` 避免 nested
-chart 重装/重启 L0 installer：
+将 Helm CLI 和已校验的发布 chart 临时复制进目标 CKM Server，并在 L1 K3s 中创建真实
+Helm release；`installer.enabled=false` 避免 nested chart 运行宿主安装器：
 
 ```bash
 export CHART_NAMESPACE=default
-helm template w7panel-sysbox "$RELEASE_DIR/$CHART_FILE" --namespace "$CHART_NAMESPACE" \
-  --set installMode=nested --set runtimeClassName=sysbox-runc-lite \
-  --set installer.enabled=false \
-  --set installer.image.repository="$SYSBOX_IMAGE_REPO" \
-  --set installer.image.tag="$SYSBOX_IMAGE_TAG" \
-  --set admission.enabled=true \
-  --set admission.image.repository="$SYSBOX_IMAGE_REPO" \
-  --set admission.image.tag="$SYSBOX_IMAGE_TAG" \
-  --set snapshotter.enabled=true > "$RELEASE_DIR/l1-chart.yaml"
-
-kubectl --kubeconfig "$KUBECONFIG_218" -n "$OUTER_NAMESPACE" exec -i "$L1_POD" \
-  -c "$L1_CONTAINER" -- /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml \
-  apply -f - < "$RELEASE_DIR/l1-chart.yaml"
+export NESTED_CHART_FILE="$RELEASE_DIR/$CHART_FILE"
+bash ./04-install-ckm-chart.sh
 ```
 
-写入同一 release 的静态 runc-lite 到 L1 持久 K3s 数据卷；绝不能覆盖 `/usr/bin/runc`：
-
-```bash
-base64 -w0 "$RELEASE_DIR/$RUNC_LITE_FILE" | \
-  kubectl --kubeconfig "$KUBECONFIG_218" -n "$OUTER_NAMESPACE" exec -i "$L1_POD" \
-    -c "$L1_CONTAINER" -- sh -c \
-    'base64 -d > /var/lib/rancher/k3s/sysbox-runc-lite && chmod 0755 /var/lib/rancher/k3s/sysbox-runc-lite'
-```
-
-L1 containerd 必须含以下 handler 配置（CKM bootstrap 会创建；首次安装可由
-`04-install-ckm-chart.sh` 写入）：
+L1 containerd 配置完全由 CKM bootstrap 在 K3s 启动前生成。Chart 不复制 runtime
+二进制，也不写 `config-v3.toml.d`。有效配置必须只保留原生 `runc` 与 lite handler：
 
 ```toml
 [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.sysbox-runc-lite]
   runtime_type = "io.containerd.runc.v2"
-  sandboxer = "podsandbox"
   snapshotter = "sysbox"
   pod_annotations = ["sysbox/rootfs-rw-layer"]
 
 [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.sysbox-runc-lite.options]
-  BinaryName = "/var/lib/rancher/k3s/sysbox-runc-lite"
+  BinaryName = "/opt/sysbox/bin/generic/sysbox-runc-lite"
 ```
 
-首次增加该区块时，需在正常 CKM rollout 中重启 L1 Server 让 containerd 加载 handler。
-仅替换同一路径的二进制不需要单独重启。验证：
+配置中不得出现 `containerd.runtimes.sysbox-runc]`，文件系统中也不得存在
+`/opt/sysbox/bin/generic/sysbox-runc-nested`。bootstrap 变更会通过 CKM controller 的正常
+rollout 重建 Server，让 containerd 在启动时加载配置。验证：
 
 ```bash
 kubectl --kubeconfig "$KUBECONFIG_218" -n "$OUTER_NAMESPACE" exec "$L1_POD" \
@@ -299,11 +279,12 @@ bash ./99-cleanup.sh
 
 ## 开发模式与排障
 
-- `04-install-ckm-chart.sh` 用于本地源码开发：它渲染工作区 chart 并上传本地构建二进制，
-  不是发布制品验收入口。
-- 发布验收必须按本文使用下载的 `.tgz` 与 release binary，避免未提交的本地内容被误测。
+- `04-install-ckm-chart.sh` 默认打包工作区 chart；发布验收必须显式设置
+  `NESTED_CHART_FILE` 为下载且校验过的 `.tgz`。
+- Helm release 名固定为 `w7panel-sysbox`，可在 L1 中用 `helm status` 和 `helm history`
+  查询；不要再用 `helm template + kubectl apply` 伪装成安装。
 - `RuntimeClass sysbox-runc-lite not found`：确认目标是 L1 K3s，不是 L0；检查
-  `sysbox-runc-lite.toml`，必要时正常重启 CKM Server。
+  bootstrap 生成的 `config-v3.toml.tmpl`，必要时通过 CKM 正常 rollout 重建 Server。
 - `failed to pull image`：检查 L0/L1 网络与 pull secret；镜像来源以 release
   `image-metadata.txt` 为准。
 - outer Pod 有 `sysbox-fuse`：这是过期 admission；升级 L0 chart 至当前 release。

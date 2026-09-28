@@ -12,6 +12,22 @@ Server 仍必须保持 `runtimeClassName=sysbox-runc` 与 `hostUsers:false`；L2
 以及 snapshotter/webhook 复用。明确放弃 proc 强隔离、视图隔离和 system workload；
 实现基于官方 runc/libcontainer 局部修改，不引入 L2 `sysbox-fs` 或 `sysbox-mgr`。
 
+### 2026-09-28：移除内层完整 handler，Helm 安装与轻量回归通过
+
+bootstrap 脚本已停止生成 `sysbox-runc-nested`、`sysbox-runc.real` 和内层完整
+`containerd.runtimes.sysbox-runc`。普通 Pod 使用原生 `runc`/overlayfs，需要 rootfs
+能力的 Pod 显式选择 `sysbox-runc-lite`/sysbox snapshotter。增量镜像为
+`docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:v0.7.1-24-no-nested-runc-20260928`
+（digest `sha256:ca82b8949da8f0d8f593bbcdb9dc90f91b7001ec626b8716bd4e6db70fd656bb`）。
+
+218 的 `k3k-console-117057/ckm-4ss8n` 已由 controller 使用该镜像正常重建；Server 2/2，
+snapshotter 自报 `0.7.1-24`，containerd 生效配置与模板均无完整 handler，旧 wrapper 文件
+不存在。内层通过真正的 `helm upgrade --install` 创建 `w7panel-sysbox` release
+`0.7.1-24`，admission 1/1。`ckm-4ss8n-no-nested-check` 在 Pod 重建后通过 rootfs
+持久化、无注解 local-path 空 PVC 初始化复制和 special bind；按用户要求 Deployment、
+rootfs PVC、webroot PVC 与 Helm release 均保留现场。首次 admission 启动曾因证书初始化
+慢被 liveness 重启一次，随后 Ready 并通过全部功能断言，不属于运行时失败。
+
 ### 2026-09-28：同版本 bootstrap 与 CKM 无启动挂载验收（已通过）
 
 218 宿主 Helm chart 与运行时为 `v0.7.1-24`。CKM bootstrap 从同一 Release 的

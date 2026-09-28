@@ -69,7 +69,7 @@ admission image; include `deploy` when admission changed.
 | `ckm` | `01-create-ckm.sh` | explicitly configured CKM discovery or creation |
 | `l0-smoke` | `02-test-l0-runtimeclasses.sh` | both host RuntimeClasses and no automatic FUSE |
 | `l0-rootfs` | `03-test-l0-rootfs.sh` | PVC initialization, rootfs persistence and special bind |
-| `l1-install` | `04-install-ckm-chart.sh` | nested chart and persisted lite binary/config |
+| `l1-install` | `04-install-ckm-chart.sh` | real nested Helm release; validates bootstrap-provided lite runtime/config |
 | `l2` | `05-test-ckm-k3s.sh` | nested lite nginx rootfs/PVC regression |
 | `build-and-test` | `06-build-and-test.sh` | selected cached build plus 00/02/03/04/05 regression |
 | `cleanup` | `99-cleanup.sh` | destructive L2 chart/PVC cleanup; retains CKM by default |
@@ -82,6 +82,11 @@ export CKM_NAMESPACE=<namespace>
 export CKM_NAME=<name>
 skills/sysbox-in-sysbox-test/scripts/run-stage.sh l0-smoke
 ```
+
+For `l1-install`, set `NESTED_CHART_FILE` to the checksum-verified release
+`.tgz`; when unset, the script packages the workspace chart for source testing.
+It copies Helm and the chart temporarily into the selected Server and runs
+`helm upgrade --install` against that Server's K3s kubeconfig.
 
 For `l0-rootfs`, set `L0_RUNTIME_CLASS`, `L0_TEST_SUFFIX`, and
 `ROOTFS_STORAGE_CLASS`. `sysbox-runc` receives `hostUsers:false` by default;

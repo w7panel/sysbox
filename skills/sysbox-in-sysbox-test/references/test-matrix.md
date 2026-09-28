@@ -65,24 +65,25 @@ verification.
 ## L1 CKM and L2 lite verification
 
 Set `CKM_NAME` and `CKM_NAMESPACE` to a known disposable, Ready CKM. Do not
-let the scripts choose another cluster. For a local build, ensure the lite
-binary exists first. For a release, pass the downloaded, checksum-verified
-release binary.
+let the scripts choose another cluster. The selected CKM bootstrap must already
+contain the matching lite binary and containerd config. For a release, pass the
+downloaded, checksum-verified chart.
 
 ```bash
 export CKM_NAMESPACE=<namespace>
 export CKM_NAME=<ckm-name>
 
-SYSBOX_RUNC_LITE_BINARY=/path/to/sysbox-runc-lite-<tag>-amd64 \
+NESTED_CHART_FILE=/path/to/w7panel-sysbox-<version>.tgz \
   bash ./04-install-ckm-chart.sh
 
-# The previous step changes L1 K3s runtime config. Wait for its Server
-# replacement to be Ready before this step.
+# Bootstrap changes roll the Server; Helm installation itself does not.
 bash ./05-test-ckm-k3s.sh
 ```
 
-`05` must reach `FUNCTIONAL PASS`; a watch error caused by the expected L1
-restart is not success and must be rerun after the Server is stable.
+`04` must leave Helm release `w7panel-sysbox` deployed, admission Ready, only
+the `sysbox-runc-lite` RuntimeClass exposed, and no `sysbox-runc-nested` file or
+full inner handler. `05` must reach `FUNCTIONAL PASS`; a watch error caused by
+an expected L1 restart is not success and must be rerun after the Server is stable.
 
 ## GitHub release verification
 

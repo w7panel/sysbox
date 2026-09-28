@@ -42,9 +42,13 @@ the executable Skill wrappers.
 - Validate both `local-path` and at least one real CSI StorageClass when the
   cluster provides one. Verify initial image files, a PVC marker after Pod
   recreation, and a rootfs special-bind marker after recreation.
-- Nested chart installation targets the selected L1 K3s only. It creates only
-  `sysbox-runc-lite` there and writes its binary to the persistent L1 K3s data
-  volume; it must not create a second K3s or replace `/usr/bin/runc`.
+- Nested chart installation targets the selected L1 K3s only and creates a
+  real `w7panel-sysbox` Helm release. Bootstrap provides the lite binary,
+  snapshotter and containerd handler before K3s starts; the chart must not
+  write runtime config, create a second K3s, or replace `/usr/bin/runc`.
+- L1 containerd exposes native `runc` plus `sysbox-runc-lite` only. Reject a
+  bootstrap that creates `sysbox-runc-nested`, `sysbox-runc.real`, or a full
+  inner `sysbox-runc` handler; those belong to the abandoned full-runtime PoC.
 - Use `BUILD_PROFILE=test` for an iterative source change. It patches only the
   requested binaries into an explicit, known-good base image and writes the
   resulting tags to `dist/test-images.env`; it never changes a CKM controller
@@ -61,11 +65,11 @@ re-run the failed case plus its persistence recreation step.
 The snapshotter may initially report `sysbox sidecar oci spec unavailable`;
 only continue after the retry reaches Ready and the functional assertions pass.
 If a newly created `local-path` PVC is Pending, wait for provisioning before
-calling it a runtime failure. Installing the nested lite handler restarts the
-CKM Server; wait for its replacement to become Ready, then re-run the L2
-case.
+calling it a runtime failure. Changing the bootstrap image rolls the CKM
+Server; wait for its replacement to become Ready, confirm the Helm release
+survived, then re-run the L2 case.
 
-After successful tests, remove ephemeral Pods. To release Pod IPs while
+After successful tests, remove ephemeral Pods only when cleanup is requested. To release Pod IPs while
 keeping persistence evidence, scale test Deployments to zero. Delete test
 PVCs only when the user authorizes storage cleanup. Record material failures
 and their verified cause in `w7panel-doc/sysbox-in-sysbox/KNOWN-ISSUES.md`.
