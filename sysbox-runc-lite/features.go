@@ -40,8 +40,6 @@ var featuresCommand = cli.Command{
 			Hooks:        configs.KnownHookNames(),
 			MountOptions: specconv.KnownMountOptions(),
 			Linux: &features.Linux{
-				UserNamespaces: &tru,
-				MountExtensions: &features.MountExtensions{IDMap: &features.IDMap{Enabled: &tru}},
 				Namespaces:   specconv.KnownNamespaces(),
 				Capabilities: capabilities.KnownCapabilities(),
 				Cgroup: &features.Cgroup{

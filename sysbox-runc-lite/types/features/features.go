@@ -29,10 +29,6 @@ type Features struct {
 
 // Linux is specific to Linux.
 type Linux struct {
-	// UserNamespaces reports whether the runtime supports user namespaces.
-	UserNamespaces *bool `json:"user_namespaces,omitempty"`
-	MountExtensions *MountExtensions `json:"mountExtensions,omitempty"`
-
 	// Namespaces is the list of the recognized namespaces, e.g., "mount".
 	// Nil value means "unknown", not "no support for any namespace".
 	Namespaces []string `json:"namespaces,omitempty"`
@@ -45,14 +41,6 @@ type Linux struct {
 	Seccomp  *Seccomp  `json:"seccomp,omitempty"`
 	Apparmor *Apparmor `json:"apparmor,omitempty"`
 	Selinux  *Selinux  `json:"selinux,omitempty"`
-}
-
-type MountExtensions struct {
-	IDMap *IDMap `json:"idmap,omitempty"`
-}
-
-type IDMap struct {
-	Enabled *bool `json:"enabled,omitempty"`
 }
 
 // Seccomp represents the "seccomp" field.

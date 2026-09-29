@@ -2,6 +2,9 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
+### Changed
+  * sysbox-runc-lite: preserve OCI UID/GID mappings as supplied instead of rewriting nonzero host IDs inside nested user namespaces; remove the custom `user_namespaces` and `mountExtensions.idmap` feature claims, which were not required by the current L2 rootfs workflow and could misrepresent runtime capabilities. The nested regression now validates the workload directly rather than requiring the removed feature flag.
+
 ### Added
   * Inner K3s bootstrap no longer creates the retired `sysbox-runc-nested` wrapper or advertises a full `sysbox-runc` containerd handler. The lightweight nested chart exposes only `sysbox-runc-lite`; ordinary Pods keep native `runc`. Existing wrapper files are removed on launcher startup so an upgraded CKM cannot accidentally use the abandoned full runtime.
   * Nested CKM chart installation now creates a real Helm release inside the selected CKM K3s. The test flow copies Helm and the selected chart into the Server temporarily, while bootstrap remains the sole owner of the lite binary and containerd config; skills and deployment docs now enforce this topology and distinguish the historical full nested runtime from current lite acceptance.

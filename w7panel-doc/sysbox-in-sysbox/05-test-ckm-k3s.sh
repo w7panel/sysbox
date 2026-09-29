@@ -6,11 +6,9 @@ source "$(dirname "$0")/_common.sh"
 check_common
 discover_l1
 log "testing a sysbox-runc-lite workload directly in CKM K3s with ${TEST_IMAGE}"
-if ! l1_exec test -x /var/lib/rancher/k3s/sysbox-runc-lite && ! l1_exec test -x /usr/local/bin/sysbox-runc-lite && ! l1_exec test -x /opt/sysbox/bin/generic/runc-lite; then
+if ! l1_exec test -x /var/lib/rancher/k3s/sysbox-runc-lite && ! l1_exec test -x /usr/local/bin/sysbox-runc-lite && ! l1_exec test -x /opt/sysbox/bin/generic/sysbox-runc-lite; then
   die 'sysbox-runc-lite is not installed in the CKM server image/data volume; install it before running the workload test'
 fi
-l1_exec sh -c '(/var/lib/rancher/k3s/sysbox-runc-lite features 2>/dev/null || /usr/local/bin/sysbox-runc-lite features 2>/dev/null || /opt/sysbox/bin/generic/runc-lite features 2>/dev/null) | grep -q '"'"'"user_namespaces": true'"'"'' \
-  || die 'sysbox-runc-lite does not advertise linux.user_namespaces=true'
 l1_kubectl -n "$CHART_NAMESPACE" delete deployment "$CKM_TEST_DEPLOYMENT" --ignore-not-found --wait=true
 l1_kubectl -n "$CHART_NAMESPACE" delete pvc "$CKM_TEST_VOLUME_INIT_PVC" --ignore-not-found --wait=true
 l1_kubectl_input apply -f - <<EOF

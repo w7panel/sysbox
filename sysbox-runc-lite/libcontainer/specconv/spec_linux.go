@@ -939,7 +939,6 @@ func setupUserNamespace(spec *specs.Spec, config *configs.Config) error {
 			config.GidMappings = append(config.GidMappings, create(m))
 		}
 	}
-	normalizeNestedIDMappings(config)
 	rootUID, err := config.HostRootUID()
 	if err != nil {
 		return err
@@ -953,37 +952,6 @@ func setupUserNamespace(spec *specs.Spec, config *configs.Config) error {
 		node.Gid = uint32(rootGID)
 	}
 	return nil
-}
-
-// Nested runtimes receive host IDs from the node's /etc/subuid, but those IDs
-// are not necessarily mapped in the outer user namespace. Map such ranges to
-// the current namespace's root instead of failing clone(2) with EPERM.
-func normalizeNestedIDMappings(config *configs.Config) {
-	var current configs.IDMap
-	for _, path := range []string{"/proc/self/uid_map", "/proc/self/gid_map"} {
-		data, err := os.ReadFile(path)
-		if err != nil || len(data) == 0 {
-			continue
-		}
-		var containerID, hostID, size int
-		if _, err := fmt.Sscanf(string(data), "%d %d %d", &containerID, &hostID, &size); err == nil && hostID != 0 {
-			current = configs.IDMap{ContainerID: containerID, HostID: 0, Size: size}
-			break
-		}
-	}
-	if current.Size == 0 {
-		return
-	}
-	for i := range config.UidMappings {
-		if config.UidMappings[i].HostID != 0 {
-			config.UidMappings[i].HostID = current.HostID
-		}
-	}
-	for i := range config.GidMappings {
-		if config.GidMappings[i].HostID != 0 {
-			config.GidMappings[i].HostID = current.HostID
-		}
-	}
 }
 
 // parseMountOptions parses options and returns a configs.Mount
