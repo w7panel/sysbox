@@ -30,16 +30,6 @@ func (l *linuxSetnsInit) getSessionRingName() string {
 }
 
 func (l *linuxSetnsInit) Init() error {
-	// newSetnsProcess starts with its cwd pinned to the bundle rootfs. After
-	// entering the target mount namespace, make that rootfs the process root;
-	// otherwise exec requests can retain the L1 view rather than the FUSE
-	// rootfs used by the workload.
-	if err := unix.Chroot("."); err != nil {
-		return fmt.Errorf("jail setns process in workload rootfs: %w", err)
-	}
-	if err := unix.Chdir("/"); err != nil {
-		return fmt.Errorf("chdir setns process root: %w", err)
-	}
 	if !l.config.Config.NoNewKeyring {
 		if err := selinux.SetKeyLabel(l.config.ProcessLabel); err != nil {
 			return err

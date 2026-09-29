@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * sysbox-runc-lite: remove the extra exec-time `chroot` and `/dev/ptmx` fallback. The standard runc setns path and device setup handle lite workloads; newly created host and CKM nginx Pods pass non-TTY/TTY exec, device, persisted rootfs, UID/GID 65534, and initContainer shared-volume checks. Unspecified RuntimeClass Pods continue to use native runc.
   * sysbox-runc-lite: preserve OCI UID/GID mappings as supplied instead of rewriting nonzero host IDs inside nested user namespaces; remove the custom `user_namespaces` and `mountExtensions.idmap` feature claims, which were not required by the current L2 rootfs workflow and could misrepresent runtime capabilities. The nested regression now validates the workload directly rather than requiring the removed feature flag.
 
 ### Added
