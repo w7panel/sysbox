@@ -12,6 +12,30 @@ Server 仍必须保持 `runtimeClassName=sysbox-runc` 与 `hostUsers:false`；L2
 以及 snapshotter/webhook 复用。明确放弃 proc 强隔离、视图隔离和 system workload；
 实现基于官方 runc/libcontainer 局部修改，不引入 L2 `sysbox-fs` 或 `sysbox-mgr`。
 
+### 2026-09-29：内层 CRI 空 mountpoint 已修复；用量统计仍待完善
+
+内层 K3s 的默认 `runc` 使用 overlayfs，显式 `sysbox-runc-lite` 使用 sysbox snapshotter。
+此前 containerd 的 CRI image service 只登记了默认 overlayfs 的文件系统路径，没有为
+`sysbox-runc-lite` 配置 `runtime_platforms` 映射。因此 lite 容器的
+`writableLayer.fsId.mountpoint` 为空，kubelet 每约 10 秒报 `stat failed on ""`，
+节点 `/stats/summary` 返回 InternalError。此问题与 CKM 启动脚本移除 `mountpoint -q`
+检查无关；空路径报错在该脚本移除前就已记录。
+
+`sysbox-inner-k3s.sh` 现生成 `runtime_platforms.sysbox-runc-lite → sysbox` 映射。
+218 使用 bootstrap 镜像
+`docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:v0.7.1-26-cri-stats-20260929`
+（digest `sha256:745625402f0efa7ee3a32b6bee6780d653dbd54eb4fa4b07d41becbf410f45fa`）。
+新建 `ckm-cristats-0929` 的 Helm/nested lite 回归通过 rootfs 持久化、无注解空 PVC
+初始化复制和 special bind；其 CRI statsp 中 lite 容器路径为
+`/var/lib/rancher/k3s/agent/containerd/io.containerd.snapshotter.v1.sysbox`，
+节点 `/stats/summary` 可返回。`ckm-wwvg5` 和 `ckm-4ss8n` 被 controller 自动滚动到
+同一镜像后，分别检查 26 个容器记录均无空路径，节点统计接口也成功返回。
+测试 Deployment、PVC、Helm release 和旧 Error Pod 均保留现场。
+
+剩余限制：sysbox 容器的 writable-layer `timestamp`、`usedBytes` 仍为 `0`，
+而普通 overlayfs 容器正常。这不再阻塞 `/stats/summary`，但精确用量统计需要另行
+排查 containerd 对外部 snapshotter 的采集；不能将其误报为已修复。
+
 ### 2026-09-28：移除内层完整 handler，Helm 安装与轻量回归通过
 
 bootstrap 脚本已停止生成 `sysbox-runc-nested`、`sysbox-runc.real` 和内层完整
@@ -91,8 +115,8 @@ RuntimeClass 的 server dry-run 保持 RuntimeClass 为空且不注入 sidecar�
 special bind 均通过。
 
 复测时 nginx 首次启动仍偶发 `sysbox sidecar oci spec unavailable`，重试后正常；
-内层 kubelet 还持续记录 `Failed to get the info of the filesystem with mountpoint`
-（空 mountpoint）统计错误。这两项不影响本次 Pod 启动及功能验收，需另行跟踪。
+内层 kubelet 当时还持续记录 `Failed to get the info of the filesystem with mountpoint`
+（空 mountpoint）统计错误；该项于 2026-09-29 修复，见上节。
 
 ### 2026-09-24：由 runc special mount 提供递归传播（已通过）
 

@@ -4,8 +4,16 @@ set -euo pipefail
 source "$(dirname "$0")/_common.sh"
 
 check_common
+need_cmd jq
 discover_l1
 log "testing a sysbox-runc-lite workload directly in CKM K3s with ${TEST_IMAGE}"
+l1_exec /bin/sh -ec 'grep -A1 "runtime_platforms.sysbox-runc-lite]" /var/lib/rancher/k3s/agent/etc/containerd/config.toml | grep -Fq "snapshotter = \"sysbox\""' ||
+  die 'inner containerd is missing the sysbox-runc-lite image-service snapshotter mapping'
+l1_exec /bin/crictl info | jq -e '
+  .config.containerd.defaultRuntimeName == "runc" and
+  .config.containerd.runtimes.runc.snapshotter == "overlayfs" and
+  .config.containerd.runtimes["sysbox-runc-lite"].snapshotter == "sysbox"
+' >/dev/null || die 'inner containerd runtime handlers do not match the native/lite split'
 if ! l1_exec test -x /var/lib/rancher/k3s/sysbox-runc-lite && ! l1_exec test -x /usr/local/bin/sysbox-runc-lite && ! l1_exec test -x /opt/sysbox/bin/generic/sysbox-runc-lite; then
   die 'sysbox-runc-lite is not installed in the CKM server image/data volume; install it before running the workload test'
 fi
@@ -79,4 +87,13 @@ l1_kubectl -n "$CHART_NAMESPACE" delete pod "$pod" --wait=true
 l1_kubectl -n "$CHART_NAMESPACE" rollout status "deployment/$CKM_TEST_DEPLOYMENT" --timeout=180s
 pod="$(l1_kubectl -n "$CHART_NAMESPACE" get pod -l "app=$CKM_TEST_DEPLOYMENT" --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')"
 l1_rootfs_exec "$pod" nginx 'test -f /usr/share/nginx/html/index.html; test -f /usr/share/nginx/html/50x.html; grep -qx volume-persisted /usr/share/nginx/html/.sysbox-runc-lite-marker; grep -qx rootfs-persisted /srv/data/.sysbox-runc-lite-rootfs-marker'
-log 'FUNCTIONAL PASS: rootfs persistence, annotation-free CSI empty-volume init and special bind mount verified'
+pod_uid="$(l1_kubectl -n "$CHART_NAMESPACE" get pod "$pod" -o jsonpath='{.metadata.uid}')"
+node_name="$(l1_kubectl -n "$CHART_NAMESPACE" get pod "$pod" -o jsonpath='{.spec.nodeName}')"
+l1_exec /bin/crictl statsp -o json | jq -e --arg uid "$pod_uid" '
+  [.stats[] | select(.attributes.metadata.uid == $uid) | .linux.containers[] |
+   select(.attributes.metadata.name == "nginx") | .writableLayer.fsId.mountpoint] |
+  any(. != null and . != "")
+' >/dev/null || die 'sysbox-runc-lite container has an empty writable-layer mountpoint'
+l1_kubectl get --raw "/api/v1/nodes/${node_name}/proxy/stats/summary" >/dev/null ||
+  die 'nested kubelet stats/summary is unavailable'
+log 'FUNCTIONAL PASS: rootfs persistence, annotation-free CSI empty-volume init, special bind and CRI stats verified'
