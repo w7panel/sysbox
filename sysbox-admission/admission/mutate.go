@@ -48,6 +48,11 @@ func (m *Mutator) Mutate(ctx context.Context, pod *corev1.Pod) (*corev1.Pod, err
 
 func (m *Mutator) mutatePod(ctx context.Context, pod *corev1.Pod) ([]RootfsRwLayerEntry, bool, error) {
 	spec := &pod.Spec
+	if _, configured := pod.Annotations[AnnotationRootfsRwLayer]; configured {
+		if spec.RuntimeClassName == nil || !isManagedRuntime(*spec.RuntimeClassName) {
+			return nil, false, fmt.Errorf("%s annotation requires runtimeClassName %q or %q", AnnotationRootfsRwLayer, RuntimeClassSysboxRunc, RuntimeClassRuncLite)
+		}
+	}
 	if spec.RuntimeClassName == nil || !isManagedRuntime(*spec.RuntimeClassName) {
 		return nil, false, nil
 	}
@@ -74,9 +79,12 @@ func isManagedRuntime(name string) bool {
 }
 
 func parseRootfsAnnotation(annotations map[string]string, spec *corev1.PodSpec) ([]RootfsRwLayerEntry, bool, error) {
-	raw := annotations[AnnotationRootfsRwLayer]
-	if raw == "" {
+	raw, configured := annotations[AnnotationRootfsRwLayer]
+	if !configured {
 		return nil, false, nil
+	}
+	if strings.TrimSpace(raw) == "" {
+		return nil, false, fmt.Errorf("%s annotation must not be empty", AnnotationRootfsRwLayer)
 	}
 	var entries []RootfsRwLayerEntry
 	decoder := json.NewDecoder(strings.NewReader(raw))

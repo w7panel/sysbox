@@ -61,6 +61,6 @@ func TestBuildMutatingWebhookConfiguration_setsExactRulesAndMatchCondition(t *te
 	require.Equal(t, []string{"v1"}, entry.Rules[0].Rule.APIVersions)
 	require.Equal(t, []string{"pods"}, entry.Rules[0].Rule.Resources)
 	require.Len(t, entry.MatchConditions, 1)
-	require.Equal(t, "uses-sysbox-runtime", entry.MatchConditions[0].Name)
+	require.Equal(t, "uses-sysbox-runtime-or-rootfs", entry.MatchConditions[0].Name)
 	require.Equal(t, SysboxPodMatchConditionExpression, entry.MatchConditions[0].Expression)
 }

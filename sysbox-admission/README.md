@@ -7,12 +7,12 @@ official-runc-based `sysbox-runc-lite` runtime. `sysbox-runc` requires `hostUser
 
 Empty writable CSI PVCs are initialized directly by `sysbox-runc` and `sysbox-runc-lite` from their kubelet mount paths; no `sysbox/volume-init` Pod or OCI annotation is created or consumed. Existing data is never overwritten, and unrecognized storage paths are skipped.
 
-The webhook handles Pods that meet both of these conditions:
+The webhook handles Pod `CREATE` requests when either of these conditions applies:
 
-- The request is a Pod `CREATE` admission request.
 - `spec.runtimeClassName` is `sysbox-runc` or `sysbox-runc-lite`.
+- The `sysbox/rootfs-rw-layer` annotation is present, including an empty value.
 
-The webhook never selects a RuntimeClass. Pods without one use the cluster's default runtime, even when they carry `sysbox/rootfs-rw-layer`.
+The webhook never selects a RuntimeClass. Pods with a rootfs annotation must explicitly select `sysbox-runc` or `sysbox-runc-lite`; a missing or different RuntimeClass, or an empty annotation, is rejected instead of silently using a non-persistent rootfs.
 
 The PVC initialization metadata is generated without requiring `sysbox/rootfs-rw-layer`. The rootfs sidecar is injected only when that annotation exists and is non-empty.
 
@@ -146,7 +146,7 @@ Important flags:
 
 When `--bootstrap-webhook=true`, one elected replica manages certificate resources and webhook configuration. All replicas wait for and refresh the serving TLS certificate from the configured Secret.
 
-The generated webhook matches only Pod create requests whose `sysbox/rootfs-rw-layer` annotation exists and is non-empty. It uses `failurePolicy: Fail`, `sideEffects: None`, `reinvocationPolicy: IfNeeded`, and a 10 second timeout.
+The generated webhook matches Pod create requests that use a managed RuntimeClass or carry the `sysbox/rootfs-rw-layer` annotation. It uses `failurePolicy: Fail`, `sideEffects: None`, `reinvocationPolicy: IfNeeded`, and a 10 second timeout.
 
 ## Sandbox Image
 

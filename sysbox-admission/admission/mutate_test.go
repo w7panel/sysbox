@@ -131,6 +131,30 @@ func TestServer_rejectsWorkloadResource_whenAnnotationIsValid(t *testing.T) {
 	assertAdmissionDenied(t, recorder.Body.Bytes(), "unsupported resource deployments")
 }
 
+func TestServer_rejectsRootfsConfigurationThatWouldFallBack(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		configurePod func(*corev1.Pod)
+		message      string
+	}{
+		{name: "missing runtime", configurePod: func(pod *corev1.Pod) { pod.Spec.RuntimeClassName = nil }, message: "requires runtimeClassName"},
+		{name: "wrong runtime", configurePod: func(pod *corev1.Pod) { runtime := "runc"; pod.Spec.RuntimeClassName = &runtime }, message: "requires runtimeClassName"},
+		{name: "empty annotation", configurePod: func(pod *corev1.Pod) { pod.Annotations[admission.AnnotationRootfsRwLayer] = "" }, message: "annotation must not be empty"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pod := validRootfsPod()
+			test.configurePod(pod)
+			request := httptest.NewRequest(http.MethodPost, "/mutate", bytes.NewReader(admissionReviewBody(t, "pods", pod)))
+			recorder := httptest.NewRecorder()
+
+			admission.NewServer(newTestMutator()).ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusOK, recorder.Code)
+			assertAdmissionDenied(t, recorder.Body.Bytes(), test.message)
+		})
+	}
+}
+
 func TestMutator_rejectsDuplicateContainerEntries(t *testing.T) {
 	mutator := newTestMutator()
 	pod := validRootfsPod()
@@ -167,20 +191,38 @@ func TestMutator_rejectsInvalidPath(t *testing.T) {
 	require.ErrorContains(t, err, "path")
 }
 
-func TestMutator_leavesPodUnchanged_whenRuntimeClassIsNotSysbox(t *testing.T) {
+func TestMutator_rejectsRootfsAnnotationWhenRuntimeClassIsNotSysbox(t *testing.T) {
 	mutator := newTestMutator()
 	pod := validRootfsPod()
 	otherRuntime := "runc"
 	pod.Spec.RuntimeClassName = &otherRuntime
 
-	mutated, err := mutator.Mutate(context.Background(), pod)
+	_, err := mutator.Mutate(context.Background(), pod)
 
-	require.NoError(t, err)
-	require.Empty(t, mutated.Spec.Containers[0].VolumeMounts)
+	require.ErrorContains(t, err, "requires runtimeClassName")
 }
 
-func TestMutator_doesNotSelectRuncLiteFromRootfsAnnotation(t *testing.T) {
+func TestMutator_rejectsRootfsAnnotationWithoutRuntimeClass(t *testing.T) {
 	pod := validRootfsPod()
+	pod.Spec.RuntimeClassName = nil
+
+	_, err := newTestMutator().Mutate(context.Background(), pod)
+
+	require.ErrorContains(t, err, "requires runtimeClassName")
+}
+
+func TestMutator_rejectsEmptyRootfsAnnotation(t *testing.T) {
+	pod := validRootfsPod()
+	pod.Annotations[admission.AnnotationRootfsRwLayer] = " "
+
+	_, err := newTestMutator().Mutate(context.Background(), pod)
+
+	require.ErrorContains(t, err, "annotation must not be empty")
+}
+
+func TestMutator_leavesUnconfiguredDefaultRuntimePodUnchanged(t *testing.T) {
+	pod := validRootfsPod()
+	delete(pod.Annotations, admission.AnnotationRootfsRwLayer)
 	pod.Spec.RuntimeClassName = nil
 
 	mutated, err := newTestMutator().Mutate(context.Background(), pod)

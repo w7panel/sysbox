@@ -9,7 +9,7 @@ import (
 
 const WebhookName = "sysbox-webhook-mutator"
 
-const SysboxPodMatchConditionExpression = `has(object.spec.runtimeClassName) && (object.spec.runtimeClassName == "sysbox-runc" || object.spec.runtimeClassName == "sysbox-runc-lite")`
+const SysboxPodMatchConditionExpression = `(has(object.metadata.annotations) && "sysbox/rootfs-rw-layer" in object.metadata.annotations) || (has(object.spec.runtimeClassName) && (object.spec.runtimeClassName == "sysbox-runc" || object.spec.runtimeClassName == "sysbox-runc-lite"))`
 
 type WebhookConfig struct {
 	Name        string
@@ -65,7 +65,7 @@ func BuildMutatingWebhookConfiguration(config WebhookConfig) (*admissionregistra
 				SideEffects:        &sideEffects,
 				TimeoutSeconds:     &timeoutSeconds,
 				MatchConditions: []admissionregistrationv1.MatchCondition{
-					{Name: "uses-sysbox-runtime", Expression: SysboxPodMatchConditionExpression},
+					{Name: "uses-sysbox-runtime-or-rootfs", Expression: SysboxPodMatchConditionExpression},
 				},
 			},
 		},
