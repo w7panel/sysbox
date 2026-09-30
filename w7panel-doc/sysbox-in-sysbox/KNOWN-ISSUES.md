@@ -28,6 +28,10 @@ runc Ubuntu 持久化探针也仍正常。测试资源保留。
 （digest `sha256:81ea917b0412829682b71e6725a2d218184e8ed840a6692e91b51cf8c157d1b4`）；
 镜像层数、lite 可执行文件及启动脚本已检查。对测试 CKM 单独修改 Deployment 镜像会被
 共享 controller 恢复为旧值，未完成新镜像的 CKM 功能回归；该 CKM 已恢复 Ready。
+随后按授权将 `default/w7panel-ckm` 的 `CKM_INNER_SYSBOX_BOOTSTRAP_IMAGE` 切换到该
+压平镜像，`ckm-disk-ubuntu-0930` 重建并恢复 Ready。内层新建
+`default/ckm-k3s-nginx-v28`，`05-test-ckm-k3s.sh` 报 `FUNCTIONAL PASS`，验证 rootfs
+持久化、无注解空 PVC 初始化、特殊目录 bind 和 CRI stats。测试 Deployment/PVC 保留。
 下节旧版本的空
 mountpoint 故障是历史事实，但不能据此断定该映射在当前版本仍为必要条件。
 
