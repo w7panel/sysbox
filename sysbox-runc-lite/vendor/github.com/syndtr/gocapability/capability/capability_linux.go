@@ -411,13 +411,6 @@ func (c *capsV3) Load() (err error) {
 
 	f, err := os.Open(status_path)
 	if err != nil {
-		// runc-lite can run on a FUSE rootfs where the outer runtime refuses
-		// a proc mount. capget above already populated the effective sets;
-		// callers overwrite the requested bounding and ambient sets before
-		// applying them, so a missing status file is not fatal here.
-		if os.IsNotExist(err) {
-			return nil
-		}
 		return
 	}
 	b := bufio.NewReader(f)

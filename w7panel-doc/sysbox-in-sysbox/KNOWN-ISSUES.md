@@ -12,6 +12,24 @@ Server 仍必须保持 `runtimeClassName=sysbox-runc` 与 `hostUsers:false`；L2
 以及 snapshotter/webhook 复用。明确放弃 proc 强隔离、视图隔离和 system workload；
 实现基于官方 runc/libcontainer 局部修改，不引入 L2 `sysbox-fs` 或 `sysbox-mgr`。
 
+### 2026-09-30：移除 vendored gocapability 的缺失 proc 容错
+
+lite 原先在读取 `/proc/self/status` 返回 ENOENT 时仍把 capability `Load` 当作成功；
+官方 runc v1.1.4 的同版 gocapability 直接返回错误。已移除这段容错，静态测试二进制
+SHA256 为 `159d844f87523cb436538df85bcab742a82ffa89dd09ff903836e8301277a315`。
+只替换 218 宿主 `/usr/bin/sysbox-runc-lite` 与测试 CKM
+`ckm-disk-ubuntu-0930` 的 `/opt/sysbox/bin/generic/sysbox-runc-lite`；原二进制均保存为
+`.before-proc-upstream-0930`。L0 的 `local-path` 和 `disk-default`、L2 的 `local-path`
+均通过 rootfs 重建持久化、无注解空 PVC 初始化与特殊 bind；L2 CRI stats、双层 TTY
+exec、`/proc/self/status` 和字符设备检查也通过。测试 Deployment/PVC 保留。
+随后将同一二进制装入单层 bootstrap 镜像
+`docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:v0.7.1-28-proc-upstream-20260930-flat`
+（digest `sha256:fdbba2452f8f2edb674fdaafc6785c64981f36c65fa902a3495a15d43086da3d`）。
+`default/w7panel-ckm` 的环境变量切换后，测试 CKM Server 重建、恢复 Ready，镜像安装的
+lite SHA256 仍一致；新建 `ckm-k3s-nginx-proc-image-0930` 再次通过 L2 完整回归。
+Chart 默认值已更新，但尚未验证新的 tagged Release。BusyBox `tar` 不支持
+`kubectl cp` 使用的 `-m`，初次现场二进制传输改用标准输入经 base64 完成。
+
 ### 2026-09-30：移除 runtime_platforms 与 container_annotations 的现场回归通过
 
 当前源码已移除内层 K3s 的 `runtime_platforms.sysbox-runc-lite → sysbox` 和 lite
