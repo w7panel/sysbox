@@ -12,6 +12,46 @@ Server 仍必须保持 `runtimeClassName=sysbox-runc` 与 `hostUsers:false`；L2
 以及 snapshotter/webhook 复用。明确放弃 proc 强隔离、视图隔离和 system workload；
 实现基于官方 runc/libcontainer 局部修改，不引入 L2 `sysbox-fs` 或 `sysbox-mgr`。
 
+### 2026-09-30：移除 runtime_platforms 与 container_annotations 的现场回归通过
+
+当前源码已移除内层 K3s 的 `runtime_platforms.sysbox-runc-lite → sysbox` 和 lite
+handler 的 `container_annotations`，保留 `snapshotter = "sysbox"` 与
+`pod_annotations = ["sysbox/rootfs-rw-layer"]`。在新建的
+`ckm-disk-ubuntu-0930`（外层 PVC 使用 `disk-default`）中，仅替换该 CKM 的共享启动脚本
+并重启 `k3s-server` 容器后，生成的 `config-v3.toml.tmpl` 和 `config.toml` 均不含这两项。
+`05-test-ckm-k3s.sh` 完成 rootfs 持久化、无注解空 PVC 初始化复制、special bind、CRI
+writable-layer 非空路径和 kubelet `/stats/summary` 验证；内层 `kubectl exec` 与普通
+runc Ubuntu 持久化探针也仍正常。测试资源保留。
+
+这是运行中脚本替换的结果，尚非新 bootstrap 镜像的功能验收。随后构建并推送了单层镜像
+`docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:v0.7.1-28-lite-minimal-20260930-flat`
+（digest `sha256:81ea917b0412829682b71e6725a2d218184e8ed840a6692e91b51cf8c157d1b4`）；
+镜像层数、lite 可执行文件及启动脚本已检查。对测试 CKM 单独修改 Deployment 镜像会被
+共享 controller 恢复为旧值，未完成新镜像的 CKM 功能回归；该 CKM 已恢复 Ready。
+下节旧版本的空
+mountpoint 故障是历史事实，但不能据此断定该映射在当前版本仍为必要条件。
+
+同日，进一步移除了 lite 的 `/dev`、`/proc`、sysfs 和挂载失败兼容绕过，仅保留上游
+标准设备/proc 安全逻辑与 lite 的空 PVC 初始化、特殊目录挂载。静态测试二进制 SHA256
+为 `9268ef44e1d5a6823c1bb3a4f878974496bb5d2f3bedf0e8f72c52459678befa`：只替换
+新 CKM 的 lite 与 218 宿主 `/usr/bin/sysbox-runc-lite`，旧二进制各留一份备份。
+L2 `ckm-k3s-nginx-minimal` 完整回归通过；L0
+`sysbox-l0-rootfs-lite-minimal-0930`（local-path）与
+`sysbox-l0-rootfs-lite-minimal-disk-0930`（disk-default/Longhorn）均通过空 PVC 复制、
+rootfs 和 special bind 重建持久化。L0/L2 TTY exec、字符设备 `/dev/null`、普通
+`/proc`/`/sys` 挂载也通过。上述结果仍是本地二进制现场测试，不等于发布镜像验收。
+此后源码又移除了一处无关的 `/dev/null` 预检查；该最终源码通过单元测试，但未进行
+同版本二进制的 L0/L2 现场回归。
+
+同日审查发现：`w7panel` HEAD 的 admission 会拒绝带 `sysbox/rootfs-rw-layer`
+注解却未选择 Sysbox RuntimeClass 的 Pod，但已发布的 v0.7.1-25/26/27 镜像均不含
+该拒绝逻辑。旧 webhook 匹配条件也未覆盖此类 Pod。已将 218 和两个测试 CKM 的
+匹配条件扩展到 rootfs 注解，并将仅更新 admission 的测试镜像
+`docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:v0.7.1-27-admission-strict-20260930`
+部署到三处（digest `sha256:5257dc0d33cb219e38c10533c3fd42e29962ad8667500aa2a8a5097a722ffb11`）。
+三处 rollout 完成；错误配置在三处均被 server dry-run 拒绝，普通 Pod dry-run 仍通过。
+这是临时测试镜像与现场 webhook 修正，尚未进入 Helm chart 或正式 release。
+
 ### 2026-09-29：内层 CRI 空 mountpoint 已修复；用量统计仍待完善
 
 内层 K3s 的默认 `runc` 使用 overlayfs，显式 `sysbox-runc-lite` 使用 sysbox snapshotter。
@@ -21,7 +61,7 @@ Server 仍必须保持 `runtimeClassName=sysbox-runc` 与 `hostUsers:false`；L2
 节点 `/stats/summary` 返回 InternalError。此问题与 CKM 启动脚本移除 `mountpoint -q`
 检查无关；空路径报错在该脚本移除前就已记录。
 
-`sysbox-inner-k3s.sh` 现生成 `runtime_platforms.sysbox-runc-lite → sysbox` 映射。
+当时版本的 `sysbox-inner-k3s.sh` 生成了 `runtime_platforms.sysbox-runc-lite → sysbox` 映射。
 218 使用 bootstrap 镜像
 `docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:v0.7.1-26-cri-stats-20260929`
 （digest `sha256:745625402f0efa7ee3a32b6bee6780d653dbd54eb4fa4b07d41becbf410f45fa`）。

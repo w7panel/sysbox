@@ -26,7 +26,6 @@ type linuxStandardInit struct {
 	fifoFd        int
 	logFd         int
 	mountFds      []int
-	procFd        int
 	config        *initConfig
 }
 
@@ -47,12 +46,6 @@ func (l *linuxStandardInit) getSessionRingParams() (string, uint32, uint32) {
 }
 
 func (l *linuxStandardInit) Init() error {
-	procFd, err := unix.Open("/proc", unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
-	if err != nil {
-		return fmt.Errorf("open inherited proc: %w", err)
-	}
-	l.procFd = procFd
-	defer unix.Close(procFd) //nolint: errcheck
 	if !l.config.Config.NoNewKeyring {
 		if err := selinux.SetKeyLabel(l.config.ProcessLabel); err != nil {
 			return err
@@ -94,7 +87,7 @@ func (l *linuxStandardInit) Init() error {
 	selinux.GetEnabled()
 
 	// We don't need the mountFds after prepareRootfs() nor if it fails.
-	err = prepareRootfs(l.pipe, l.config, l.mountFds)
+	err := prepareRootfs(l.pipe, l.config, l.mountFds)
 	for _, m := range l.mountFds {
 		if m == -1 {
 			continue
@@ -138,7 +131,7 @@ func (l *linuxStandardInit) Init() error {
 	}
 
 	for key, value := range l.config.Config.Sysctl {
-		if err := writeSystemProperty(key, value); err != nil && !os.IsNotExist(err) {
+		if err := writeSystemProperty(key, value); err != nil {
 			return err
 		}
 	}
@@ -240,8 +233,8 @@ func (l *linuxStandardInit) Init() error {
 	// user process. We open it through /proc/self/fd/$fd, because the fd that
 	// was given to us was an O_PATH fd to the fifo itself. Linux allows us to
 	// re-open an O_PATH fd through /proc.
-	fifoPath := "self/fd/" + strconv.Itoa(l.fifoFd)
-	fd, err := unix.Openat(l.procFd, fifoPath, unix.O_WRONLY|unix.O_CLOEXEC, 0)
+	fifoPath := "/proc/self/fd/" + strconv.Itoa(l.fifoFd)
+	fd, err := unix.Open(fifoPath, unix.O_WRONLY|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return &os.PathError{Op: "open exec fifo", Path: fifoPath, Err: err}
 	}

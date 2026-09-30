@@ -1,12 +1,18 @@
 ---
 name: sysbox-in-sysbox-test
-description: Run and diagnose the Sysbox-in-Sysbox L0 host, L1 CKM, and L2 workload regression flow, including rootfs PVC persistence, empty-volume initialization, special bind mounts, and release-artifact verification.
+description: Analyze and test the W7Panel Sysbox-in-Sysbox runtime, including branch/submodule comparisons and L0 host, L1 CKM, L2 workload regressions.
 ---
 
 # Sysbox-in-Sysbox Test
 
-Use this skill for validating the W7Panel Sysbox runtime flow, not for generic
-Kubernetes workload tests.
+Use this skill for analyzing or validating the W7Panel Sysbox runtime flow,
+not for generic Kubernetes workload tests.
+
+For branch comparisons, runtime-code reviews, or implementation-status reports,
+read [analysis and runtime boundaries](references/analysis-and-runtime-boundaries.md).
+This analysis mode is read-only: do not access a live cluster, change branches,
+or deploy merely to answer a comparison question. Run cluster tests only when
+the user requests validation or a change that requires it.
 
 The topology is L0 host Kubernetes, L1 CKM Server/K3s, and L2 workload. The
 supported workload is nginx; Docker, systemd, strong `/proc` isolation, and
@@ -25,12 +31,19 @@ host-view isolation are outside this flow.
 
 Read [the test matrix](references/test-matrix.md) before running tests. It
 contains the commands and the required evidence for source and release modes.
+For the separate native-runc comparison, read
+[the native-runc probe results](references/native-runc-probe.md); do not count
+that probe as a pass for lite-only initialization or special binds.
 Read [the build and script catalog](references/build-and-script-catalog.md)
 when building an image, packaging a chart, selecting a test stage, or using
 the executable Skill wrappers.
 
 ## Required invariants
 
+- Lite's custom runtime behavior is limited to annotation-free empty-PVC image
+  copy and persistent special-directory binds. Rootfs persistence belongs to
+  admission and snapshotter; keep ordinary `/dev`, `/proc`, `/sys`, and mount
+  errors on upstream runc semantics rather than adding failure-skipping paths.
 - L0 exposes both `sysbox-runc` and `sysbox-runc-lite`; normal L0 Pods must
   not receive an automatic `/dev/fuse` mount.
 - Full L0 `sysbox-runc` rootfs/nginx validation uses `hostUsers: false`.

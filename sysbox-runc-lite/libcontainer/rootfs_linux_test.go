@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/opencontainers/runc/libcontainer/configs"
-	"github.com/opencontainers/runc/libcontainer/userns"
 )
 
 func TestCheckMountDestOnProc(t *testing.T) {
@@ -57,7 +56,7 @@ func TestNeedsSetupDev(t *testing.T) {
 			},
 		},
 	}
-	if got, want := needsSetupDev(config), userns.RunningInUserNS(); got != want {
+	if got, want := needsSetupDev(config), false; got != want {
 		t.Fatalf("expected needsSetupDev=%v, got %v", want, got)
 	}
 }
@@ -72,7 +71,7 @@ func TestNeedsSetupDevStrangeSource(t *testing.T) {
 			},
 		},
 	}
-	if got, want := needsSetupDev(config), userns.RunningInUserNS(); got != want {
+	if got, want := needsSetupDev(config), false; got != want {
 		t.Fatalf("expected needsSetupDev=%v, got %v", want, got)
 	}
 }

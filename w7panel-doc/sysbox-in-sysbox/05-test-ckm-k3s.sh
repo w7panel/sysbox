@@ -7,8 +7,11 @@ check_common
 need_cmd jq
 discover_l1
 log "testing a sysbox-runc-lite workload directly in CKM K3s with ${TEST_IMAGE}"
-l1_exec /bin/sh -ec 'grep -A1 "runtime_platforms.sysbox-runc-lite]" /var/lib/rancher/k3s/agent/etc/containerd/config.toml | grep -Fq "snapshotter = \"sysbox\""' ||
-  die 'inner containerd is missing the sysbox-runc-lite image-service snapshotter mapping'
+l1_exec /bin/sh -ec '
+  config=/var/lib/rancher/k3s/agent/etc/containerd/config.toml
+  ! grep -Fq "runtime_platforms.sysbox-runc-lite]" "$config"
+  ! grep -A5 -F "runtimes.sysbox-runc-lite]" "$config" | grep -Fq "container_annotations"
+' || die 'inner containerd still has removed lite image-service or container-annotation configuration'
 l1_exec /bin/crictl info | jq -e '
   .config.containerd.defaultRuntimeName == "runc" and
   .config.containerd.runtimes.runc.snapshotter == "overlayfs" and

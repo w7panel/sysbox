@@ -42,10 +42,7 @@ type mountConfig struct {
 func needsSetupDev(config *configs.Config) bool {
 	for _, m := range config.Mounts {
 		if m.Device == "bind" && utils.CleanPath(m.Destination) == "/dev" {
-			// The host /dev bind is rejected from the L1 user namespace. Fall
-			// back to runc's normal device setup after the failed bind instead
-			// of preserving copied regular files such as /dev/null.
-			return userns.RunningInUserNS()
+			return false
 		}
 	}
 	return true
@@ -71,10 +68,6 @@ func prepareRootfs(pipe io.ReadWriter, iConfig *initConfig, mountFds []int) (err
 		rootlessCgroups: iConfig.RootlessCgroups,
 		cgroupns:        config.Namespaces.Contains(configs.NEWCGROUP),
 	}
-	// The nested snapshotter materializes FUSE rootfs into a normal bind mount
-	// before OCI create. Keep the upstream device setup enabled so /dev/null
-	// and the remaining standard device nodes retain their character-device
-	// semantics instead of becoming copied regular files.
 	setupDev := needsSetupDev(config)
 	for i, m := range config.Mounts {
 		for _, precmd := range m.PremountCmds {
@@ -92,9 +85,6 @@ func prepareRootfs(pipe io.ReadWriter, iConfig *initConfig, mountFds []int) (err
 		}
 
 		if err := mountToRootfs(m, mountConfig); err != nil {
-			if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.EPERM) {
-				continue
-			}
 			return fmt.Errorf("error mounting %q to rootfs at %q: %w", m.Source, m.Destination, err)
 		}
 
@@ -148,9 +138,6 @@ func prepareRootfs(pipe io.ReadWriter, iConfig *initConfig, mountFds []int) (err
 		err = msMoveRoot(config.Rootfs)
 	} else if config.Namespaces.Contains(configs.NEWNS) {
 		err = pivotRoot(config.Rootfs)
-		if errors.Is(err, unix.EINVAL) {
-			err = chroot()
-		}
 	} else {
 		err = chroot()
 	}
@@ -434,37 +421,15 @@ func mountToRootfs(m *configs.Mount, c *mountConfig) error {
 		if err := os.MkdirAll(dest, 0o755); err != nil {
 			return err
 		}
-		// Procfs must be mounted before the pivot because runc itself uses
-		// /proc/self/fd during finalisation. This is the normal runc proc mount;
-		// runc-lite makes no additional proc-view isolation guarantee.
-		if m.Device == "proc" {
-			return mountPropagate(m, rootfs, "", nil)
-		}
-		// A nested user namespace cannot create a new sysfs either; isolation is
-		// outside this lightweight runtime's scope.
-		return nil
+		return mountPropagate(m, rootfs, "", nil)
 	case "mqueue":
 		if err := os.MkdirAll(dest, 0o755); err != nil {
 			return err
 		}
 		if err := mountPropagate(m, rootfs, "", nil); err != nil {
-			if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.EPERM) {
-				return nil
-			}
 			return err
 		}
 		return label.SetFileLabel(dest, mountLabel)
-	case "devpts":
-		if err := os.MkdirAll(dest, 0o755); err != nil {
-			return err
-		}
-		if err := mountPropagate(m, rootfs, "", nil); err != nil {
-			if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.EPERM) {
-				return nil
-			}
-			return err
-		}
-		return nil
 	case "tmpfs":
 		stat, err := os.Stat(dest)
 		if err != nil {
@@ -480,11 +445,6 @@ func mountToRootfs(m *configs.Mount, c *mountConfig) error {
 		}
 
 		if err != nil {
-			// Nested user namespaces may reject tmpfs mounts. The base rootfs
-			// directories remain usable when isolation mounts are unavailable.
-			if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.EPERM) {
-				return nil
-			}
 			return err
 		}
 
@@ -499,9 +459,6 @@ func mountToRootfs(m *configs.Mount, c *mountConfig) error {
 			return err
 		}
 		if err := mountPropagate(m, rootfs, mountLabel, mountFd); err != nil {
-			if utils.CleanPath(m.Destination) == "/dev/shm" && (errors.Is(err, unix.ENOENT) || errors.Is(err, unix.EPERM)) {
-				return nil
-			}
 			return err
 		}
 		// bind mount won't change mount options, we need remount to make mount options effective.
@@ -849,18 +806,7 @@ func prepareRoot(config *configs.Config) error {
 	if err := rootfsParentMountPrivate(config.Rootfs); err != nil {
 		return err
 	}
-	if mounted, err := mountinfo.Mounted(config.Rootfs); err == nil && mounted {
-		return nil
-	}
-
 	if err := mount(config.Rootfs, config.Rootfs, "", "bind", unix.MS_BIND|unix.MS_REC, ""); err != nil {
-		// FUSE-backed rootfs in a nested user namespace may reject recursive
-		// bind while a plain bind remains valid. Sysbox's outer runtime returns
-		// EPERM for the recursive form when the FUSE mount is inherited through
-		// the L1 shared mount namespace.
-		if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.EPERM) {
-			return mount(config.Rootfs, config.Rootfs, "", "bind", unix.MS_BIND, "")
-		}
 		return err
 	}
 	return nil
@@ -937,13 +883,6 @@ func pivotRoot(rootfs string) error {
 	// mount while a process in the host namespace are trying to operate on
 	// something they think has no mounts (devicemapper in particular).
 	if err := mount("", ".", "", "", unix.MS_SLAVE|unix.MS_REC, ""); err != nil {
-		// The outer Sysbox runtime rejects changing propagation on an inherited
-		// FUSE rootfs (EPERM). The pivot already succeeded at this point, so
-		// retain the old root only until this process switches back to "/".
-		// runc-lite intentionally does not provide strong mount-view isolation.
-		if errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) {
-			return unix.Chdir("/")
-		}
 		return err
 	}
 	// Perform the unmount. MNT_DETACH allows us to unmount /proc/self/cwd.
