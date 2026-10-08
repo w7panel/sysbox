@@ -12,6 +12,23 @@ Server 仍必须保持 `runtimeClassName=sysbox-runc` 与 `hostUsers:false`；L2
 以及 snapshotter/webhook 复用。明确放弃 proc 强隔离、视图隔离和 system workload；
 实现基于官方 runc/libcontainer 局部修改，不引入 L2 `sysbox-fs` 或 `sysbox-mgr`。
 
+### 2026-10-08：内层 UID/GID remap 尚未通过实测
+
+`ckm-disk-ubuntu-0930` 使用单层 bootstrap 测试镜像
+`docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:v0.7.1-29-inner-remap-20261008-test-flat`
+（digest `sha256:b99e3ee0412c24c310ea0fbaa8843db1e865af8d3005e6e0e3bf3be8507f2271`）。
+内层 containerd 显示 Sysbox proxy snapshotter `Capabilities: remap-ids`；未启用
+`hostUsers:false` 的 lite nginx 已通过 rootfs、空 PVC、特殊 bind 和 CRI stats 回归。
+
+另建 `default/ckm-inner-remap-userns-1008`，指定 `sysbox-runc-lite` 与
+`hostUsers:false` 后，Kubelet 在 sandbox 前拒绝：`RuntimeClass handler
+"sysbox-runc-lite" does not support user namespaces`。`crictl info` 确认该 handler 的
+`features.user_namespaces` 未声明。官方 runc 的现存 `runc-sysbox-probe` handler 声明了
+该能力，但对照 Deployment `default/ckm-inner-remap-native-1008` 在创建网络命名空间时
+失败：`fork/exec /proc/self/exe: operation not permitted`。因此两条路径均未到达
+snapshotter 的 UID/GID 映射挂载阶段；`remap-ids` 配置加载成功不等于映射功能通过。
+两个诊断 Deployment/PVC 保留，不能将此结果算作支持内层 `hostUsers:false`。
+
 ### 2026-09-30：移除 vendored gocapability 的缺失 proc 容错
 
 lite 原先在读取 `/proc/self/status` 返回 ENOENT 时仍把 capability `Load` 当作成功；
