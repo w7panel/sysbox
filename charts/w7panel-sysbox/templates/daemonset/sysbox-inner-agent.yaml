@@ -1,0 +1,65 @@
+{{- if eq .Values.installMode "nested" }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "w7panel-sysbox.fullname" . }}-inner-agent
+  namespace: {{ include "w7panel-sysbox.namespace" . }}
+  labels:
+    {{- include "w7panel-sysbox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: inner-agent
+spec:
+  selector:
+    matchLabels:
+      {{- include "w7panel-sysbox.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: inner-agent
+  template:
+    metadata:
+      labels:
+        {{- include "w7panel-sysbox.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: inner-agent
+      {{- with .Values.installer.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      enableServiceLinks: false
+      hostPID: true
+      serviceAccountName: {{ include "w7panel-sysbox.serviceAccountName" . }}
+      tolerations:
+        - operator: Exists
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: inner-agent
+          image: {{ printf "%s:%s" .Values.installer.image.repository (.Values.installer.image.tag | default (printf "v%s" .Chart.AppVersion)) | quote }}
+          imagePullPolicy: {{ .Values.installer.image.pullPolicy }}
+          command: ["/opt/sysbox/scripts/sysbox-inner-agent.sh", "install"]
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          securityContext:
+            privileged: true
+          readinessProbe:
+            exec:
+              command: ["/opt/sysbox/scripts/sysbox-inner-agent.sh", "status"]
+            periodSeconds: 5
+            failureThreshold: 6
+          volumeMounts:
+            - name: host-k3s-data
+              mountPath: /host/var/lib/rancher/k3s
+            - name: dev-fuse
+              mountPath: /dev/fuse
+      volumes:
+        - name: host-k3s-data
+          hostPath:
+            path: /var/lib/rancher/k3s
+            type: Directory
+        - name: dev-fuse
+          hostPath:
+            path: /dev/fuse
+            type: CharDevice
+{{- end }}

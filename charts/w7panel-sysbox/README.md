@@ -10,8 +10,10 @@ installer and admission backend.
 In host mode the chart creates both fixed RuntimeClasses: `sysbox-runc` and
 `sysbox-runc-lite`. Both use the Sysbox snapshotter/rootfs annotation contract
 and admission webhook; the only difference is the OCI runtime binary. Nested
-mode creates only `sysbox-runc-lite`, because its K3s bootstrap installs that
-binary and handler itself.
+mode creates only `sysbox-runc-lite`. The nested agent DaemonSet installs its
+binary and containerd handler from the installer image, then restarts K3s when
+the containerd template changes. The agent marks the node ready for lite Pods
+only after CRI and the snapshotter respond.
 
 ### Node Selector
 
@@ -35,7 +37,7 @@ To use a custom label, set `nodeSelector` to the desired key/value map.
 
 | Value | Default | Description |
 | --- | --- | --- |
-| `nodeSelector` | `{}` | Shared node selector for the installer DaemonSet, admission Deployment, and RuntimeClass scheduling. |
+| `nodeSelector` | `{}` | Shared node selector for the installer DaemonSet and admission Deployment. In nested mode, the RuntimeClass additionally requires the agent's readiness label. |
 
 ### Images
 
@@ -59,6 +61,14 @@ helm upgrade --install w7panel-sysbox ./charts/w7panel-sysbox \
 ```
 
 ### Installer
+
+In nested mode, the Chart always runs the inner agent from `installer.image`.
+The CKM Server needs a `/dev/fuse` device and persistent
+`/var/lib/rancher/k3s`. The agent stores release binaries there and reconciles
+them after K3s or agent restarts. Uninstall checks for active lite Pods, stops
+the agent, and restores the previous containerd template. Restart the CKM
+Server after Helm uninstall completes so containerd loads that template;
+`w7panel-doc/sysbox-in-sysbox/07-uninstall-ckm-chart.sh` performs both steps.
 
 | Value | Default | Description |
 | --- | --- | --- |

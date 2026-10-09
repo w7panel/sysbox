@@ -9,17 +9,16 @@ discover_l1
 log "testing a sysbox-runc-lite workload directly in CKM K3s with ${TEST_IMAGE}"
 l1_exec /bin/sh -ec '
   config=/var/lib/rancher/k3s/agent/etc/containerd/config.toml
-  ! grep -Fq "runtime_platforms.sysbox-runc-lite]" "$config"
+  grep -Fq "runtime_platforms.sysbox-runc-lite]" "$config"
   ! grep -A5 -F "runtimes.sysbox-runc-lite]" "$config" | grep -Fq "container_annotations"
-' || die 'inner containerd still has removed lite image-service or container-annotation configuration'
+' || die 'inner containerd is missing the lite CRI filesystem mapping or has obsolete container annotations'
 l1_exec /bin/crictl info | jq -e '
   .config.containerd.defaultRuntimeName == "runc" and
   .config.containerd.runtimes.runc.snapshotter == "overlayfs" and
   .config.containerd.runtimes["sysbox-runc-lite"].snapshotter == "sysbox"
 ' >/dev/null || die 'inner containerd runtime handlers do not match the native/lite split'
-if ! l1_exec test -x /var/lib/rancher/k3s/sysbox-runc-lite && ! l1_exec test -x /usr/local/bin/sysbox-runc-lite && ! l1_exec test -x /opt/sysbox/bin/generic/sysbox-runc-lite; then
-  die 'sysbox-runc-lite is not installed in the CKM server image/data volume; install it before running the workload test'
-fi
+l1_exec /bin/sh -ec 'release=$(cat /var/lib/rancher/k3s/sysbox-inner/current); test -x "/var/lib/rancher/k3s/sysbox-inner/releases/$release/bin/generic/sysbox-runc-lite"' ||
+  die 'sysbox-runc-lite is not installed in the CKM data volume; install the nested Chart before running the workload test'
 l1_kubectl -n "$CHART_NAMESPACE" delete deployment "$CKM_TEST_DEPLOYMENT" --ignore-not-found --wait=true
 l1_kubectl -n "$CHART_NAMESPACE" delete pvc "$CKM_TEST_VOLUME_INIT_PVC" --ignore-not-found --wait=true
 l1_kubectl_input apply -f - <<EOF

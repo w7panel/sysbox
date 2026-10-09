@@ -13,9 +13,10 @@ case "$stage" in
   l1-install) script=04-install-ckm-chart.sh ;;
   l2) script=05-test-ckm-k3s.sh ;;
   build-and-test) script=06-build-and-test.sh ;;
+  l1-uninstall) script=07-uninstall-ckm-chart.sh ;;
   cleanup) script=99-cleanup.sh ;;
   *)
-    echo "usage: $0 {preflight|ckm|l0-smoke|l0-rootfs|l1-install|l2|build-and-test|cleanup}" >&2
+    echo "usage: $0 {preflight|ckm|l0-smoke|l0-rootfs|l1-install|l2|build-and-test|l1-uninstall|cleanup}" >&2
     exit 2
     ;;
 esac

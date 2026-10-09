@@ -19,7 +19,7 @@ commands include `git status --short --branch`, `git merge-base`,
 `git -C <submodule> log <old>..<new>`.
 
 Group findings by runtime handler, snapshotter/rootfs, PVC initialization,
-special mounts, bootstrap/containerd configuration, chart, and tests. For each
+special mounts, nested containerd configuration, chart, and tests. For each
 material change report the baseline behavior, new behavior, runtime invariant,
 and source or test evidence. Distinguish implemented, actually validated,
 unverified, and known limitation; a code path or Ready Pod alone is not a

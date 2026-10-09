@@ -6,11 +6,9 @@ metadata:
   labels:
     {{- include "w7panel-sysbox.labels" . | nindent 4 }}
 handler: sysbox-runc-lite
-{{- with .Values.nodeSelector }}
 scheduling:
   nodeSelector:
-    {{- toYaml . | nindent 4 }}
-{{- end }}
+    sysbox.w7panel.io/nested-runtime: ready
 {{- else }}
 apiVersion: node.k8s.io/v1
 kind: RuntimeClass

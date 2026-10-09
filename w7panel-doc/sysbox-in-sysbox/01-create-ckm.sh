@@ -25,7 +25,7 @@ if outer_kubectl -n "$CKM_NAMESPACE" get pvc "$server_pvc" >/dev/null 2>&1; then
   die "server PVC $CKM_NAMESPACE/$server_pvc already exists; choose a new CKM_NAME (the test will not alter an existing PVC)"
 fi
 outer_kubectl create namespace "$CKM_NAMESPACE" --dry-run=client -o yaml | outer_kubectl apply -f - >/dev/null
-log "creating CKM $CKM_NAMESPACE/$CKM_NAME with inner Sysbox=$INNER_SYSBOX_ENABLED"
+log "creating CKM $CKM_NAMESPACE/$CKM_NAME; the nested Chart will install Sysbox after K3s starts"
 outer_kubectl apply -f - <<EOF
 apiVersion: ckm.w7.cc/v1alpha2
 kind: Ckm
@@ -36,8 +36,6 @@ metadata:
     ckm.w7.cc/controller-version: v1alpha2
 spec:
   runtimeClass: ${OUTER_RUNTIME_CLASS}
-  innerSysbox:
-    enabled: ${INNER_SYSBOX_ENABLED}
   storageClassName: local-path
   workload:
     apiVersion: k3k.io/v1beta1

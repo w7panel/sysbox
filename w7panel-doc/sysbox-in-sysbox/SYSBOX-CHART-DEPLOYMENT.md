@@ -21,6 +21,7 @@ L0：218 外层 Kubernetes
    └─ L1 K3s
       └─ w7panel-sysbox（installMode=nested）
          ├─ RuntimeClass: sysbox-runc-lite
+         ├─ inner-agent 安装二进制与 containerd handler，按需重启 K3s
          ├─ sysbox-snapshotter + admission
          └─ L2 nginx（runtimeClassName: sysbox-runc-lite）
 ```
@@ -32,7 +33,7 @@ L0：218 外层 Kubernetes
 | L2 workload | `sysbox-runc-lite` | 本轮不设置、不验收 | nginx、rootfs 与普通 CSI 卷 |
 
 L0 admission 不会为普通 `sysbox-runc` Pod 自动挂载 `/dev/fuse`。L1 的 FUSE 设备由
-CKM bootstrap/Server 路径提供，不能将它改为通用 webhook 注入规则。
+CKM Server 的 `/dev/fuse` hostPath 提供，不能将它改为通用 webhook 注入规则。
 
 不提供 proc 强隔离、宿主资源视图隔离或 system/Docker workload 支持。L3 仅是历史实验。
 限制与现场问题见 [KNOWN-ISSUES.md](./KNOWN-ISSUES.md)。
@@ -209,7 +210,7 @@ kubectl --kubeconfig "$KUBECONFIG_218" -n "$OUTER_NAMESPACE" exec "$L1_POD" \
 不要继续 nested 安装。
 
 将 Helm CLI 和已校验的发布 chart 临时复制进目标 CKM Server，并在 L1 K3s 中创建真实
-Helm release；`installer.enabled=false` 避免 nested chart 运行宿主安装器：
+Helm release；nested chart 使用 installer 镜像运行 inner-agent：
 
 ```bash
 export CHART_NAMESPACE=default
@@ -217,8 +218,8 @@ export NESTED_CHART_FILE="$RELEASE_DIR/$CHART_FILE"
 bash ./04-install-ckm-chart.sh
 ```
 
-L1 containerd 配置完全由 CKM bootstrap 在 K3s 启动前生成。Chart 不复制 runtime
-二进制，也不写 `config-v3.toml.d`。有效配置必须只保留原生 `runc` 与 lite handler：
+inner-agent 将 runtime 二进制保存到 L1 的持久 K3s 数据卷，生成 containerd 模板并按需
+重启 K3s。有效配置只保留原生 `runc` 与 lite handler：
 
 ```toml
 [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.sysbox-runc-lite]
@@ -227,12 +228,11 @@ L1 containerd 配置完全由 CKM bootstrap 在 K3s 启动前生成。Chart 不�
   pod_annotations = ["sysbox/rootfs-rw-layer"]
 
 [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.sysbox-runc-lite.options]
-  BinaryName = "/opt/sysbox/bin/generic/sysbox-runc-lite"
+  BinaryName = "/var/lib/rancher/k3s/sysbox-inner/releases/<release>/bin/generic/sysbox-runc-lite"
 ```
 
-配置中不得出现 `containerd.runtimes.sysbox-runc]`，文件系统中也不得存在
-`/opt/sysbox/bin/generic/sysbox-runc-nested`。bootstrap 变更会通过 CKM controller 的正常
-rollout 重建 Server，让 containerd 在启动时加载配置。验证：
+配置中不得出现 `containerd.runtimes.sysbox-runc]`。agent 在 CRI 和 snapshotter 就绪后
+标记节点，RuntimeClass 只调度到有就绪标记的节点。验证：
 
 ```bash
 kubectl --kubeconfig "$KUBECONFIG_218" -n "$OUTER_NAMESPACE" exec "$L1_POD" \
@@ -284,7 +284,7 @@ bash ./99-cleanup.sh
 - Helm release 名固定为 `w7panel-sysbox`，可在 L1 中用 `helm status` 和 `helm history`
   查询；不要再用 `helm template + kubectl apply` 伪装成安装。
 - `RuntimeClass sysbox-runc-lite not found`：确认目标是 L1 K3s，不是 L0；检查
-  bootstrap 生成的 `config-v3.toml.tmpl`，必要时通过 CKM 正常 rollout 重建 Server。
+  nested Helm release 与 inner-agent DaemonSet。
 - `failed to pull image`：检查 L0/L1 网络与 pull secret；镜像来源以 release
   `image-metadata.txt` 为准。
 - outer Pod 有 `sysbox-fuse`：这是过期 admission；升级 L0 chart 至当前 release。

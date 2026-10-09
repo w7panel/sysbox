@@ -43,6 +43,11 @@ code is not demonstrated to be necessary by this probe.
 
 ## Live inner-script regression after removing redundant config
 
+Historical result only: on 2026-10-09, a fresh CKM without the old bootstrap
+showed that removing `runtime_platforms.sysbox-runc-lite` makes CRI writable
+layer mountpoints empty and breaks `/stats/summary`. The current inner script
+restores that mapping; see `w7panel-doc/sysbox-in-sysbox/KNOWN-ISSUES.md`.
+
 On the same CKM, the inner K3s startup script was replaced in the running
 Server and `k3s-server` was restarted. Both `config-v3.toml.tmpl` and the
 generated `config.toml` then lacked `runtime_platforms` and
@@ -54,9 +59,9 @@ and `sysbox-runc-lite/sysbox`; `PodAnnotations` remained configured while
 persistence, annotation-free empty-PVC initialization, special binds, CRI
 mountpoint, and `/stats/summary`. Nested `kubectl exec` could access
 `/dev/null` and files, and the native-runc Ubuntu rootfs marker still existed.
-This is a **live-script-swap regression**, not validation that any rebuilt or
-published bootstrap image contains the changed script. Rebuild, deploy, and
-rerun the same checks before calling a release artifact verified.
+This is a **live-script-swap regression**, not validation of a fresh CKM or
+release artifact. Rebuild, deploy, and rerun the checks on a new CKM before
+calling a release artifact verified.
 
 ## Minimal lite binary regression
 

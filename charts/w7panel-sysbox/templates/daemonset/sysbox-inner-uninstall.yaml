@@ -1,0 +1,53 @@
+{{- if eq .Values.installMode "nested" }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "w7panel-sysbox.fullname" . }}-inner-uninstall
+  namespace: {{ include "w7panel-sysbox.namespace" . }}
+  annotations:
+    "helm.sh/hook": pre-delete
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      enableServiceLinks: false
+      hostPID: true
+      serviceAccountName: {{ include "w7panel-sysbox.serviceAccountName" . }}
+      containers:
+        - name: uninstall
+          image: {{ printf "%s:%s" .Values.installer.image.repository (.Values.installer.image.tag | default (printf "v%s" .Chart.AppVersion)) | quote }}
+          imagePullPolicy: {{ .Values.installer.image.pullPolicy }}
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              if kubectl get pods -A -o json | jq -e '[.items[] | select(.spec.runtimeClassName == "sysbox-runc-lite" and .status.phase != "Succeeded" and .status.phase != "Failed")] | length > 0' >/dev/null; then
+                echo 'remove sysbox-runc-lite Pods before uninstalling the nested runtime' >&2
+                exit 1
+              fi
+              kubectl -n {{ include "w7panel-sysbox.namespace" . }} delete daemonset {{ include "w7panel-sysbox.fullname" . }}-inner-agent --ignore-not-found --wait=true
+              exec /opt/sysbox/scripts/sysbox-inner-agent.sh uninstall
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: host-k3s-data
+              mountPath: /host/var/lib/rancher/k3s
+            - name: dev-fuse
+              mountPath: /dev/fuse
+      volumes:
+        - name: host-k3s-data
+          hostPath:
+            path: /var/lib/rancher/k3s
+            type: Directory
+        - name: dev-fuse
+          hostPath:
+            path: /dev/fuse
+            type: CharDevice
+{{- end }}

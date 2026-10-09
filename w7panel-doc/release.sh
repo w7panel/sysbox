@@ -4,8 +4,8 @@
 # all release artifacts. For a quick nested-runtime regression, patch only the
 # changed binaries into a known-good image, for example:
 # BUILD_PROFILE=test TEST_COMPONENTS=runc-lite,snapshotter,inner-script \
-# TEST_TARGETS=bootstrap TEST_BOOTSTRAP_BASE_IMAGE=repo/bootstrap:base \
-# TEST_BOOTSTRAP_IMAGE=repo/bootstrap:test ./w7panel-doc/release.sh
+# TEST_BASE_IMAGE=repo/deploy:base TEST_IMAGE=repo/deploy:test \
+# ./w7panel-doc/release.sh
 #   1. build the generic sysbox-ce deb
 #   2. build and verify the K3s deploy image
 #   3. write release artifacts under dist/
@@ -21,11 +21,8 @@ DIST_DIR="${DIST_DIR:-${ROOT_DIR}/dist}"
 CACHE_DIR="${SYSBOX_CACHE_DIR:-${ROOT_DIR}/.cache/sysbox}"
 BUILD_PROFILE="${BUILD_PROFILE:-release}"
 TEST_COMPONENTS="${TEST_COMPONENTS:-}"
-TEST_TARGETS="${TEST_TARGETS:-bootstrap}"
 TEST_BASE_IMAGE="${TEST_BASE_IMAGE:-}"
-TEST_BOOTSTRAP_BASE_IMAGE="${TEST_BOOTSTRAP_BASE_IMAGE:-}"
 TEST_IMAGE="${TEST_IMAGE:-}"
-TEST_BOOTSTRAP_IMAGE="${TEST_BOOTSTRAP_IMAGE:-}"
 CLEAR_BUILD_CACHE="${CLEAR_BUILD_CACHE:-false}"
 
 detect_sys_arch() {
@@ -67,13 +64,6 @@ fi
 IMAGE_REPO="${IMAGE_REPO:-ghcr.io/w7panel/sysbox-deploy-k3s}"
 IMAGE_TAG="${IMAGE_TAG:-${RELEASE_TAG}}"
 IMAGE="${IMAGE:-${IMAGE_REPO}:${IMAGE_TAG}}"
-# The bootstrap image is consumed by CKM's initContainer before its nested K3s
-# starts. It is intentionally flattened: some nested containerd versions fail
-# while extracting the normal multi-layer deploy image.
-BUILD_BOOTSTRAP_IMAGE="${BUILD_BOOTSTRAP_IMAGE:-false}"
-BOOTSTRAP_IMAGE_REPO="${BOOTSTRAP_IMAGE_REPO:-${IMAGE_REPO}-bootstrap}"
-BOOTSTRAP_IMAGE_TAG="${BOOTSTRAP_IMAGE_TAG:-${IMAGE_TAG}}"
-BOOTSTRAP_IMAGE="${BOOTSTRAP_IMAGE:-${BOOTSTRAP_IMAGE_REPO}:${BOOTSTRAP_IMAGE_TAG}}"
 PUSH_IMAGE="${PUSH_IMAGE:-false}"
 SAVE_IMAGE_TAR="${SAVE_IMAGE_TAR:-false}"
 VERIFY_IMAGE="${VERIFY_IMAGE:-true}"
@@ -312,7 +302,10 @@ patch_test_image() {
         "${DOCKER}" cp "${ROOT_DIR}/sysbox-admission/build/${SYS_ARCH}/sysbox-admission" "${container}:/usr/local/bin/sysbox-admission"
         "${DOCKER}" cp "${ROOT_DIR}/sysbox-admission/build/${SYS_ARCH}/sysbox-admission" "${container}:/opt/sysbox/bin/generic/sysbox-admission"
     fi
-    contains_csv "${TEST_COMPONENTS}" inner-script && "${DOCKER}" cp "${K8S_DIR}/scripts/sysbox-inner-k3s.sh" "${container}:/opt/sysbox/scripts/sysbox-inner-k3s.sh"
+    if contains_csv "${TEST_COMPONENTS}" inner-script; then
+        "${DOCKER}" cp "${K8S_DIR}/scripts/sysbox-inner-k3s.sh" "${container}:/opt/sysbox/scripts/sysbox-inner-k3s.sh"
+        "${DOCKER}" cp "${K8S_DIR}/scripts/sysbox-inner-agent.sh" "${container}:/opt/sysbox/scripts/sysbox-inner-agent.sh"
+    fi
     "${DOCKER}" commit "${container}" "${output}" >/dev/null
     "${DOCKER}" rm "${container}" >/dev/null
     if [[ "${PUSH_IMAGE}" == true ]]; then
@@ -323,24 +316,10 @@ patch_test_image() {
 build_test_images() {
     build_test_components
     mkdir -p "${DIST_DIR}"
-    case "${TEST_TARGETS}" in
-        deploy|bootstrap|deploy,bootstrap|bootstrap,deploy) ;;
-        *) die 'BUILD_PROFILE=test TEST_TARGETS must be deploy, bootstrap, or deploy,bootstrap' ;;
-    esac
-    if contains_csv "${TEST_TARGETS}" deploy; then
-        patch_test_image "${TEST_BASE_IMAGE}" "${TEST_IMAGE}" deploy
-    fi
-    if contains_csv "${TEST_TARGETS}" bootstrap; then
-        patch_test_image "${TEST_BOOTSTRAP_BASE_IMAGE}" "${TEST_BOOTSTRAP_IMAGE}" bootstrap
-    fi
+    patch_test_image "${TEST_BASE_IMAGE}" "${TEST_IMAGE}" deploy
     {
-        if contains_csv "${TEST_TARGETS}" deploy; then
-            printf 'export SYSBOX_IMAGE_REPO=%q\n' "${TEST_IMAGE%:*}"
-            printf 'export SYSBOX_IMAGE_TAG=%q\n' "${TEST_IMAGE##*:}"
-        fi
-        if contains_csv "${TEST_TARGETS}" bootstrap; then
-            printf 'export CKM_INNER_SYSBOX_BOOTSTRAP_IMAGE=%q\n' "${TEST_BOOTSTRAP_IMAGE}"
-        fi
+        printf 'export SYSBOX_IMAGE_REPO=%q\n' "${TEST_IMAGE%:*}"
+        printf 'export SYSBOX_IMAGE_TAG=%q\n' "${TEST_IMAGE##*:}"
         printf 'export SYSBOX_RUNC_LITE_BINARY=%q\n' "${ROOT_DIR}/sysbox-runc-lite/build/${SYS_ARCH}/sysbox-runc-lite"
     } > "${DIST_DIR}/test-images.env"
     info "Fast test artifacts: ${DIST_DIR}/test-images.env"
@@ -361,38 +340,12 @@ verify_images() {
 	"${DOCKER}" run --rm "${IMAGE}" /opt/sysbox/bin/generic/sysbox-runc-lite --version
 }
 
-build_bootstrap_image() {
-    local container_id
-
-    [[ "${BUILD_BOOTSTRAP_IMAGE}" == "true" ]] || return 0
-
-    info "Flatten bootstrap image ${BOOTSTRAP_IMAGE} from ${IMAGE}"
-    container_id="$("${DOCKER}" create "${IMAGE}")"
-    # docker import intentionally makes one filesystem layer. The bootstrap is
-    # invoked explicitly as /bin/sh by the CKM initContainer, so it needs the
-    # payload filesystem rather than the deploy-image CMD or ENTRYPOINT.
-    "${DOCKER}" export "${container_id}" | "${DOCKER}" import - "${BOOTSTRAP_IMAGE}"
-    "${DOCKER}" rm "${container_id}" >/dev/null
-
-    info "Verify flattened bootstrap payload"
-    "${DOCKER}" run --rm "${BOOTSTRAP_IMAGE}" /bin/sh -ec '
-        test -x /opt/sysbox/scripts/sysbox-inner-k3s.sh
-        test -x /opt/sysbox/bin/generic/sysbox-runc
-        test -x /opt/sysbox/bin/generic/runc-lite
-	    test -x /opt/sysbox/bin/generic/sysbox-runc-lite
-    '
-}
-
 push_images() {
     [[ "${PUSH_IMAGE}" == "true" ]] || return 0
 
     info "Push deploy image ${IMAGE}"
     "${DOCKER}" push "${IMAGE}"
 
-    if [[ "${BUILD_BOOTSTRAP_IMAGE}" == "true" ]]; then
-        info "Push bootstrap image ${BOOTSTRAP_IMAGE}"
-        "${DOCKER}" push "${BOOTSTRAP_IMAGE}"
-    fi
 }
 
 write_image_artifacts() {
@@ -406,11 +359,6 @@ write_image_artifacts() {
         echo "installer_image=${IMAGE}"
         "${DOCKER}" image inspect "${IMAGE}" --format 'installer_image_id={{.Id}}'
         "${DOCKER}" image inspect "${IMAGE}" --format 'installer_repo_digests={{json .RepoDigests}}'
-        if [[ "${BUILD_BOOTSTRAP_IMAGE}" == "true" ]]; then
-            echo "bootstrap_image=${BOOTSTRAP_IMAGE}"
-            "${DOCKER}" image inspect "${BOOTSTRAP_IMAGE}" --format 'bootstrap_image_id={{.Id}}'
-            "${DOCKER}" image inspect "${BOOTSTRAP_IMAGE}" --format 'bootstrap_repo_digests={{json .RepoDigests}}'
-        fi
     } > "${DIST_DIR}/image-metadata.txt"
 
     if [[ "${SAVE_IMAGE_TAR}" == "true" ]]; then
@@ -606,7 +554,6 @@ main() {
     extract_bins "${deb}"
     build_installer_image
     verify_images
-    build_bootstrap_image
     push_images
     write_image_artifacts
     package_chart
@@ -616,9 +563,6 @@ main() {
     info "Release complete: ${RELEASE_TAG}"
     info "Artifacts: ${DIST_DIR}"
     info "Installer image: ${IMAGE}"
-    if [[ "${BUILD_BOOTSTRAP_IMAGE}" == "true" ]]; then
-        info "Bootstrap image: ${BOOTSTRAP_IMAGE}"
-    fi
 }
 
 main "$@"

@@ -41,22 +41,18 @@ L0 宿主 Kubernetes
 | [KNOWN-ISSUES.md](./KNOWN-ISSUES.md) | 当前能力边界、未解决项和问题根因 |
 | [HISTORY.md](./HISTORY.md) | 旧镜像、旧 CKM 和 L2/L3 实验时间线 |
 
-## 当前基线（2026-09-28）
+## 当前部署模型
 
-- 当前发布基线是 `v0.7.1-24`。增量验证 bootstrap 为
-  `docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:v0.7.1-24-no-nested-runc-20260928`
-  （digest `sha256:ca82b8949da8f0d8f593bbcdb9dc90f91b7001ec626b8716bd4e6db70fd656bb`）。
-- `ckm-4ss8n` 内层以 Helm release `w7panel-sysbox` 安装 `0.7.1-24`；bootstrap 只配置
-  原生 `runc` 与显式 `sysbox-runc-lite`，不生成 `sysbox-runc-nested` 或完整 handler。
-- 保留的 `ckm-4ss8n-no-nested-check` 已通过 rootfs 持久化、无注解空 PVC 初始化复制和
-  special bind，Deployment 与两个 PVC 按要求保留现场。
-- 历史完整 nested Sysbox 的 child userns、CNI/HTTP、Docker、cgroup 和 L3 结果仅保留在
-  [HISTORY.md](./HISTORY.md)，不构成当前轻量交付的验收范围。
-- 明确不支持：`/proc noexec` 强隔离、Pod 内 CPU/内存视图隔离、多租户或不可信负载
-  安全边界。运行 `08-check-isolation.sh` 预期返回非零。
-- 尚待验证：长时间并发重启、L0 Sysbox 服务重启恢复、大 rootfs rsync 生命周期压力。
+内层 `w7panel-sysbox` Chart 使用 deploy 镜像运行 `inner-agent`。该 agent 在 CKM
+Server 的 K3s 数据目录安装脚本和二进制、写入 containerd 模板，配置变化时重启内层
+K3s，再核对实际加载的 CRI handler。CKM 已移除 bootstrap initContainer、Server
+启动前的 `sysbox-inner-k3s.sh` 调用和 `spec.innerSysbox.enabled` 开关；外层
+`sysbox-runc` Server 仍挂载 `/dev/fuse`。再次安装相同配置不应重复重启 K3s。
 
-详细证据和根因见 [KNOWN-ISSUES.md](./KNOWN-ISSUES.md)，历史测试结果不作为当前验收依据。
+测试集群迁移须覆盖每个现有 CKM，逐实例安装、等待 K3s 恢复并验证普通 `runc` 与
+`sysbox-runc-lite` workload；固定旧 SystemTemplate 的实例也要检查没有旧启动注入。
+过去 bootstrap 镜像的发布号、CKM 和测试结果保留在 [HISTORY.md](./HISTORY.md)；
+已知能力边界与故障记录见 [KNOWN-ISSUES.md](./KNOWN-ISSUES.md)。
 
 ## 层级名称
 
@@ -79,13 +75,13 @@ L0 宿主 Kubernetes
 | 1 | `01-create-ckm.sh` | 复用或按 `config.sh` 名称创建 CKM，并发现 Server Pod |
 | 2 | `02-test-l0-runtimeclasses.sh` | 验证 L0 两个标准 RuntimeClass 都能启动且不自动注入 FUSE |
 | 3 | `03-test-l0-rootfs.sh` | 回归 L0 lite rootfs、无注解 local-path 初始化复制及 special bind |
-| 4 | `04-install-ckm-chart.sh` | 在 CKM 自有 K3s 创建/升级真实 Helm release；runtime 配置由 bootstrap 提供 |
+| 4 | `04-install-ckm-chart.sh` | 在 CKM 自有 K3s 创建/升级真实 Helm release；Chart agent 安装 runtime 配置并按需重启内层 K3s |
 | 5 | `05-test-ckm-k3s.sh` | 创建并回归 sysbox-runc-lite workload；rootfs 结果以最新现场状态为准 |
 | 6 | `06-build-and-test.sh` | 快速增量构建或完整 release 后，按 00/02/03/04/05 运行验收 |
 | 6 | `99-cleanup.sh` | 清理测试资源，默认保留 CKM |
 
-脚本不会自动跳过失败步骤。需要重建 CKM Server Pod 或删除资源时，应先人工确认；这些操作
-可能短暂中断 CKM 内 K3s，但不应重启 L0 宿主。
+脚本不会自动跳过失败步骤。Chart 安装或升级可能因内层 K3s 重启短暂中断 API；
+重新连接后检查 Helm release、agent 与 CRI 状态。此流程不重启 L0 宿主。
 
 当前功能回归命令：
 
@@ -100,21 +96,21 @@ bash ./05-test-ckm-k3s.sh
 bash ./99-cleanup.sh
 ```
 
-日常修改不要重建完整 release。以已验证 bootstrap 镜像为基线，仅编译并注入改动组件：
+日常修改使用已验证的 deploy 镜像作为基线，只构建变更组件：
 
 ```bash
 BUILD_PROFILE=test \
 TEST_COMPONENTS=runc-lite,snapshotter,inner-script \
-TEST_TARGETS=bootstrap \
-TEST_BOOTSTRAP_BASE_IMAGE=docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:<known-good> \
-TEST_BOOTSTRAP_IMAGE=docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s-bootstrap:<test-tag> \
+TEST_TARGETS=deploy \
+TEST_BASE_IMAGE=docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:<known-good> \
+TEST_IMAGE=docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:<test-tag> \
 PUSH_IMAGE=true \
 bash ./06-build-and-test.sh
 ```
 
-脚本只构建、推送和执行验收，不会私自重启 CKM。它会输出需要设置到 CKM controller 的
-`CKM_INNER_SYSBOX_BOOTSTRAP_IMAGE`；完成正常的 CKM Server rollout 后再运行功能测试。
-Chart 或发布链路改动才使用 `BUILD_PROFILE=release bash ./06-build-and-test.sh`。
+将输出的 deploy 镜像仓库和 tag 作为 `SYSBOX_IMAGE_REPO`、`SYSBOX_IMAGE_TAG`
+传给内层 Chart 安装脚本；它同时设置 `installer.image` 与 `admission.image`。
+Chart 或发布链路改动使用 `BUILD_PROFILE=release bash ./06-build-and-test.sh`。
 
 查看 Deployment、标签和资源限制（命令在 CKM 内 K3s 执行）：
 
@@ -185,7 +181,6 @@ bash ./01-create-ckm.sh
 
 - `status.clusterPhase=Ready`；
 - `spec.runtimeClass=sysbox-runc`；
-- `spec.innerSysbox.enabled=true`；
 - CKM Server Pod 使用 `hostUsers=false`。
 
 如果要强制创建一次性 CKM，设置 `CREATE_CKM=true`，并使用一个当前不存在的新名称：
@@ -204,15 +199,13 @@ CREATE_CKM=true bash ./01-create-ckm.sh
 ```yaml
 spec:
   runtimeClass: sysbox-runc
-  innerSysbox:
-    enabled: true
   workload:
     apiVersion: k3k.io/v1beta1
     kind: Cluster
 ```
 
-`innerSysbox.enabled=true` 只负责让 controller 在 L1 K3s 启动前准备 nested
-handler、`/dev/fuse` 和 Sysbox 二进制；它不会自动安装 `w7panel-sysbox` Helm Chart。
+CKM 仅负责外层 Server 的 `/dev/fuse` 和 Sysbox RuntimeClass；内层运行时须安装
+`w7panel-sysbox` Chart 才能使用。
 无论是复用还是新建，脚本都会按配置的 CKM 名称定位 Server Pod；如果同名 CKM 已存在
 但状态不满足要求会直接失败，不会改用其他 CKM。
 
@@ -226,25 +219,10 @@ kubectl --kubeconfig "$KUBECONFIG_218" -n "$OUTER_NAMESPACE" \
 
 ## 2. 构建镜像
 
-当前 CKM K3s workload 直接使用
-`ccr.ccs.tencentyun.com/afan-public/nginx:latest`。只有修改了 `sysbox-runc`、
-`sysbox-mgr`、`sysbox-fs` 或 nested-agent 时才需要重建 deploy 镜像：
-
-```bash
-# 快速确认五个本地二进制能编译
-bash ../build.sh local
-
-# 完整构建 K3s deploy 镜像；默认不推送
-PUSH_IMAGE=false bash ./02-build-sysbox-deploy.sh
-
-# 确认 registry 登录后再推送，并把同一 tag 写入 config.sh
-docker login docker.cnb.cool -u cnb -p "$CNB_TOKEN"
-SYSBOX_IMAGE_TAG=v0.7.1-manual-$(git -C ../.. rev-parse --short HEAD) \
-PUSH_IMAGE=true bash ./02-build-sysbox-deploy.sh
-```
-
-该步骤比复用已发布镜像慢很多；只是验证 CKM/chart 流程时可跳过，直接使用
-`config.sh` 中的稳定 `SYSBOX_IMAGE_TAG`。
+验证现有 CKM 和 Chart 时可直接使用 `config.sh` 中已发布的 deploy 镜像。
+变更了 `runc-lite`、snapshotter、admission 或内层脚本时，使用上文
+`BUILD_PROFILE=test` 构建 deploy 镜像；Chart、发布链路或多组件变更使用
+`BUILD_PROFILE=release`。内层 Chart 的 agent 和 admission 都从 deploy 镜像运行。
 
 ## 3. 在 CKM 自己的 K3s 中安装精简运行时组件
 
@@ -269,9 +247,16 @@ deployment/w7panel-sysbox-admission successfully rolled out
 RuntimeClass/sysbox-runc-lite.handler=sysbox-runc-lite
 ```
 
-Chart 安装不应重启 L0 宿主。首次把一个已经运行的 CKM K3s 迁移到 nested
-handler 时，若 containerd 不能热加载，按已有 CKM 控制器做一次“只重建 L1 Pod”的
-受控迁移；不要重启物理节点，也不要并发删除多个 CKM Pod。
+Chart 安装不重启 L0 宿主。首次安装或配置更新会由 inner-agent 重启内层 K3s，
+Helm 连接可能暂时中断；重连后核对 release、agent Ready、`crictl info` 中的
+`sysbox-runc-lite` handler，再执行 workload 验证。重复安装相同配置不应重启。
+迁移现有 CKM 时逐实例执行，并检查旧 bootstrap initContainer 和启动 prelude
+已从 Server Pod 消失。
+
+卸载时先移除内层所有 `sysbox-runc-lite` Pod，再运行
+`bash ./07-uninstall-ckm-chart.sh`。脚本等待 Helm 卸载完成后重建 CKM Server，
+使 containerd 加载恢复后的模板。直接执行 `helm uninstall` 只完成模板与载荷清理，
+仍需重启 CKM Server。
 
 ## 4. 在 CKM K3s 中运行 Sysbox workload
 
@@ -340,9 +325,9 @@ DELETE_CKM=true bash ./99-cleanup.sh
 
 | 现象 | 优先检查 |
 | --- | --- |
-| 找不到 CKM K3s | 检查 `CKM_NAMESPACE/CKM_NAME`，以及 CKM 是否 `innerSysbox.enabled=true` |
-| nested-agent 不 Ready | 检查 CKM K3s 的 `/run/k3s`、`/run/sysbox` 和 K3s 数据目录是否 shared |
-| nested-agent `CrashLoopBackOff` | 先执行下方只读诊断；重点检查 snapshotter socket 是否只有文件但无监听进程，以及是否存在多个残留 launcher |
+| 找不到 CKM K3s | 检查 `CKM_NAMESPACE/CKM_NAME`、Server Ready 和 Chart agent 状态 |
+| inner-agent 不 Ready | 检查 agent 日志、`/var/lib/rancher/k3s` 挂载与内层 K3s 重启状态 |
+| inner-agent `CrashLoopBackOff` | 执行下方只读诊断，检查 snapshotter socket、CRI handler 和 agent 日志 |
 | 镜像 `no space left on device` | 检查 CKM K3s 节点 ephemeral storage 和节点磁盘 |
 | admission 访问旧 IP | 删除 CKM K3s `default` 中的 `w7panel-sysbox-admission` Pod，等待 Service endpoint 重建 |
 | `sidecar spec unavailable` 或 seccomp notify 错误 | 先确认 L0 `sysbox-mgr/fs/snapshotter` 健康；单 Pod、串行重建，不要并发删除 CKM |
@@ -352,7 +337,7 @@ DELETE_CKM=true bash ./99-cleanup.sh
 每完成一个脚本就保存输出和 `kubectl get events --sort-by=.lastTimestamp`，这样可以
 区分 CKM 创建、镜像拉取、nested chart、CKM K3s workload 和 CNI 各阶段的问题。
 
-### nested-agent 只读诊断
+### inner-agent 只读诊断
 
 以下命令只读取状态，不删除 Pod、不重启 CKM：
 
@@ -362,18 +347,18 @@ source ./_common.sh
 check_common
 discover_l1
 l1_kubectl -n default get pods -o wide
-l1_kubectl -n default describe pod -l app.kubernetes.io/name=w7panel-sysbox-nested-agent
-l1_kubectl -n default logs daemonset/w7panel-sysbox-nested-agent --tail=200
+l1_kubectl -n "$CHART_NAMESPACE" describe pod -l app.kubernetes.io/component=inner-agent
+l1_kubectl -n "$CHART_NAMESPACE" logs daemonset/w7panel-sysbox-inner-agent --tail=200
 outer_kubectl -n "$OUTER_NAMESPACE" exec "$L1_POD" -c "$L1_CONTAINER" -- \
   /bin/sh -ec '
     ls -l /run/sysbox/sysbox-snapshotter.sock 2>/dev/null || true
     ss -xl 2>/dev/null | grep sysbox-snapshotter || true
-    ps -ef | grep "sysbox-inner-k3s.sh" | grep -v grep || true
+    ps -ef | grep "sysbox-snapshotter" | grep -v grep || true
     pgrep -af sysbox-snapshotter || true
     pgrep -af "k3s (server|init)" || true
   '
 ```
 
-若日志出现 `timed out waiting for /run/sysbox/sysbox-snapshotter.sock`，先运行
-`11-test-nested-agent-lifecycle.sh`。v47 会回收旧 launcher/snapshotter 并等待新 socket 真正监听；
-只有该脚本仍失败时才保存进程、socket 和 agent 日志，再判断是否需要受控重建 CKM Server Pod。
+若日志出现 `timed out waiting for /run/sysbox/sysbox-snapshotter.sock`，先查看
+Chart agent 日志并确认内层 K3s 是否已重启。等待 agent 重新建立 socket；
+仍失败时保存进程、socket、CRI 和 agent 日志，再定位安装或重启失败的原因。

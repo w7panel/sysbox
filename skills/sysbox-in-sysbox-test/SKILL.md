@@ -55,19 +55,26 @@ the executable Skill wrappers.
 - Validate both `local-path` and at least one real CSI StorageClass when the
   cluster provides one. Verify initial image files, a PVC marker after Pod
   recreation, and a rootfs special-bind marker after recreation.
-- Nested chart installation targets the selected L1 K3s only and creates a
-  real `w7panel-sysbox` Helm release. Bootstrap provides the lite binary,
-  snapshotter and containerd handler before K3s starts; the chart must not
-  write runtime config, create a second K3s, or replace `/usr/bin/runc`.
-- L1 containerd exposes native `runc` plus `sysbox-runc-lite` only. Reject a
-  bootstrap that creates `sysbox-runc-nested`, `sysbox-runc.real`, or a full
-  inner `sysbox-runc` handler; those belong to the abandoned full-runtime PoC.
-- Use `BUILD_PROFILE=test` for an iterative source change. It patches only the
-  requested binaries into an explicit, known-good base image and writes the
-  resulting tags to `dist/test-images.env`; it never changes a CKM controller
-  or restarts a Server Pod. Apply the printed bootstrap tag deliberately, then
-  run the functional stages. Use `BUILD_PROFILE=release` for chart/release
-  changes and final source-artifact validation.
+- Nested Chart installation targets each selected L1 K3s and creates a real
+  `w7panel-sysbox` Helm release. Its inner agent runs with native `runc`, takes
+  the script and binaries from the deploy image, writes the containerd template,
+  and restarts inner K3s only when the installed configuration changes. Confirm
+  the loaded CRI handler after reconnection; do not rely on a DaemonSet restart.
+  CKM no longer supplies a bootstrap initContainer or pre-K3s launcher.
+- L1 containerd exposes native `runc` plus `sysbox-runc-lite` only. Reject
+  `sysbox-runc-nested`, `sysbox-runc.real`, or a full inner `sysbox-runc`
+  handler; those belong to the abandoned full-runtime PoC.
+- Keep `images.runtime_platforms.sysbox-runc-lite` mapped to the `sysbox`
+  snapshotter. A fresh CKM without this mapping returns an empty CRI writable
+  layer mountpoint and fails kubelet `/stats/summary`, even if a migrated CKM
+  passes. Validate at least one newly created CKM after changing inner
+  containerd configuration.
+- Use `BUILD_PROFILE=test` with `TEST_TARGETS=deploy` for an iterative source
+  change. It patches requested binaries into an explicit, known-good deploy
+  image and writes its tag to `dist/test-images.env`; install the selected
+  Chart with that tag. Use `BUILD_PROFILE=release` for Chart/release changes and
+  final source-artifact validation. Test-cluster migration must cover every
+  existing CKM, one at a time, and verify runtime plus workloads after each.
 
 ## Failure handling and cleanup
 
@@ -78,9 +85,10 @@ re-run the failed case plus its persistence recreation step.
 The snapshotter may initially report `sysbox sidecar oci spec unavailable`;
 only continue after the retry reaches Ready and the functional assertions pass.
 If a newly created `local-path` PVC is Pending, wait for provisioning before
-calling it a runtime failure. Changing the bootstrap image rolls the CKM
-Server; wait for its replacement to become Ready, confirm the Helm release
-survived, then re-run the L2 case.
+calling it a runtime failure. A Chart install or upgrade may briefly interrupt
+L1 API access while the agent restarts inner K3s. Reconnect, verify Helm release,
+agent readiness and `crictl info`, then re-run the L2 case. Reinstalling unchanged
+configuration must not trigger another K3s restart.
 
 After successful tests, remove ephemeral Pods only when cleanup is requested. To release Pod IPs while
 keeping persistence evidence, scale test Deployments to zero. Delete test

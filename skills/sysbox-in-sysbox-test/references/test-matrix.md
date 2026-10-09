@@ -40,34 +40,31 @@ Each `03` run must report `FUNCTIONAL PASS` and prove all of:
 ## Fast source-build verification
 
 Use the flow driver after a focused runtime, snapshotter, admission, or inner
-bootstrap-script change. It uses a cached incremental image build and does not
-implicitly modify CKM state. Set every base and output image explicitly:
+script change. Build only the deploy image, which supplies the Chart's inner
+agent and L1 payload:
 
 ```bash
 BUILD_PROFILE=test \
 TEST_COMPONENTS=runc-lite,snapshotter,admission,inner-script \
-TEST_TARGETS=deploy,bootstrap \
+TEST_TARGETS=deploy \
 TEST_BASE_IMAGE=<known-good-deploy-image> \
 TEST_IMAGE=<test-deploy-image> \
-TEST_BOOTSTRAP_BASE_IMAGE=<known-good-bootstrap-image> \
-TEST_BOOTSTRAP_IMAGE=<test-bootstrap-image> \
 PUSH_IMAGE=true \
 bash ./06-build-and-test.sh
 ```
 
-Before the L2 stage, set the emitted `CKM_INNER_SYSBOX_BOOTSTRAP_IMAGE` on the
-CKM controller and let the selected Server perform its normal replacement.
-The required proof is the final `FUNCTIONAL PASS` from both `03` and `05`.
-For chart, packaging, or release changes, replace `BUILD_PROFILE=test` with
+Set `SYSBOX_IMAGE_REPO` and `SYSBOX_IMAGE_TAG` to the emitted deploy image
+before installing the Chart. The required proof is the final `FUNCTIONAL PASS`
+from both `03` and `05`. For Chart, packaging, or release changes, use
 `BUILD_PROFILE=release`; this is a source-artifact result, not GitHub-release
 verification.
 
 ## L1 CKM and L2 lite verification
 
-Set `CKM_NAME` and `CKM_NAMESPACE` to a known disposable, Ready CKM. Do not
-let the scripts choose another cluster. The selected CKM bootstrap must already
-contain the matching lite binary and containerd config. For a release, pass the
-downloaded, checksum-verified chart.
+Set `CKM_NAME` and `CKM_NAMESPACE` to an existing Ready CKM. Its Server must
+use the outer `sysbox-runc` and `/dev/fuse`; no bootstrap initContainer or
+startup prelude is required. For a release, pass the downloaded,
+checksum-verified Chart.
 
 ```bash
 export CKM_NAMESPACE=<namespace>
@@ -75,15 +72,19 @@ export CKM_NAME=<ckm-name>
 
 NESTED_CHART_FILE=/path/to/w7panel-sysbox-<version>.tgz \
   bash ./04-install-ckm-chart.sh
-
-# Bootstrap changes roll the Server; Helm installation itself does not.
 bash ./05-test-ckm-k3s.sh
 ```
 
-`04` must leave Helm release `w7panel-sysbox` deployed, admission Ready, only
-the `sysbox-runc-lite` RuntimeClass exposed, and no `sysbox-runc-nested` file or
-full inner handler. `05` must reach `FUNCTIONAL PASS`; a watch error caused by
-an expected L1 restart is not success and must be rerun after the Server is stable.
+`04` must leave Helm release `w7panel-sysbox` deployed, the native-runc inner
+agent and admission Ready, the loaded `sysbox-runc-lite` handler visible in
+`crictl info`, the `images.runtime_platforms.sysbox-runc-lite` mapping set to
+`sysbox`, and no full inner handler. It may reconnect after the agent
+restarts inner K3s. A second install with unchanged image/configuration must
+not restart K3s. `05` must reach `FUNCTIONAL PASS`; an API watch error during
+restart is not success. In the test cluster, repeat the migration and checks
+for every existing CKM sequentially, including previously pinned templates.
+Also create one fresh CKM when validating a change to inner containerd: a
+migrated instance may retain CRI filesystem state from the old bootstrap.
 
 ## GitHub release verification
 

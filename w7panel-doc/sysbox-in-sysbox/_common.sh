@@ -22,21 +22,21 @@ configured_ckm_exists() {
 }
 
 select_existing_ckm() {
-  local rows candidate ckm_inner ckm_runtime ckm_phase
+  local rows candidate ckm_runtime ckm_phase
 
   [ -n "${CKM_NAME:-}" ] || die 'CKM_NAME must be set in config.sh; automatic/random CKM selection is disabled'
-  rows="$(outer_kubectl get ckm -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,INNER:.spec.innerSysbox.enabled,RUNTIME:.spec.runtimeClass,PHASE:.status.clusterPhase' --no-headers)"
+  rows="$(outer_kubectl get ckm -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,RUNTIME:.spec.runtimeClass,PHASE:.status.clusterPhase' --no-headers)"
   candidate="$(awk -v namespace="${CKM_NAMESPACE:-}" -v name="$CKM_NAME" \
     '$2 == name && (namespace == "" || $1 == namespace) { print; exit }' <<<"$rows")"
   [ -n "$candidate" ] || die "configured CKM ${CKM_NAMESPACE:-<any>}/$CKM_NAME was not found"
 
-  read -r CKM_NAMESPACE CKM_NAME ckm_inner ckm_runtime ckm_phase <<<"$candidate"
+  read -r CKM_NAMESPACE CKM_NAME ckm_runtime ckm_phase <<<"$candidate"
   [ "$ckm_runtime" = sysbox-runc ] || die "CKM $CKM_NAMESPACE/$CKM_NAME uses runtimeClass=$ckm_runtime"
   [ "$ckm_phase" = Ready ] || die "CKM $CKM_NAMESPACE/$CKM_NAME is not Ready: $ckm_phase"
   CKM_SELECTOR="cluster=${CKM_NAME},role=server"
   CKM_SELECTED=true
   export CKM_NAMESPACE CKM_NAME CKM_SELECTOR CKM_SELECTED
-  log "selected existing CKM ${CKM_NAMESPACE}/${CKM_NAME} selector=${CKM_SELECTOR} (inner Sysbox disabled)"
+  log "selected existing CKM ${CKM_NAMESPACE}/${CKM_NAME} selector=${CKM_SELECTOR}"
 }
 
 discover_l1() {

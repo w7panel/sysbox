@@ -12,6 +12,20 @@ Server 仍必须保持 `runtimeClassName=sysbox-runc` 与 `hostUsers:false`；L2
 以及 snapshotter/webhook 复用。明确放弃 proc 强隔离、视图隔离和 system workload；
 实现基于官方 runc/libcontainer 局部修改，不引入 L2 `sysbox-fs` 或 `sysbox-mgr`。
 
+### 2026-10-09：内层 `SystemdCgroup=true` 无法启动 lite Pod
+
+在 `k3k-console-164315/ckm-cristats-0929` 仅将内层 containerd 的
+`sysbox-runc-lite` handler 改为 `SystemdCgroup=true`，重启 K3s 后通过
+`crictl info` 确认运行时已加载该值。新建无 PVC 的 nginx 测试 Pod 时，sandbox
+持续创建失败：`expected cgroupsPath to be of format "slice:prefix:name" for
+systemd cgroups, got "/kubepods/besteffort/pod.../..." instead`。内层 Kubelet
+仍生成 cgroupfs 路径，与 runc 的 systemd cgroup 模式不匹配；失败发生在
+sandbox 创建阶段，尚未进入 nginx 容器。
+
+已恢复启动脚本、containerd 模板和运行时配置为 `false`，重启 K3s 后
+`crictl info` 确认生效。同一 RuntimeClass 和镜像的对照 Pod 达到 `1/1 Running`；
+两个临时测试 Pod 与配置备份均已删除。
+
 ### 2026-10-08：内层 UID/GID remap 尚未通过实测
 
 `ckm-disk-ubuntu-0930` 使用单层 bootstrap 测试镜像
@@ -46,6 +60,17 @@ exec、`/proc/self/status` 和字符设备检查也通过。测试 Deployment/PV
 lite SHA256 仍一致；新建 `ckm-k3s-nginx-proc-image-0930` 再次通过 L2 完整回归。
 Chart 默认值已更新，但尚未验证新的 tagged Release。BusyBox `tar` 不支持
 `kubectl cp` 使用的 `-m`，初次现场二进制传输改用标准输入经 base64 完成。
+
+### 2026-10-09：全新 CKM 需要 runtime_platforms 映射
+
+新建无 bootstrap 的 `ckm-inner-chart-1009` 暴露出历史实例未覆盖的启动路径：
+containerd 首次启动时，若内层模板缺少
+`runtime_platforms.sysbox-runc-lite → sysbox`，CRI stats 为 lite 容器返回空
+`writableLayer.fsId.mountpoint`，kubelet `/stats/summary` 因此失败。历史 CKM 曾在
+bootstrap 阶段带有该映射，后续移除模板并没有覆盖首次启动场景。现已恢复这项映射，
+保留 lite handler 的 Pod 注解传递，并继续不使用 container annotations。Chart 升级
+`inner-chart-fix5-20261009` 后，新 CKM 的 rootfs 持久化、空 CSI PVC 初始化、特殊
+bind、CRI stats 和 `/stats/summary` 完整回归通过。
 
 ### 2026-09-30：移除 runtime_platforms 与 container_annotations 的现场回归通过
 
