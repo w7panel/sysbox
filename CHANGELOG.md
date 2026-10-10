@@ -3,6 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * Document the 218 CKM test showing that removing `/dev/fuse` leaves inner K3s running but prevents the inner Sysbox agent and snapshotter-backed workloads from starting; all seven CKMs were restored to the original controller image and FUSE mounts.
+  * Document the follow-up 218 test: the CKM template now owns the `/dev/fuse` mount, while `mknod /dev/fuse c 10 229` inside a `sysbox-runc` Pod with `hostUsers: false` fails with `Operation not permitted`.
   * Removed obsolete bootstrap-image environment variables from the release workflow. The release script now builds and pushes only the deploy image; leaving the unused variables suggested that CI still produced a bootstrap image.
   * Restore the nested `runtime_platforms.sysbox-runc-lite` mapping so a CKM created without the legacy bootstrap registers the Sysbox snapshotter filesystem in containerd CRI stats. Without it, fresh inner K3s nodes returned an empty writable-layer mountpoint and `/stats/summary` failed; the new `ckm-inner-chart-1009` passed the full nested workload regression after the Chart upgrade.
   * Nested Chart uninstall now lets its hook finish template and payload cleanup before restarting the CKM Server through the uninstall script. Terminating K3s inside the hook interrupted Helm and left the release in `uninstalling`; the two-stage flow completes Helm first, then reloads containerd. The agent also detects K3s' rewritten argv and uses snapshotter RPC for recovery after agent recreation.

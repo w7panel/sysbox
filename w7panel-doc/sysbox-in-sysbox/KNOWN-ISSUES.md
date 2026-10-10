@@ -12,6 +12,34 @@ Server 仍必须保持 `runtimeClassName=sysbox-runc` 与 `hostUsers:false`；L2
 以及 snapshotter/webhook 复用。明确放弃 proc 强隔离、视图隔离和 system workload；
 实现基于官方 runc/libcontainer 局部修改，不引入 L2 `sysbox-fs` 或 `sysbox-mgr`。
 
+### 2026-10-10：CKM Server 移除 `/dev/fuse` 后内层 Sysbox 失效
+
+在 218 集群将 `w7panel-ckm` 测试镜像切换为
+`docker.cnb.cool/i0358/ai-cvm:no-fuse-template-20261010-1`。当前 `k3s.v1`
+系统模板不含 `/dev/fuse`；新 controller 不再自动注入该设备，7 个 Sysbox CKM 的
+Server Deployment 因此移除挂载并重建。在 `k3k-console-117057/ckm-nmmhh` 确认
+Server 内 `/dev/fuse` 不存在，而内层 K3s API 和节点仍可启动。内层
+`w7panel-sysbox-inner-agent` 的 hostPath 挂载报
+`/dev/fuse is not a character device`；`ckm-k3s-nginx` 的 sandbox 因
+`/run/sysbox/sysbox-snapshotter.sock: connect: connection refused` 无法创建。
+这证明当前内层 Sysbox Chart 与 snapshotter 仍依赖 L1 的 FUSE 设备。
+
+测试后 controller 恢复为 `docker.cnb.cool/i0358/ai-cvm:v1.1.290`，7 个 CKM 的
+Server Deployment 均恢复 `/dev/fuse`、达到 `1/1 Ready`；`ckm-nmmhh` 的内层
+agent 和 nginx 均恢复 Running，nginx HTTP 返回欢迎页。
+
+随后把 `/dev/fuse` 的 `hostPath`（`CharDevice`）和 mount 移入 `SystemTemplate/k3s.v1`，
+controller 不再硬编码注入。测试镜像
+`docker.cnb.cool/i0358/ai-cvm:fuse-in-template-20261010-1` 上线后，7 个 CKM
+保持 Ready；`ckm-nmmhh` 按新模板 hash 重建，内层 agent、nginx 和 HTTP 均通过。
+另建不挂载 `/dev/fuse` 的普通 `sysbox-runc`、`hostUsers:false` 测试 Pod，
+容器内执行 `mknod /dev/fuse c 10 229` 返回 `Operation not permitted`，节点不存在，
+只读打开也失败。测试 Pod 已删除，因此当前不能用容器内 `mknod` 代替模板挂载。
+特权对照 Pod 也未声明设备挂载，但启动时 `/dev/fuse` 已存在且可打开；
+对新路径执行 `mknod /dev/fuse-selftest c 10 229` 仍返回
+`Operation not permitted`。因此不能把特权 Pod 中已有的节点视为容器自行创建成功。
+对照 Pod 已删除。
+
 ### 2026-10-09：内层 `SystemdCgroup=true` 无法启动 lite Pod
 
 在 `k3k-console-164315/ckm-cristats-0929` 仅将内层 containerd 的
