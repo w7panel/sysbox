@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * Make the host `sysbox-runc` bind-mount `/dev/fuse` and grant device access for every Sysbox container, so CKM Server no longer depends on a Pod hostPath. Preserve an existing explicit device mount and fail clearly when the host device is unavailable. Add a no-volume L0 open check to the Sysbox-in-Sysbox skill before CKM template migration.
   * Document the 218 CKM test showing that removing `/dev/fuse` leaves inner K3s running but prevents the inner Sysbox agent and snapshotter-backed workloads from starting; all seven CKMs were restored to the original controller image and FUSE mounts.
   * Document the follow-up 218 test: the CKM template now owns the `/dev/fuse` mount, while `mknod /dev/fuse c 10 229` inside a `sysbox-runc` Pod with `hostUsers: false` fails with `Operation not permitted`.
   * Removed obsolete bootstrap-image environment variables from the release workflow. The release script now builds and pushes only the deploy image; leaving the unused variables suggested that CI still produced a bootstrap image.

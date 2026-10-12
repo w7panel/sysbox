@@ -30,6 +30,14 @@ L0_RUNTIME_CLASS=sysbox-runc L0_TEST_SUFFIX=full-csi \
   ROOTFS_STORAGE_CLASS=<csi-storage-class> bash ./03-test-l0-rootfs.sh
 ```
 
+`02` creates a `hostUsers:false` `sysbox-runc` Pod without a FUSE volume or
+mount in its Pod spec, then checks `/dev/fuse` is a character device and opens
+it. It also checks that `sysbox-runc-lite` does not receive the device. Inspect
+the Pod spec as well as the container: runtime-added mounts are absent from
+`kubectl get pod -o yaml`. If the L0 check fails, keep the CKM template mount
+until the host runtime is corrected; a successful `test -c` alone is weaker
+than opening the device.
+
 Each `03` run must report `FUNCTIONAL PASS` and prove all of:
 
 1. Fresh PVC has nginx image files (`index.html`, `50x.html`).
@@ -62,7 +70,8 @@ verification.
 ## L1 CKM and L2 lite verification
 
 Set `CKM_NAME` and `CKM_NAMESPACE` to an existing Ready CKM. Its Server must
-use the outer `sysbox-runc` and `/dev/fuse`; no bootstrap initContainer or
+use the outer `sysbox-runc` and have a usable `/dev/fuse` without a Pod volume;
+no bootstrap initContainer or
 startup prelude is required. For a release, pass the downloaded,
 checksum-verified Chart.
 

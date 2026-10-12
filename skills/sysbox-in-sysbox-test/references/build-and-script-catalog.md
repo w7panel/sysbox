@@ -24,11 +24,13 @@ before a tag release, but only the GitHub release chart/image/binary is the
 final release input.
 
 For an ordinary code iteration prefer cached test mode. Valid components are
-`runc-lite`, `snapshotter`, `admission`, and `inner-script`; use
+`runc`, `runc-lite`, `snapshotter`, `admission`, and `inner-script`; use
 `TEST_TARGETS=deploy`. The resulting deploy image contains the Chart inner
 agent's script and binaries. `dist/test-images.env` records the image tag;
 select that tag through the nested Chart's `installer.image` and
 `admission.image` values. CKM does not consume a bootstrap image.
+The `runc` component updates the outer host runtime in the deploy image;
+run the L0 FUSE check before removing CKM's device mount.
 
 ```bash
 BUILD_PROFILE=test TEST_COMPONENTS=runc-lite,snapshotter,inner-script \
@@ -49,7 +51,7 @@ Do not overwrite `/usr/bin/runc` or restart an unrelated CKM.
 | --- | --- | --- |
 | `preflight` | `00-check-prereqs.sh` | kubeconfig, CRDs, templates and tools |
 | `ckm` | `01-create-ckm.sh` | explicitly configured CKM discovery or creation |
-| `l0-smoke` | `02-test-l0-runtimeclasses.sh` | both host RuntimeClasses and no automatic FUSE |
+| `l0-smoke` | `02-test-l0-runtimeclasses.sh` | `sysbox-runc` opens runtime-provided FUSE without a Pod mount; lite has no FUSE |
 | `l0-rootfs` | `03-test-l0-rootfs.sh` | PVC initialization, rootfs persistence and special bind |
 | `l1-install` | `04-install-ckm-chart.sh` | real nested Helm release; inner agent installs lite runtime/config and checks loaded CRI |
 | `l2` | `05-test-ckm-k3s.sh` | nested lite nginx rootfs/PVC regression |

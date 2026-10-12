@@ -63,7 +63,8 @@ helm upgrade --install w7panel-sysbox ./charts/w7panel-sysbox \
 ### Installer
 
 In nested mode, the Chart always runs the inner agent from `installer.image`.
-The CKM Server needs a `/dev/fuse` device and persistent
+The host `sysbox-runc` supplies `/dev/fuse` to the CKM Server at runtime; its
+Pod does not declare a FUSE volume. The Server also needs persistent
 `/var/lib/rancher/k3s`. The agent stores release binaries there and reconciles
 them after K3s or agent restarts. Uninstall checks for active lite Pods, stops
 the agent, and restores the previous containerd template. Restart the CKM

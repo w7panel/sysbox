@@ -44,8 +44,11 @@ the executable Skill wrappers.
   copy and persistent special-directory binds. Rootfs persistence belongs to
   admission and snapshotter; keep ordinary `/dev`, `/proc`, `/sys`, and mount
   errors on upstream runc semantics rather than adding failure-skipping paths.
-- L0 exposes both `sysbox-runc` and `sysbox-runc-lite`; normal L0 Pods must
-  not receive an automatic `/dev/fuse` mount.
+- L0 exposes both `sysbox-runc` and `sysbox-runc-lite`. The host `sysbox-runc`
+  adds `/dev/fuse` to every container at OCI runtime setup, without a Pod
+  volume or mount; `sysbox-runc-lite` does not. Verify a non-privileged
+  `hostUsers:false` Pod with no `/dev/fuse` volume can open the character device.
+  A Pod `mknod` failure does not disprove runtime device injection.
 - Full L0 `sysbox-runc` rootfs/nginx validation uses `hostUsers: false`.
   L2 `sysbox-runc-lite` workloads deliberately omit it.
 - Empty-volume initialization is runtime discovery, not the removed

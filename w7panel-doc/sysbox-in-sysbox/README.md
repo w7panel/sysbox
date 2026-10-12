@@ -47,7 +47,7 @@ L0 宿主 Kubernetes
 Server 的 K3s 数据目录安装脚本和二进制、写入 containerd 模板，配置变化时重启内层
 K3s，再核对实际加载的 CRI handler。CKM 已移除 bootstrap initContainer、Server
 启动前的 `sysbox-inner-k3s.sh` 调用和 `spec.innerSysbox.enabled` 开关；外层
-`sysbox-runc` Server 仍挂载 `/dev/fuse`。再次安装相同配置不应重复重启 K3s。
+宿主 `sysbox-runc` 自动为 Server 提供 `/dev/fuse`，Pod 不声明设备挂载。再次安装相同配置不应重复重启 K3s。
 
 测试集群迁移须覆盖每个现有 CKM，逐实例安装、等待 K3s 恢复并验证普通 `runc` 与
 `sysbox-runc-lite` workload；固定旧 SystemTemplate 的实例也要检查没有旧启动注入。
@@ -204,7 +204,7 @@ spec:
     kind: Cluster
 ```
 
-CKM 仅负责外层 Server 的 `/dev/fuse` 和 Sysbox RuntimeClass；内层运行时须安装
+CKM 负责外层 Server 的 Sysbox RuntimeClass；宿主 `sysbox-runc` 提供 `/dev/fuse`，内层运行时须安装
 `w7panel-sysbox` Chart 才能使用。
 无论是复用还是新建，脚本都会按配置的 CKM 名称定位 Server Pod；如果同名 CKM 已存在
 但状态不满足要求会直接失败，不会改用其他 CKM。
