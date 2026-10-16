@@ -14,8 +14,8 @@ This analysis mode is read-only: do not access a live cluster, change branches,
 or deploy merely to answer a comparison question. Run cluster tests only when
 the user requests validation or a change that requires it.
 For high `sysbox-fs` reaper log volume or `nsenter` load in CKM, read
-[the 218 reaper investigation](references/218-reaper-load.md). Its proposed
-optimizations have not been implemented or validated.
+[the 218 reaper investigation](references/218-reaper-load.md). Its two load
+optimizations and their 218 validation result are recorded there.
 
 The topology is L0 host Kubernetes, L1 CKM Server/K3s, and L2 workload. The
 supported workload is nginx; Docker, systemd, strong `/proc` isolation, and

@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * Reduce CKM `k3s` nsenter load for read-only `/proc/sys/kernel/threads-max`: open without PassThrough and read the current host value directly. On 218, 200 controlled reads succeeded without a `comm=cat` nsenter request; L0 rootfs/PVC and L1/L2 tests passed. The proposed sysfs net namespace change broke `/sys/devices/virtual/net` lookups in a fresh CKM, so it was reverted from the runtime and source. Restarting `sysbox-fs` disconnected existing FUSE mounts; affected Pods were recreated sequentially and verified. The global log reduction cannot be attributed to this change because the Pod and CKM populations changed during recovery.
   * Make the host `sysbox-runc` bind-mount `/dev/fuse` and grant device access for every Sysbox container, so CKM Server no longer depends on a Pod hostPath. Preserve an existing explicit device mount and fail clearly when the host device is unavailable. Add a no-volume L0 open check to the Sysbox-in-Sysbox skill before CKM template migration.
   * Document the 218 CKM test showing that removing `/dev/fuse` leaves inner K3s running but prevents the inner Sysbox agent and snapshotter-backed workloads from starting; all seven CKMs were restored to the original controller image and FUSE mounts.
   * Document the follow-up 218 test: the CKM template now owns the `/dev/fuse` mount, while `mknod /dev/fuse c 10 229` inside a `sysbox-runc` Pod with `hostUsers: false` fails with `Operation not permitted`.
