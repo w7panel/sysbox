@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Added
+  * sysbox-deploy-k8s: accept Kubernetes v1.37 for the `v0.7.1-15-k3s137` hotfix. The original `v0.7.1-15` installer rejected the 218 cluster's K3s v1.37 before installation.
   * sysbox-admission: stop injecting `/dev/fuse` into outer `sysbox-runc` Pods; L1 CKM bootstrap remains responsible for the fuse device required by its snapshotter.
   * w7panel-sysbox: omit the host installer DaemonSet in nested mode; the CKM bootstrap and nested chart runtime configuration provide the required lightweight runtime instead.
   * Release packaging excludes local Git metadata and generated `dist/` artifacts from the source archive so deployment-image builds package only source files.
