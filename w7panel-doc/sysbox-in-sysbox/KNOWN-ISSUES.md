@@ -51,6 +51,132 @@ umount /var/lib/sysboxfs/*/,
 不能将此代码修复记为现场恢复。部署后需确认目标 Pod Ready，且对应容器的
 `failed mntpnt match` 与 FUSE 初始化错误消失。
 
+现场处置补记（2026-11-09）：经授权在 60 的 server1 直接补齐上述两条规则并
+重载，已通过退出码断言确认文件内容、`fusermount3 (enforce)` 与 parser 重载成功。
+目标 Deployment 已为 1/1 Available，原 Pod 于 08:12:15 UTC Ready，重启次数 0，
+Nginx 日志显示 worker 正常启动。操作时 installer 已被外部升级为 v0.7.1-34 且
+尚处 ContainerCreating，因此使用已有 hostPID 特权容器执行宿主规则配置；
+此次不作为 v0.7.1-34 完整安装验收。面板 exec 存在输出丢失，服务日志检查
+未取得足够完整证据，不能声明节点所有相关错误均已消失。
+
+### 2026-11-03：两个 CKM 的 seccomp listener 丢失，agent 删除卡住
+
+218 的 `k3k-console-117057/ckm-slowdisk-test` 与
+`k3k-console-164315/loadopt-218-1016` 均出现内层 w7panel agent 长期
+Terminating。此次只读取日志、进程状态并短时运行自动退出的 BPF 观测，未重启
+CKM、Sysbox 服务或删除资源。
+
+已确认的故障链：
+
+- agent 实际进程已退出，`ctr tasks list` 为 STOPPED，但 `crictl inspect` 仍为
+  CONTAINER_RUNNING。两个内层 containerd 日志均反复重试 TaskExit，报
+  `failed to handle container TaskExit event: failed to stop container: failed to
+  delete task: failed rootfs umount: function not implemented`，随后 kubelet 的
+  StopContainer / StopPodSandbox 超时。agent 使用原生 runc / overlayfs。
+- 同时内层 kubelet 访问 `/sys/fs/cgroup/...` 的 `openat2` 返回 ENOSYS，QoS
+  cgroup 更新、指标采集及新 registry Job Pod 的 cgroup 创建失败。
+- 在宿主 BPF `sys_exit_openat2` 与 `seccomp_do_user_notification*` 探针中，两个
+  K3s 进程均进入 USER_NOTIF 路径，唯一 seccomp filter 的 `notif` 为 NULL：
+
+  | CKM | 宿主 PID / CKM PID | filter | notif |
+  | --- | --- | --- | --- |
+  | ckm-slowdisk-test | 3879813 / 145 | 0xffff8e5ed2d7bd00 | 0 |
+  | loadopt-218-1016 | 2623427 / 115 | 0xffff8e664ecfac00 | 0 |
+
+  两个 filter 的 `prev` 均为 NULL，`Seccomp_filters` 均为 1；8 秒观测分别捕获
+  368 / 434 次 `openat2=-38`。这是 listener 已丢失的现场证据，不能仅凭
+  sysbox-fs 进程存活或 inner-agent Ready 判断拦截链路正常。
+- 宿主 kernel 为 `7.0.0-31-generic`；sysbox-fs PID 3671294 自
+  `2026-10-16 10:22:47 UTC` 持续运行，systemd NRestarts=0。运行二进制为
+  `0.7.1-32`，构建时间 `2026-10-16 10:01:01 UTC`，SHA256 为
+  `e813b6df69f19b5ed90c0114a23758710ab04215ec899accd5af26508cd28418`。
+
+源码对应关系：`sysbox-runc/libsysbox/syscont/spec.go` 的
+`cfgSyscontSyscallTraps` 拦截 openat2；`sysbox-fs/seccomp/openat2.go` 对普通
+cgroup 路径返回 CONTINUE。`seccomp/tracer.go` 的 `connHandler` 在容器启动时接收
+listener；poll 非 EINTR 错误或 `Revents != POLLIN` 会结束会话并关闭 FD。
+kernel >=5.8 使用 listener 的 unused-filter 通知，不走旧内核的进程 pidfd 退出
+分支。现有 poll 退出日志为 Debug，且未记录实际 Revents；没有旧 filter 的
+listener 恢复机制。
+
+外层 Pod 重建会建立新的 filter/listener，因此符合用户观察到的恢复现象；本次未
+执行重建验证。**尚未确定旧 listener 最初为何被关闭，不能把 poll 分支直接认定为
+根因补丁，也不能归因于本次 sysbox-fs 服务重启。** 后续应捕获 listener release 的
+filter、PID、用户态调用栈，以及 tracer 退出时的 container ID、FD、Revents 和
+errno，区分 poll 主动退出、FD 误关与其他释放来源。修复应针对 listener 生命周期，
+单独给 cgroup openat2 增加 fallback 无法解决已证实的 rootfs 卸载失败。
+
+后续对照 Linux v7.0 `kernel/seccomp.c` 找到具体的误关闭风险：
+`seccomp_notify_poll()` 的 `mutex_lock_interruptible(&filter->notify_lock)` 若被
+信号打断，返回 `EPOLLERR`；这不代表 filter 已无人使用。正常结束通知是
+`refcount_read(&filter->users) == 0` 时返回 `EPOLLHUP`。Sysbox 却在
+`Revents != POLLIN` 时统一退出并关闭 listener，因此临时 POLLERR 也会触发永久
+失效；此时 poll 可成功返回，`err == EINTR` 的重试分支无法处理。内核
+`seccomp_notify_release()` 会 detach listener 并将 `filter->notif` 置 NULL，之后
+USER_NOTIF 返回 ENOSYS，与现场证据吻合。这是源码可确认的错误处理缺陷，但仍未
+捕获两次历史故障发生时的 Revents，不能声称已证明它们均由此路径触发。
+
+### 2026-10-16：Longhorn 限速导致单节点 CKM 的 cluster-reset 超时
+
+在 218 新建 `k3k-console-117057/ckm-slowdisk-test`，其 K3s 数据位于独立的
+Longhorn `disk-default` PVC `disk-alh1y`。通过宿主 cgroup v2 `io.max` 仅对该
+Pod 的卷设备设置读写 1 MiB/s、100 IOPS 上限；8 MiB 同卷写入实测耗时 8.1 秒。
+不限速时重启容器，`cluster-reset` 约 8 秒完成。限速时重启同一容器，etcd
+两次 `fdatasync` 分别耗时 7.39 秒、8.13 秒，`cluster-reset` 在约 46 秒后以
+`rangeKeys: context cancelled: context deadline exceeded` 退出，启动模板报
+`cluster reset failed`，容器重启。由对照确认，慢速同步写入会使当前模板的
+启动前 reset 超时，表现为长时间停在 `Starting single node setup`。
+
+已清除 `io.max` 限制；该 CKM 恢复 Ready、Server `2/2 Ready`、内层
+`/readyz=ok`。测试 CKM 和 PVC 保留；其他 CKM 未设置限速。
+
+本次使用 installer 的宿主 PID namespace 进入节点，再写测试 Pod 的 cgroup v2
+`io.max`。执行前确认 Pod UID、卷设备和 cgroup 路径；以下值只对应本次测试，Pod
+重建或卷重新挂载后必须重新查询。挂载信息显示设备为 `66:0`，`stat -c %t:%T`
+以十六进制输出 `42:0`。
+
+```sh
+kubectl --kubeconfig /root/.kube/218.config -n k3k-console-117057 \
+  get pod k3k-ckm-slowdisk-test-server-875b967f6-2945l -o jsonpath='{.metadata.uid}'
+kubectl --kubeconfig /root/.kube/218.config -n k3k-console-117057 \
+  exec k3k-ckm-slowdisk-test-server-875b967f6-2945l -c k3s-server -- \
+  grep ' /var/lib/rancher/k3s ' /proc/self/mountinfo
+
+host() {
+  kubectl --kubeconfig /root/.kube/218.config -n default \
+    exec w7panel-sysbox-installer-djnrg -c w7panel-sysbox -- \
+    nsenter -t 1 -m -u -i -n -p -- "$@"
+}
+cg=/sys/fs/cgroup/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod866d8b41_c59d_45bf_8aad_e1028ad84a28.slice
+dev=/dev/longhorn/pvc-2e9446e0-e092-4cf6-bae7-e350396467db
+host find /sys/fs/cgroup -type d -name '*866d8b41_c59d_45bf_8aad_e1028ad84a28*'
+
+host sh -ec 'cg=$1; dev=$2; test -d "$cg"; test "$(stat -c %t:%T "$dev")" = 42:0; printf "66:0 rbps=1048576 wbps=1048576 riops=100 wiops=100\n" > "$cg/io.max"; cat "$cg/io.max"' sh "$cg" "$dev"
+
+# 测试结束后解除限制；io.max 应为空。
+host sh -ec 'cg=$1; printf "66:0 rbps=max wbps=max riops=max wiops=max\n" > "$cg/io.max"; test ! -s "$cg/io.max"' sh "$cg"
+```
+
+### 2026-10-16：218 拉取 v0.7.1-15-k3s137 镜像超时
+
+首次升级时，节点 containerd 拉取镜像层 `sha256:8b9b96d66975…` 超过 22 分钟，
+active ingest 仅有 3.146 MB；Helm 10 分钟超时并自动回滚。将本机已校验的正式镜像
+导入节点后，`31 → 15-k3s137 → 31` 完成：`ckm-uejsa` 受控重建到 Pod Ready
+分别为 64.0 秒、66.1 秒，内层 `/readyz` 均成功。再次尝试升级到 `15-k3s137`
+时，Kubelet 对已由 `crictl inspecti` 确认存在的本地镜像返回
+`ErrImageNeverPull`；原因尚未确认，Helm 已自动回滚到 `0.7.1-31` revision 25。
+最终节点和全部 8 个 CKM 均为 Ready。
+
+### 2026-10-16：v0.7.1-15 无法安装到 218 的 Kubernetes v1.37
+
+218 单节点运行 K3s `v1.37.1+k3s1`。已校验 GitHub Release 的
+`w7panel-sysbox-0.7.1-15.tgz`、`sysbox-runc-lite-v0.7.1-15-amd64` 和
+`image-metadata.txt` checksum；Chart 默认镜像的实际 digest 与发布元数据一致。
+升级后 installer 立即退出，日志为 `Sysbox is not supported on this Kubernetes
+version (v1.37)`。因此该 tag 未完成宿主安装，也不能据此验收新 CKM 启动。
+已将 Helm release 回滚到原 `0.7.1-31`；installer、admission、节点及原有 7 个
+CKM 均恢复 Ready。要验证此 tag 的 CKM 启动，需使用其支持的 Kubernetes 版本。
+
 ### 2026-10-10：CKM Server 移除 `/dev/fuse` 后内层 Sysbox 失效
 
 在 218 集群将 `w7panel-ckm` 测试镜像切换为
@@ -1360,7 +1486,6 @@ Terminating 状态且容量为 20Gi。新建同名 `ckm-test` 时，CKM controll
 `05-test-ckm-k3s.sh` 返回 `FUNCTIONAL PASS`：webhook 自动提升 rootfs 注解 Pod 至
 `sysbox-runc-lite` 并注入 sidecar；无注解 CSI 初始化复制、rootfs 持久化和 special bind
 跨 Pod 重建均通过。
-
 ## console-145382 升级 v0.7.1-33（2026-11-09）
 
 ### 修复及 218 验证结果（2026-11-09）
