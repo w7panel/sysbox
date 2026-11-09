@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * Pull Chart images directly from `ghcr.io/w7panel/sysbox-deploy-k3s` by default instead of the CDN proxy, including the host installer, nested agent, uninstall hook and admission backend.
   * Document the manual fusermount3 AppArmor repair procedure: enter the affected host, preserve and back up local policy, add scoped Sysbox rules, compile and reload the profile, verify workload recovery and logs, and restore the backup if needed.
   * Record the authorized manual fusermount3 policy repair on the 60 cluster: Sysbox mount/unmount rules are present and reload succeeds with enforcement retained; the affected tradition-tool Deployment is now 1/1 Available. This is a targeted live recovery, not full v0.7.1-34 release validation.
   * Fix nested snapshotter cold-image timeouts: keep extraction snapshots layered using containerd's snapshot reference label and materialize only container writable roots. Make rootfs copying cancellable, stage data before atomic publication, serialize retries, and require successful unmount before directory deletion. Preserve existing PVC contents on failure and recognize completed publication across retries using the upper inode marker. Nested materialization now requires GNU cp and filesystem RENAME_EXCHANGE support; unsupported environments fail explicitly.

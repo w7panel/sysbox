@@ -46,19 +46,13 @@ installer tag is empty, the chart defaults it to `v{{ .Chart.AppVersion }}`.
 
 | Value | Default | Description |
 | --- | --- | --- |
-| `installer.image.repository` | `ghcr.registry.cdn.w7.cc/w7panel/sysbox-deploy-k3s` | Installer image repository. |
+| `installer.image.repository` | `ghcr.io/w7panel/sysbox-deploy-k3s` | Installer image repository. |
 | `installer.image.tag` | `""` | Installer image tag; defaults to `v{{ .Chart.AppVersion }}`. |
 | `admission.image.repository` | `""` | Optional admission image repository override; defaults to `installer.image.repository`. |
 | `admission.image.tag` | `""` | Optional admission image tag override; defaults to `installer.image.tag`. |
 | `admission.image.pullPolicy` | `""` | Optional admission pull policy override; defaults to `installer.image.pullPolicy`. |
 
-For direct GHCR access, set the shared image repository:
-
-```bash
-helm upgrade --install w7panel-sysbox ./charts/w7panel-sysbox \
-  -n default \
-  --set installer.image.repository=ghcr.io/w7panel/sysbox-deploy-k3s
-```
+Images are pulled directly from GHCR by default.
 
 ### Installer
 

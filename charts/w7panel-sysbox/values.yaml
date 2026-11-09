@@ -10,7 +10,7 @@ runtimeClassName: sysbox-runc
 installer:
   enabled: true
   image:
-    repository: ghcr.registry.cdn.w7.cc/w7panel/sysbox-deploy-k3s
+    repository: ghcr.io/w7panel/sysbox-deploy-k3s
     tag: ""
     pullPolicy: Always
   podLabels: {}
