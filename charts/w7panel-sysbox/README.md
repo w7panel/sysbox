@@ -5,6 +5,21 @@ installer and admission backend.
 
 ## Values
 
+### Installation mode
+
+`installMode` defaults to `auto`; an empty value also selects automatic detection.
+The chart queries DaemonSets in `default`, following CKM's `createAgent` identity:
+an agent labeled `k3k-agent-pod=true` with `IS_CHILD=true` in its container environment
+selects `nested`. Otherwise it selects `host`. Explicit `host` or `nested` skips
+detection. The mode is resolved consistently for all chart resources.
+
+Automatic detection requires API access to get the `kube-system` namespace and
+list DaemonSets in `default`. Offline `helm template`/`helm lint` must use
+`--set installMode=host` or `--set installMode=nested`; connected previews can use
+`--dry-run=server`. A CKM without its panel agent yet must explicitly select
+`nested`. Existing releases that saved `installMode=host` must change it to
+`auto` to enable detection; `--reuse-values` retains the saved override.
+
 ### RuntimeClass
 
 In host mode the chart creates both fixed RuntimeClasses: `sysbox-runc` and

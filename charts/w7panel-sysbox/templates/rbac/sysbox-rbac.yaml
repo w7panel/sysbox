@@ -57,7 +57,7 @@ subjects:
 - kind: ServiceAccount
   name: {{ include "w7panel-sysbox.serviceAccountName" . }}
   namespace: {{ include "w7panel-sysbox.namespace" . }}
-{{- if eq .Values.installMode "nested" }}
+{{- if eq (include "w7panel-sysbox.installMode" .) "nested" }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

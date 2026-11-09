@@ -4,7 +4,7 @@ Check installer pods:
   kubectl get pods -n {{ include "w7panel-sysbox.namespace" . }} -l app.kubernetes.io/name={{ include "w7panel-sysbox.name" . }},app.kubernetes.io/instance={{ .Release.Name }}
 
 Check RuntimeClass:
-{{- if eq .Values.installMode "nested" }}
+{{- if eq (include "w7panel-sysbox.installMode" .) "nested" }}
   kubectl get runtimeclass sysbox-runc-lite
 {{- else }}
   kubectl get runtimeclass sysbox-runc sysbox-runc-lite

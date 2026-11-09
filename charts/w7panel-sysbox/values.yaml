@@ -1,6 +1,7 @@
 nodeSelector: {}
 
-installMode: host
+# auto detects CKM's child panel agent; explicit host/nested overrides detection.
+installMode: auto
 
 # RuntimeClass names are standard and fixed. Host mode creates both
 # sysbox-runc and sysbox-runc-lite; nested mode creates sysbox-runc-lite only.

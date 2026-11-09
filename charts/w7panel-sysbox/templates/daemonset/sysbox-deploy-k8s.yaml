@@ -1,4 +1,4 @@
-{{- if and .Values.installer.enabled (ne .Values.installMode "nested") }}
+{{- if and .Values.installer.enabled (ne (include "w7panel-sysbox.installMode" .) "nested") }}
 ---
 apiVersion: apps/v1
 kind: DaemonSet

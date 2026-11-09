@@ -1,6 +1,35 @@
 {{/*
-Expand the name of the chart.
+Resolve installation mode once per render using CKM's child-agent identity.
 */}}
+{{- define "w7panel-sysbox.installMode" -}}
+{{- if not (hasKey . "sysboxResolvedInstallMode") -}}
+{{- $mode := .Values.installMode | default "auto" -}}
+{{- if not (has $mode (list "auto" "host" "nested")) -}}
+{{- fail "installMode must be auto, host or nested" -}}
+{{- end -}}
+{{- if eq $mode "auto" -}}
+{{- if not (lookup "v1" "Namespace" "" "kube-system") -}}
+{{- fail "installMode=auto requires cluster API access; use explicit host/nested for offline rendering" -}}
+{{- end -}}
+{{- $mode = "host" -}}
+{{- range (lookup "apps/v1" "DaemonSet" "default" "").items -}}
+{{- if eq (index (.metadata.labels | default dict) "k3k-agent-pod") "true" -}}
+{{- range .spec.template.spec.containers -}}
+{{- range .env -}}
+{{- if and (eq .name "IS_CHILD") (eq (.value | default "") "true") -}}
+{{- $mode = "nested" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $_ := set . "sysboxResolvedInstallMode" $mode -}}
+{{- end -}}
+{{- .sysboxResolvedInstallMode -}}
+{{- end -}}
+
+{{/* Expand the name of the chart. */}}
 {{- define "w7panel-sysbox.name" -}}
 {{- .Chart.Name | trunc 63 | trimSuffix "-" }}
 {{- end }}
