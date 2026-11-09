@@ -12,6 +12,45 @@ Server 仍必须保持 `runtimeClassName=sysbox-runc` 与 `hostUsers:false`；L2
 以及 snapshotter/webhook 复用。明确放弃 proc 强隔离、视图隔离和 system workload；
 实现基于官方 runc/libcontainer 局部修改，不引入 L2 `sysbox-fs` 或 `sysbox-mgr`。
 
+### 2026-11-09：宿主 fusermount3 AppArmor 策略阻止 Sysbox 沙箱创建
+
+60 面板集群的 `server1`（Ubuntu 26.04.1 LTS）上，
+`default/w7-traditiontool-fmvkwtkm` 长期 `ContainerCreating`，事件为
+`FailedCreatePodSandBox` / `failed to pre-register container with sysbox-fs`。
+`sysbox-fs` 日志报 `fusermount3: mount failed: Permission denied` 和
+`FuseServer InitWait error`；内核审计明确记录：
+
+```text
+apparmor="DENIED" profile="fusermount3" operation="mount"
+info="failed mntpnt match" error=-13
+name="/var/lib/sysboxfs/<container-id>/" fstype="fuse" srcname="sysboxfs"
+flags="rw, nosuid, nodev"
+```
+
+直接对比 218：其宿主为 Ubuntu 26.04 LTS，同样加载 `fusermount3 (enforce)`，
+但 `/etc/apparmor.d/local/fusermount3` 已有 Sysbox 目录的 mount/umount 放行规则；
+60 节点没有该文件。218 文件的修改时间为 7 月 29 日，添加来源未确认。
+这是宿主策略适配差异；`sysbox-fs` 自身为 unconfined、`/dev/fuse` 为 0666
+均不能绕过执行 fusermount3 后的独立 AppArmor 策略。
+
+项目此前没有自动安装这项规则。现由 `sysbox-deploy-k8s.sh` 的宿主 `install`
+流程在依赖安装之后、启动 Sysbox 之前补齐 local/fusermount3：
+
+```text
+mount fstype=fuse options=(rw,nosuid,nodev) sysboxfs -> /var/lib/sysboxfs/*/,
+umount /var/lib/sysboxfs/*/,
+```
+
+相同版本再次安装也执行；保留管理员已有内容，重复运行不重复追加规则。
+无主 profile、AppArmor 未启用或 profile 已禁用时跳过；通过 `nsenter --root`
+使用宿主根目录执行 `apparmor_parser -r`，重载失败终止安装。
+本次只处理 Sysbox FUSE 目录，不复制 218 中另有的 K3s rootfs 卸载规则。
+
+验证：本地安装逻辑回归覆盖缺少/禁用策略、规则保留和幂等、重载失败与重试；
+策略通过 apparmor_parser 离线编译。尚未构建发布镜像或部署到 60/218，
+不能将此代码修复记为现场恢复。部署后需确认目标 Pod Ready，且对应容器的
+`failed mntpnt match` 与 FUSE 初始化错误消失。
+
 ### 2026-10-10：CKM Server 移除 `/dev/fuse` 后内层 Sysbox 失效
 
 在 218 集群将 `w7panel-ckm` 测试镜像切换为
