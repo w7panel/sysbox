@@ -1589,6 +1589,51 @@ Terminating 状态且容量为 20Gi。新建同名 `ckm-test` 时，CKM controll
 跨 Pod 重建均通过。
 ## console-145382 升级 v0.7.1-33（2026-11-09）
 
+### 218：v0.7.1-37 正式 Release 验收（2026-11-09）
+
+GitHub Actions run `42588984950` 成功后，从该 Release 下载 Chart、lite
+二进制、`image-metadata.txt` 和 `SHA256SUMS`；三个实际下载附件校验全部通过。
+正式镜像为 `ghcr.io/w7panel/sysbox-deploy-k3s:v0.7.1-37`：
+
+- manifest digest：`sha256:6a4f78365b0effbf86fd19dc78f87741785179bf77d49e4a6ee85cb317c0e1cb`。
+- image config ID：`sha256:1fc33f58628879037ca32f15e4b51913768093345f662bebc98a16bf49dbd655`。
+- lite 附件与 L0 `/usr/bin/sysbox-runc-lite`、L1 实际 release 目录的二进制
+  SHA256 均为 `a0c478eee57a2812d7610b790450857d7825e475f9ea599dfcd840b98d206f9a`。
+
+使用 `/root/.kube/218.config`，主集群 `default/w7panel-sysbox` 从 v33 升到
+正式 v37；独立子集群为 `k3k-console-164315/ckm-snapshot-1109`。两边都安装
+下载的正式 Chart，未显式传入 installMode，分别自动生成 host installer 与
+nested inner-agent；镜像均来自正式 Release。子集群实际 readiness timeout=10s。
+宿主 installer 完成二进制替换、服务/K3s 重启及已有完整 Sysbox Pod 重建。
+基线 24 个活动 Sysbox Pod 均恢复 Ready；4 个 CKM 内 `/readyz=ok`、节点 Ready。
+其他 CKM 的内层 Sysbox 版本未迁移。
+
+验收结果：
+
+- L0 FUSE smoke：full 无显式 Pod 挂载仍可打开 `/dev/fuse`，lite 不注入设备。
+- L0 lite/local-path、full/local-path、full/Longhorn `disk-default` 均通过
+  无注解空 PVC 初始化、Pod 重建后的 PVC 与 `/srv/data` 持久化；full 使用
+  `hostUsers:false`。Longhorn 用例首次因节点 110 Pod 上限超时，自动调度恢复后
+  完整重试通过；不是 Sysbox 启动失败。
+- L2 local-path 的 rootfs/特殊目录、PVC 初始化、CRI writable-layer mountpoint
+  和 kubelet stats 全部通过，nginx HTTP 200。L2 没有 CSI，本轮 CSI 结果属于 L0。
+- 新的 `nginx:1.27-alpine` 在 Sysbox 冷缓存中 10 秒 Ready、HTTP 200；新增
+  8 个镜像解包层没有 materialization marker，未遗留 merged 挂载。
+- 直接向 snapshotter 发出 300ms Prepare 请求，取消后 staging/merged 挂载
+  清理成功；同一 snapshot 仍可查询、重试 Mounts 并正常移除。
+- SIGKILL 独立测试 CKM 的 snapshotter，保留旧 socket，PID `9923` 在 2 秒内
+  恢复为 `28088`；随后重建 nginx，持久化标记与 HTTP 200 均通过。
+- 相同正式 Chart/配置重复 Helm upgrade，L1 Pod UID 未变，K3s restartCount
+  保持 2；收尾日志检查未见 panic/fatal/OOM/ENOMEM。
+- 本轮 3 个 L0、2 个 L2 测试 Deployment 均缩为 0，PVC 保留。
+
+传输问题单独记录：218 的 containerd 仍配置了 `ghcr.io` 到
+`ghcr.registry.cdn.w7.cc/v2` 的 registry mirror，Chart 的 GHCR 地址不等于
+底层一定直连。L0 首次拉取出现一层 digest mismatch，重试后所有内容通过摘要
+校验；日志不足以确定返回错误字节的上游。随后用独立 hosts-dir 直连 GHCR
+确认 manifest/digest；L1 下载被宿主升级重建打断，改从 L0 导出已校验的同一
+正式镜像并导入 L1，保留原 GHCR 名称与 digest。本轮未修改集群 registry mirror。
+
 ### 218：Chart GHCR 地址与 readiness 超时验证（2026-11-09）
 
 Chart 默认镜像改为 `ghcr.io/w7panel/sysbox-deploy-k3s`。内层 agent 原先

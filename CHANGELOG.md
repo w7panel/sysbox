@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * Verify the official v0.7.1-37 release on 218: host/nested auto detection, release image and binary checksums, full/lite local-path and Longhorn regression, nested cold-image startup, cancellation cleanup, snapshotter recovery and idempotent Helm upgrade passed. Record transient image digest/download and Pod-capacity issues separately from runtime results.
   * Lint both explicit host and nested Chart modes during release packaging; offline CI cannot resolve the default auto mode against a target cluster.
   * Default Chart installMode to auto (also for an empty value): detect CKM's child-agent DaemonSet via k3k-agent-pod=true and IS_CHILD=true, matching w7panel-ckm/createAgent and w7panel-server. Preserve explicit host/nested overrides and reject offline auto rendering rather than silently installing the host runtime in a child cluster. Verified connected rendering against the 218 host and its independent CKM.
   * Give the nested agent readiness command 10 seconds instead of Kubernetes' implicit 1-second timeout, allowing its 3-second snapshotter RPC and subsequent CRI check to complete under load without false readiness failures.
