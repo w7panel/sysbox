@@ -1589,6 +1589,24 @@ Terminating 状态且容量为 20Gi。新建同名 `ckm-test` 时，CKM controll
 跨 Pod 重建均通过。
 ## console-145382 升级 v0.7.1-33（2026-11-09）
 
+### 218：Chart GHCR 地址与 readiness 超时验证（2026-11-09）
+
+Chart 默认镜像改为 `ghcr.io/w7panel/sysbox-deploy-k3s`。内层 agent 原先
+未设置 `timeoutSeconds`，Kubernetes 默认只给 1 秒，而 status 的 snapshotter
+RPC 自身允许 3 秒，之后还需查询 CRI；改为明确的 10 秒，保留原健康检查。
+
+在 `k3k-console-164315/ckm-snapshot-1109` 用现有
+`snapshot-fix-218-20261109c` 镜像升级工作区 Chart：探针确认为 10 秒，agent
+1/1 Ready，三次 status 耗时 0.399–0.415 秒。启动期间出现一次无错误文本的
+readiness 失败，随后恢复；未观察到 1 秒超时。L1 重启次数保持 3。
+独立 `ghcr-probe-nginx` 通过空 PVC 初始化、rootfs/special bind 持久化、Pod
+重建及 CRI/kubelet stats 回归，HTTP 200。测试 Deployment 已缩为 0，PVC 保留。
+
+同一 CKM 通过 `crictl pull` 成功直连拉取 GHCR 的 `v0.7.1-34`，镜像 ID 为
+`sha256:bfc4bd1f60a0509478b4560ae9cd099bb4a9e71b1f1ec88431d095a12adc4cc2`。
+`v0.7.1-35` 此时仍在 GitHub Actions 构建，拉取返回 NotFound；因此本次是
+Chart 探针验证及 GHCR 拉取验证，不是 v35 正式发布镜像的完整验收。
+
 ### 修复及 218 验证结果（2026-11-09）
 
 按 `skills/sysbox-in-sysbox-test/SKILL.md` 执行，目标 kubeconfig 为用户指定的

@@ -47,6 +47,7 @@ spec:
             exec:
               command: ["/opt/sysbox/scripts/sysbox-inner-agent.sh", "status"]
             periodSeconds: 5
+            timeoutSeconds: 10
             failureThreshold: 6
           volumeMounts:
             - name: host-k3s-data
