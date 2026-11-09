@@ -59,6 +59,107 @@ Nginx 日志显示 worker 正常启动。操作时 installer 已被外部升级�
 此次不作为 v0.7.1-34 完整安装验收。面板 exec 存在输出丢失，服务日志检查
 未取得足够完整证据，不能声明节点所有相关错误均已消失。
 
+#### 手动放行步骤（宿主 root 执行）
+
+适用于内核审计已确认 `profile="fusermount3"`、`failed mntpnt match`，且目标为
+`/var/lib/sysboxfs/<容器ID>/` 的情况。下面只增加该目录的 FUSE 挂载/卸载权限，
+AppArmor 继续保持 enforce。所有宿主命令都在故障 Pod 所在节点执行。
+
+可通过 SSH 登录宿主；通过现有 hostPID 特权调试容器进入时，先确认 kubeconfig
+指向目标集群，再执行（替换 Pod 和容器名称）：
+
+```bash
+kubectl --kubeconfig /home/.kubeconfig -n default exec -it <调试Pod> -c <容器名> -- \
+  nsenter -t 1 -m -u -i -n -p --root -- /bin/bash
+```
+
+60 本次通过面板 MCP 的 exec 进入 `server1` 上已有的
+`w7panel-offline-agent-89r84` / `k8s-offline-ds` 容器，再执行同样的 nsenter。
+Pod 名称可能变化，应重新确认其节点、hostPID 和 privileged 配置。
+
+**1. 确认策略并备份，然后补齐规则。** 在同一个宿主 Bash 会话执行：
+
+```bash
+set -euo pipefail
+hostname
+cat /sys/module/apparmor/parameters/enabled
+grep -Fx 'fusermount3 (enforce)' /sys/kernel/security/apparmor/profiles
+test -f /etc/apparmor.d/fusermount3
+grep -F 'include if exists <local/fusermount3>' /etc/apparmor.d/fusermount3
+
+sysbox_aa_rules=/etc/apparmor.d/local/fusermount3
+mkdir -p /etc/apparmor.d/local
+sysbox_aa_backup=$(mktemp -d /root/sysbox-apparmor-backup.XXXXXX)
+if [ -f "$sysbox_aa_rules" ]; then
+  cp -p "$sysbox_aa_rules" "$sysbox_aa_backup/fusermount3"
+else
+  touch "$sysbox_aa_backup/was-absent"
+fi
+printf '备份目录：%s\n' "$sysbox_aa_backup"
+
+while IFS= read -r rule; do
+  if ! grep -qxF -- "$rule" "$sysbox_aa_rules" 2>/dev/null; then
+    printf '\n%s\n' "$rule" >> "$sysbox_aa_rules"
+  fi
+done <<'EOF'
+mount fstype=fuse options=(rw,nosuid,nodev) sysboxfs -> /var/lib/sysboxfs/*/,
+umount /var/lib/sysboxfs/*/,
+EOF
+```
+
+此方式保留 local 文件已有内容，重复执行不重复追加。记录输出的备份目录，
+回滚时使用。若前置检查不通过，先确认实际策略，不继续套用本步骤。
+
+**2. 检查语法并重载单个 profile。** 无需重启 Sysbox 或 K3s：
+
+```bash
+apparmor_parser -Q -T /etc/apparmor.d/fusermount3
+sysbox_aa_since=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+apparmor_parser -r /etc/apparmor.d/fusermount3
+cat "$sysbox_aa_rules"
+grep -Fx 'fusermount3 (enforce)' /sys/kernel/security/apparmor/profiles
+```
+
+`-Q -T` 仅编译检查、不加载内核策略；`-r` 才替换已加载策略。
+任一步失败都不能视为放行完成；修正或回滚后重新加载。
+
+**3. 验证恢复。** Kubelet 会自动重试原来失败的沙箱，先等待目标应用恢复。
+以下命令在具有目标集群 kubeconfig 的管理端执行：
+
+```bash
+kubectl --kubeconfig /home/.kubeconfig -n default rollout status \
+  deployment/w7-traditiontool-fmvkwtkm --timeout=180s
+kubectl --kubeconfig /home/.kubeconfig -n default get deployment w7-traditiontool-fmvkwtkm
+kubectl --kubeconfig /home/.kubeconfig -n default logs \
+  deployment/w7-traditiontool-fmvkwtkm -c tradition-tool --tail=30 --timestamps
+```
+
+在前面的宿主 Bash 会话检查重载之后的日志，结合目标容器 ID 判断：
+
+```bash
+journalctl -k --since "$sysbox_aa_since" --no-pager --grep 'fusermount3|sysboxfs'
+journalctl -u sysbox-fs --since "$sysbox_aa_since" --no-pager
+```
+
+验收目标是 Deployment Available、Nginx 正常启动，且对应容器不再出现
+AppArmor 挂载拒绝或 FUSE 初始化失败；同时检查 panic、fatal、OOM、ENOMEM。
+仅看到规则文件或 parser 返回成功，不能替代应用恢复验证。
+
+**4. 必要时回滚。** 先确认备份之后没有其他管理员修改同一 local 文件。
+在原宿主会话执行；重新登录时，将 `sysbox_aa_backup` 设置为步骤 1 输出的真实目录：
+
+```bash
+sysbox_aa_rules=/etc/apparmor.d/local/fusermount3
+if [ -f "$sysbox_aa_backup/was-absent" ]; then
+  rm -- "$sysbox_aa_rules"
+else
+  cp -p "$sysbox_aa_backup/fusermount3" "$sysbox_aa_rules"
+fi
+apparmor_parser -r /etc/apparmor.d/fusermount3
+```
+
+回滚会撤销本次授权，之后新建 Sysbox 容器可能再次遇到原故障。
+
 ### 2026-11-03：两个 CKM 的 seccomp listener 丢失，agent 删除卡住
 
 218 的 `k3k-console-117057/ckm-slowdisk-test` 与
