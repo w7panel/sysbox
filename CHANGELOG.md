@@ -327,3 +327,9 @@ All notable changes to this project will be documented in this file.
   * Supports Ubuntu Disco (with userns-remap disabled).
   * Supports Ubuntu Disco, Cosmic, and Bionic (with userns-remap enabled).
   * Includes the Nestybox shiftfs kernel module for uid(gid) shifting.
+
+## 2026-11-09 — 内层 Sysbox 保留 K3s CNI 路径
+
+- 修复内层安装脚本将 CNI 目录固定为 `/var/lib/rancher/k3s/data/cni` 的问题：使用 `/bin` 插件布局的 K3s 容器安装 Sysbox 后，会因找不到 flannel、loopback 而无法创建或清理 Pod 网络。
+- containerd v3 模板改用 K3s 的 `CNIBinDir` 和 `CNIConfDir`，按上游条件生成 `bin_dirs` 与 `conf_dir`，保留实际路径并正确转义；不改变 agent 网络模式、重启流程或其他 runtime 配置。
+- 新增实际 shell heredoc 生成及 Go template 渲染回归测试，覆盖 `/bin`、`data/cni`、自定义路径、仅插件目录、仅配置目录及空配置，并检查 Sysbox runtime 配置仍保留。验证：在 `sysbox-pkgr/k8s/scripts` 执行 `go test -v sysbox-inner-k3s_test.go`，6 个用例通过；Shell 语法检查、nested 模式 Helm lint 和模板渲染通过。未构建发布镜像、未部署或重启线上资源，现场恢复尚未验证。
