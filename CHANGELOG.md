@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * Lint both explicit host and nested Chart modes during release packaging; offline CI cannot resolve the default auto mode against a target cluster.
   * Default Chart installMode to auto (also for an empty value): detect CKM's child-agent DaemonSet via k3k-agent-pod=true and IS_CHILD=true, matching w7panel-ckm/createAgent and w7panel-server. Preserve explicit host/nested overrides and reject offline auto rendering rather than silently installing the host runtime in a child cluster. Verified connected rendering against the 218 host and its independent CKM.
   * Give the nested agent readiness command 10 seconds instead of Kubernetes' implicit 1-second timeout, allowing its 3-second snapshotter RPC and subsequent CRI check to complete under load without false readiness failures.
   * Pull Chart images directly from `ghcr.io/w7panel/sysbox-deploy-k3s` by default instead of the CDN proxy, including the host installer, nested agent, uninstall hook and admission backend.

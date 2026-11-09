@@ -381,7 +381,8 @@ package_chart() {
     need_cmd "${HELM}"
 
     info "Lint Helm chart ${CHART_DIR}"
-    "${HELM}" lint "${CHART_DIR}"
+    "${HELM}" lint "${CHART_DIR}" --set installMode=host
+    "${HELM}" lint "${CHART_DIR}" --set installMode=nested
 
     info "Package Helm chart ${CHART_DIR}"
     "${HELM}" package "${CHART_DIR}" \
