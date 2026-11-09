@@ -1360,3 +1360,122 @@ Terminating 状态且容量为 20Gi。新建同名 `ckm-test` 时，CKM controll
 `05-test-ckm-k3s.sh` 返回 `FUNCTIONAL PASS`：webhook 自动提升 rootfs 注解 Pod 至
 `sysbox-runc-lite` 并注入 sidecar；无注解 CSI 初始化复制、rootfs 持久化和 special bind
 跨 Pod 重建均通过。
+
+## console-145382 升级 v0.7.1-33（2026-11-09）
+
+### 修复及 218 验证结果（2026-11-09）
+
+按 `skills/sysbox-in-sysbox-test/SKILL.md` 执行，目标 kubeconfig 为用户指定的
+`/root/.kube/218.config`，新建独立 CKM
+`k3k-console-164315/ckm-snapshot-1109`（L1 `sysbox-runc`、`hostUsers:false`）。
+
+源码修复：
+
+- 用 `containerd.io/snapshot.ref` 排除镜像解包层，只物化容器可写 rootfs。
+- 可取消的 GNU `cp -a --preserve=all` 复制到暂存目录，等待复制退出、成功卸载
+  临时 merged 挂载后才原子交换 upper；同 snapshot/upper 串行化。work 中的
+  marker 记录未来 upper inode，区分交换前后中断，兼容原 marker。
+- snapshot 元数据提交后不在 Prepare 失败路径删除已注册目录；删除前必须
+  成功卸载 merged，失败则保留目录，避免递归删除仍挂载的数据。
+- agent 和 launcher 检查精确 Unix 监听路径，并直连 snapshotter RPC，超时
+  3 秒。全新空库实测返回 `ctr: bucket does not exist: not found`，仅允许
+  此精确整行作为健康空库；连接失败、超时及其他 NotFound 均失败。
+
+使用 v33 镜像作为基线，经 `06-build-and-test.sh` 的 test 模式构建
+snapshotter/inner-script，然后分阶段执行 00/02/03/04/05。测试镜像仅本地构建
+并导入 L1，未推送：
+`docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:snapshot-fix-218-20261109c`。
+导入 manifest digest 为
+`sha256:95705f88390ecf90fe07f05da463a4c06687bd5cfcd8a17411d3dd708e1603c4`；
+运行中的 snapshotter SHA256 与构建结果一致：
+`a9fddb9419600c3fe6f69d93986bafea258f430fc59d12b17c47aeec1c6f3d97`。
+使用工作区 Chart（版本字段 `0.7.0-8`），nested Helm release deployed，
+为本地导入镜像设置 `IfNotPresent`；这不是新 tag 或 GitHub release 验收。
+
+验证结果：
+
+- snapshotter 全模块 `go test -race ./...` 通过；脚本 9 个健康场景和
+  6 个 CNI 场景通过。覆盖复制元数据、真实进程取消、卸载失败保护及发布中断。
+- L0 保持原运行时：FUSE 注入/打开检查及 lite 的 local-path、Longhorn
+  `disk-default` PVC/rootfs/special-bind 基线全部通过。
+- L1 Sysbox snapshot 列表为空，仅预导入 nginx 镜像内容（`--no-unpack`）。
+  7 层 nginx 首次创建到 Ready **12 秒**，HTTP **200**；镜像层保留差异大小，
+  小层仅 8–16 KiB，只有 sandbox/容器可写层有物化 marker，无残留 merged 挂载。
+- 直接 Prepare 注入 **300 毫秒** RPC 超时：复制进程退出，临时挂载及暂存目录
+  随后清理，原 upper 仅 4 KiB、无完成 marker；同一 snapshot 的 Mounts 重试
+  成功，之后正常删除目录。此为独立测试 snapshot，没有操作业务 snapshot。
+- `05-test-ckm-k3s.sh` FUNCTIONAL PASS：无注解 local-path PVC 初始化、rootfs
+  和 `/srv/data` 持久化、CRI writable-layer、kubelet stats/summary 通过。
+  初次 sidecar spec unavailable 在重试后恢复，最终功能断言全部通过。
+- 额外删除容器 `/etc/debian_version` 并写入 `/root/sysbox-extra-marker`，
+  重建后文件保持删除，rootfs、普通 PVC、special-bind marker 均保留。
+- 强制结束 snapshotter PID 10630 并保留 socket，agent **10 秒**内自动启动
+  PID 30119；恢复后重新创建 nginx，HTTP 200 且持久化断言仍通过。健康检查
+  实测约 0.33–0.37 秒，默认 1 秒 readiness 在本测试 CKM 为 Ready。
+- 将同一模块测试二进制放到挂载 Longhorn PVC 的测试 Pod，实际执行复制属性、
+  原子交换/中断 marker、失败不修改原 upper 三项测试，全部通过。
+- 使用相同 Chart/镜像/values 再次 Helm upgrade，L1 Server restartCount
+  保持 3，agent/admission Ready，没有再次重启 K3s。
+
+依赖：nested rootfs 物化需要 GNU cp（本 CKM 为 9.5）和文件系统
+`RENAME_EXCHANGE`。不支持时明确报错，不静默退化。L2 当前只提供 local-path；
+Longhorn 验证在 L0 PVC 上完成，不声称已测试 L2 CSI 驱动。
+
+测试 Deployment 已缩容为 0；保留测试 PVC 与 CKM。记录位于本地
+`/tmp/sysbox218-{cold,l2,cancel,cancel-retry,recovery,csi-atomic}.log`。
+此次没有更新 console-145382，也未提交、推送或发布修复 tag。
+
+### 后续超时定位（同日 14:55–14:58）
+
+重新启动同一 lite nginx 测试，并以同一缓存镜像创建普通 runc 对照：普通
+runc 约 3 秒启动，lite 首次 CreateContainer 从 14:55:41 到 14:57:41
+达到 120 秒后取消；第二次从 14:57:42 到 14:58:20 完成，nginx Ready，
+HTTP 返回 200。这更新了下面的初次验证结果：基础 nginx 可以在缓存完成后
+重试成功，但首次解包性能及失败清理缺陷仍未修复，未做 PVC/rootfs 完整验收。
+
+已确认的代码和现场证据：
+
+- `sysbox-snapshotter/fuseoverlayfs.go` 的 `mounts()` 对所有 nested
+  `KindActive` 都执行 `materializeActiveSnapshot()`，包含镜像 extraction
+  snapshot。`fs.CopyDir(upper, merged)` 每层重复复制完整父 rootfs，而不是
+  只在容器可写层物化；`CopyDir` 不接受 context，超时后复制仍继续。
+- 现场 snapshot 19–24 均生成物化 marker，每层 `fs` 为 170468–170500 KiB；
+  nginx 压缩镜像仅 60.9 MiB。snapshotter fd 显示持续读取对应 `merged`
+  并写入 `fs`；超时后同时持有 snapshot 25 和 26 的复制目录 fd。
+- 已提交镜像层标签存在 `containerd.io/snapshot.ref`，与上游 containerd
+  unpacker 给 extraction Prepare 添加的标记一致。后续修复可按此区分镜像
+  解包和容器可写层，避免按 key 字符串前缀猜测。
+- 初次失败残留的 snapshot 9、16 的 `merged` FUSE 挂载仍存在；卸载失败
+  只记录警告，后续清理碰到活挂载并报目录非空。未直接删除或强卸载这些目录。
+
+两个测试 Deployment 均已缩容为 0。`containerd-retry.log`、
+`snapshotter-retry.log`、`snapshotter-retry-mountinfo.txt`、
+`smoke-retry-description.txt` 和 `retry-result.txt` 保存在下述备份目录。
+此次仅排障和复测，未修改运行时源码或替换线上二进制。
+
+内层 `default/w7panel-sysbox` 从 `0.7.1-31` 升至官方 `0.7.1-33`，
+使用 `installMode=nested`。官方 Chart、lite 二进制校验通过，部署镜像 digest 为
+`sha256:8bcf4fc8b13bf14c5aa5055765e4ecd5a163aef2d03b6673454253823c7f2e74`。
+K3s 重启后 CNI 配置为 `bin_dirs = ["/bin"]`，新测试 sandbox 获得
+`10.52.0.27`，原 CNI 路径故障已修复；节点和 16 个原有 Pod Ready。
+另一个原有业务 Pod 因 `Insufficient cpu` Pending，与本次故障独立。
+
+仍存在两个问题，本次发布功能验收未通过：
+
+- **残留 socket 导致健康误判（已确认）**：snapshotter pidfile 指向已退出的
+  PID 9532，socket 文件存在但 `/proc/net/unix` 无监听，agent 仍 Ready，
+  `ctr snapshots --snapshotter sysbox ls` 空输出并返回 0。agent 的 `status()`
+  因此成功，`install_once()` 提前返回，跳过运行时启动；新 sandbox 报
+  `connection refused`。确认无活跃进程及监听后，将 socket 改名为
+  `/run/sysbox/sysbox-snapshotter.sock.stale-v33`，官方 agent 自动拉起
+  v33 snapshotter（PID 17171）。这是现场恢复措施，未修改该缺陷源码。
+- **lite 容器创建超时（原因未定）**：恢复 socket 后，使用本地已有 nginx
+  镜像、`sysbox-runc-lite`、无 PVC/无 rootfs 注解的 `sysbox33-smoke`
+  Deployment 可以创建 sandbox，但容器报 `CreateContainerError` /
+  `context deadline exceeded`，不能据 agent Ready 判定功能通过。
+  测试 Deployment 已缩容为 0，保留定义及证据，未创建测试 PVC。
+
+现场备份和 Pod/containerd/snapshot 证据位于 Server 内
+`/var/lib/rancher/k3s/sysbox-inner/upgrade-v0.7.1-33`；其中 Helm values/manifest
+可能含凭据，不应公开。此前 readiness 超时现场调整（10 秒）升级后保留，
+Chart 默认仍为 1 秒，不属于 v33 已修复项。

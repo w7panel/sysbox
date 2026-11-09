@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -33,7 +34,9 @@ import (
 	"github.com/containerd/containerd/v2/core/snapshots/storage"
 	"github.com/containerd/continuity/fs"
 	"github.com/containerd/log"
+	"github.com/moby/locker"
 	"github.com/w7panel/sysbox/sysbox-snapshotter/rootfs"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -61,10 +64,11 @@ func AsynchronousRemove(config *SnapshotterConfig) error {
 }
 
 type snapshotter struct {
-	root        string
-	ms          *storage.MetaStore
-	asyncRemove bool
-	rootfsHooks RootfsHooks
+	materializeLocks locker.Locker
+	root             string
+	ms               *storage.MetaStore
+	asyncRemove      bool
+	rootfsHooks      RootfsHooks
 }
 
 // NewSnapshotter returns a Snapshotter which uses overlayfs. The overlayfs
@@ -263,7 +267,7 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 		defer func() {
 			if err == nil {
 				for _, dir := range removals {
-					if err := os.RemoveAll(dir); err != nil {
+					if err := o.removeSnapshotDirectory(dir); err != nil {
 						log.G(ctx).WithError(err).WithField("path", dir).Warn("failed to remove directory")
 					}
 				}
@@ -307,7 +311,7 @@ func (o *snapshotter) Cleanup(ctx context.Context) error {
 	}
 
 	for _, dir := range cleanup {
-		if err := os.RemoveAll(dir); err != nil {
+		if err := o.removeSnapshotDirectory(dir); err != nil {
 			log.G(ctx).WithError(err).WithField("path", dir).Warn("failed to remove directory")
 		}
 	}
@@ -372,7 +376,7 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 				}
 			}
 			if path != "" {
-				if err1 := os.RemoveAll(path); err1 != nil {
+				if err1 := o.removeSnapshotDirectory(path); err1 != nil {
 					log.G(ctx).WithError(err1).WithField("path", path).Error("failed to reclaim snapshot directory, directory may need removal")
 					err = fmt.Errorf("failed to remove path: %v: %w", err1, err)
 				}
@@ -430,6 +434,9 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 	if err = t.Commit(); err != nil {
 		return nil, fmt.Errorf("commit failed: %w", err)
 	}
+	// Metadata now owns this directory. A failed materialization can be retried
+	// by Mounts or removed through Remove; do not delete a registered snapshot.
+	path = ""
 
 	return o.mounts(ctx, key, s, info)
 }
@@ -521,6 +528,10 @@ func (o *snapshotter) mounts(ctx context.Context, key string, s storage.Snapshot
 			Options: options,
 		},
 	}
+	// Image extraction snapshots must remain layered; they are never OCI rootfs.
+	if info.Labels["containerd.io/snapshot.ref"] != "" {
+		return mounts, nil
+	}
 	if s.Kind == snapshots.KindActive && runningInNestedUserNS() {
 		// A fuse-overlayfs mount created inside the L1 Sysbox user namespace
 		// cannot be used as a mount target by the L2 OCI runtime (proc, tmpfs,
@@ -589,34 +600,128 @@ func materializedRootfsPaths(mounts []mount.Mount) (upper, work string, err erro
 	return upper, work, nil
 }
 
-func (o *snapshotter) materializeActiveSnapshot(ctx context.Context, snapshotID string, mergedMount mount.Mount, upper, work string) error {
-	// The marker lives in workdir, never in the container rootfs. The workdir
-	// is otherwise unused after this function returns a bind-mounted rootfs.
-	// This lets an existing PVC upperdir be converted once without treating a
-	// non-empty directory as proof that its lower image layers were copied.
-	marker := filepath.Join(work, ".sysbox-materialized-rootfs")
-	if _, err := os.Stat(marker); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("stat rootfs materialization marker: %w", err)
+// removeSnapshotDirectory never traverses a merged rootfs that failed to unmount.
+func (o *snapshotter) removeSnapshotDirectory(dir string) error {
+	o.materializeLocks.Lock(dir)
+	defer o.materializeLocks.Unlock(dir)
+	return removeSnapshotDirectory(dir, mount.UnmountAll)
+}
+
+func removeSnapshotDirectory(dir string, unmount func(string, int) error) error {
+	if err := unmount(filepath.Join(dir, "merged"), 0); err != nil {
+		return fmt.Errorf("unmount snapshot before removal: %w", err)
 	}
-	merged := filepath.Join(o.root, "snapshots", snapshotID, "merged")
+	return os.RemoveAll(dir)
+}
+
+func (o *snapshotter) materializeActiveSnapshot(ctx context.Context, snapshotID string, mergedMount mount.Mount, upper, work string) (retErr error) {
+	dir := filepath.Join(o.root, "snapshots", snapshotID)
+	// Serialize Mounts retries and cleanup. Distinct snapshots may also use
+	// the same persistent upperdir, which needs its own lock.
+	o.materializeLocks.Lock(dir)
+	defer o.materializeLocks.Unlock(dir)
+	o.materializeLocks.Lock(upper)
+	defer o.materializeLocks.Unlock(upper)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	marker := filepath.Join(work, ".sysbox-materialized-rootfs")
+	if complete, err := materializedRootfsComplete(marker, upper); err != nil {
+		return err
+	} else if complete {
+		return nil
+	}
+	merged := filepath.Join(dir, "merged")
 	if err := os.MkdirAll(merged, 0o755); err != nil {
 		return fmt.Errorf("create temporary merged rootfs: %w", err)
+	}
+	// Resolve any previous failed unmount before mounting another view.
+	if err := mount.UnmountAll(merged, 0); err != nil {
+		return fmt.Errorf("unmount previous merged rootfs: %w", err)
 	}
 	if err := mergedMount.Mount(merged); err != nil {
 		return fmt.Errorf("mount temporary merged rootfs: %w", err)
 	}
+	mounted := true
 	defer func() {
-		if err := mount.UnmountAll(merged, 0); err != nil {
-			log.G(ctx).WithError(err).Warn("failed to unmount temporary merged rootfs")
+		if mounted {
+			if err := mount.UnmountAll(merged, 0); err != nil {
+				retErr = errors.Join(retErr, fmt.Errorf("unmount temporary merged rootfs: %w", err))
+			}
 		}
 	}()
-	if err := fs.CopyDir(upper, merged, fs.WithAllowXAttrErrors()); err != nil {
-		return fmt.Errorf("materialize active rootfs: %w", err)
+	// Copy away from the mounted upper: existing PVC files alias the source,
+	// and cancellation must not leave a partially overwritten durable layer.
+	staged, err := os.MkdirTemp(work, ".sysbox-rootfs-")
+	if err != nil {
+		return err
 	}
-	if err := os.WriteFile(marker, []byte("materialized\n"), 0o600); err != nil {
+	defer os.RemoveAll(staged)
+	if err := copyRootfs(ctx, staged, merged); err != nil {
+		return err
+	}
+	if err := mount.UnmountAll(merged, 0); err != nil {
+		return fmt.Errorf("unmount temporary merged rootfs: %w", err)
+	}
+	mounted = false
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return publishMaterializedRootfs(staged, upper, marker)
+}
+
+func rootfsInodeMarker(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("inode=%d\n", info.Sys().(*syscall.Stat_t).Ino), nil
+}
+
+func materializedRootfsComplete(marker, upper string) (bool, error) {
+	data, err := os.ReadFile(marker)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read rootfs materialization marker: %w", err)
+	}
+	if string(data) == "materialized\n" { // Existing releases used this marker.
+		return true, nil
+	}
+	expected, err := rootfsInodeMarker(upper)
+	return string(data) == expected, err
+}
+
+func publishMaterializedRootfs(staged, upper, marker string) error {
+	// Write the future upper inode before exchanging directories. A crash on
+	// either side of exchange is distinguishable without overlaying an already
+	// complete rootfs again (which would resurrect previously whiteouted files).
+	data, err := rootfsInodeMarker(staged)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(marker, []byte(data), 0o600); err != nil {
 		return fmt.Errorf("write rootfs materialization marker: %w", err)
+	}
+	// Both directories are on the upper filesystem. Unsupported filesystems
+	// fail without replacing the original upper; do not use a non-atomic fallback.
+	if err := unix.Renameat2(unix.AT_FDCWD, staged, unix.AT_FDCWD, upper, unix.RENAME_EXCHANGE); err != nil {
+		return fmt.Errorf("publish materialized rootfs: %w", err)
+	}
+	return nil
+}
+
+func copyRootfs(ctx context.Context, dst, src string) error {
+	// GNU cp preserves hardlinks, ownership, modes and xattrs. The long option
+	// rejects BusyBox cp rather than silently losing xattrs. CommandContext
+	// kills and waits for the single copy process on cancellation.
+	output, err := exec.CommandContext(ctx, "cp", "-a", "--preserve=all", "--", src+"/.", dst).CombinedOutput()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err != nil {
+		return fmt.Errorf("materialize active rootfs (GNU cp required): %w: %s", err, output)
 	}
 	return nil
 }

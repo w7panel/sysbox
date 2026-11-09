@@ -97,6 +97,18 @@ migrated instance may retain CRI filesystem state from the old bootstrap.
 
 ## GitHub release verification
 
+For the nested snapshotter timeout regression, also verify a fresh Sysbox image
+cache: import image content with `--no-unpack`, create a multilayer nginx Pod,
+and record time to Ready plus HTTP 200. Image extraction snapshots carrying
+`containerd.io/snapshot.ref` must not get materialization markers. On disposable
+snapshots, cancel Prepare during copying, verify the copy process and temporary
+mount disappear, then retry Mounts and remove the snapshot normally. On an idle
+test CKM, terminate only its snapshotter, retain the socket, and verify automatic
+agent recovery plus another successful workload creation. Check the empty-store
+RPC case as well as a populated store. See the 2026-11-09 console-145382 entry in
+`w7panel-doc/sysbox-in-sysbox/KNOWN-ISSUES.md` for results and GNU cp / atomic
+directory-exchange requirements. These source tests do not replace release tests.
+
 1. Push an immutable tag; wait for its GitHub Actions run to succeed.
 2. Download the tag's `w7panel-sysbox-*.tgz`, matching lite binary, and
    `SHA256SUMS` through the configured GitHub proxy if required.
