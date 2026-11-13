@@ -19,11 +19,6 @@ spec:
         - name: uninstall
           image: {{ printf "%s:%s" .Values.installer.image.repository (.Values.installer.image.tag | default (printf "v%s" .Chart.AppVersion)) | quote }}
           imagePullPolicy: {{ .Values.installer.image.pullPolicy }}
-          env:
-            - name: NODE_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: spec.nodeName
           command:
             - /bin/sh
             - -ec

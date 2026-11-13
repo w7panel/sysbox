@@ -14,9 +14,11 @@ metadata:
   labels:
     {{- include "w7panel-sysbox.labels" . | nindent 4 }}
 rules:
+{{- if eq (include "w7panel-sysbox.installMode" .) "host" }}
 - apiGroups: [""]
   resources: ["nodes"]
   verbs: ["get", "patch"]
+{{- end }}
 - apiGroups: [""]
   resources: ["pods"]
   verbs: ["list", "delete"]
