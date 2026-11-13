@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * Record v0.7.1-39 release validation in TEST.MD: verify nested node labels are no longer rewritten, node permissions and NODE_NAME injection are absent, and install/reinstall plus local-path nginx persistence and CRI stats pass on ckm-snapshot-1109.
   * Remove the unused nested-runtime node label reconciliation from the inner agent after RuntimeClass scheduling selectors were removed; drop the nested agent/uninstall NODE_NAME injection and keep node get/patch permissions only in host mode. Runtime health probes remain unchanged.
   * Verify v0.7.1-38 on 218 ckm-snapshot-1109: release checksums and installed lite binary match, nested RuntimeClass and nginx Pod have no node selector, install/reinstall and local-path persistence/CRI stats pass. Recover from image-download stalls by importing the digest-verified release image; retain test PVCs and scale the test deployment to zero.
   * Remove scheduling node selectors from both host and nested RuntimeClasses so workload scheduling no longer depends on the shared installation selector or the `sysbox.w7panel.io/nested-runtime: ready` label; prohibit these selectors in AGENTS.md and align the Chart documentation.
