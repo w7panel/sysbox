@@ -24,6 +24,10 @@ spec:
     spec:
       enableServiceLinks: false
       hostPID: true
+      # The agent is the parent of sysbox-mgr, sysbox-fs and sysbox-snapshotter.
+      # A long grace period only extends the window in which those daemons are
+      # unreachable during a rollout; it does not let them drain cleanly.
+      terminationGracePeriodSeconds: 10
       serviceAccountName: {{ include "w7panel-sysbox.serviceAccountName" . }}
       tolerations:
         - operator: Exists
