@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * Remove scheduling node selectors from both host and nested RuntimeClasses so workload scheduling no longer depends on the shared installation selector or the `sysbox.w7panel.io/nested-runtime: ready` label; prohibit these selectors in AGENTS.md and align the Chart documentation.
   * Verify the official v0.7.1-37 release on 218: host/nested auto detection, release image and binary checksums, full/lite local-path and Longhorn regression, nested cold-image startup, cancellation cleanup, snapshotter recovery and idempotent Helm upgrade passed. Record transient image digest/download and Pod-capacity issues separately from runtime results.
   * Lint both explicit host and nested Chart modes during release packaging; offline CI cannot resolve the default auto mode against a target cluster.
   * Default Chart installMode to auto (also for an empty value): detect CKM's child-agent DaemonSet via k3k-agent-pod=true and IS_CHILD=true, matching w7panel-ckm/createAgent and w7panel-server. Preserve explicit host/nested overrides and reject offline auto rendering rather than silently installing the host runtime in a child cluster. Verified connected rendering against the 218 host and its independent CKM.

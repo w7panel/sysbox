@@ -27,8 +27,7 @@ In host mode the chart creates both fixed RuntimeClasses: `sysbox-runc` and
 and admission webhook; the only difference is the OCI runtime binary. Nested
 mode creates only `sysbox-runc-lite`. The nested agent DaemonSet installs its
 binary and containerd handler from the installer image, then restarts K3s when
-the containerd template changes. The agent marks the node ready for lite Pods
-only after CRI and the snapshotter respond.
+the containerd template changes. RuntimeClasses in both host and nested modes have no scheduling node selector.
 
 ### Node Selector
 
@@ -41,8 +40,8 @@ nodeSelector:
 ```
 
 When set, the same label selector is applied to the installer DaemonSet, the
-admission Deployment, and the RuntimeClass scheduling node selector. Label the
-target nodes before using this option:
+admission Deployment, and the nested agent DaemonSet. Label the target nodes
+before using this option:
 
 ```bash
 kubectl label node <node-name> sysbox-runtime=running
@@ -52,7 +51,7 @@ To use a custom label, set `nodeSelector` to the desired key/value map.
 
 | Value | Default | Description |
 | --- | --- | --- |
-| `nodeSelector` | `{}` | Shared node selector for the installer DaemonSet and admission Deployment. In nested mode, the RuntimeClass additionally requires the agent's readiness label. |
+| `nodeSelector` | `{}` | Shared node selector for the installer DaemonSet and admission Deployment. RuntimeClasses in both modes have no node selector. |
 
 ### Images
 
