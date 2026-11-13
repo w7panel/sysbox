@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * Verify v0.7.1-38 on 218 ckm-snapshot-1109: release checksums and installed lite binary match, nested RuntimeClass and nginx Pod have no node selector, install/reinstall and local-path persistence/CRI stats pass. Recover from image-download stalls by importing the digest-verified release image; retain test PVCs and scale the test deployment to zero.
   * Remove scheduling node selectors from both host and nested RuntimeClasses so workload scheduling no longer depends on the shared installation selector or the `sysbox.w7panel.io/nested-runtime: ready` label; prohibit these selectors in AGENTS.md and align the Chart documentation.
   * Verify the official v0.7.1-37 release on 218: host/nested auto detection, release image and binary checksums, full/lite local-path and Longhorn regression, nested cold-image startup, cancellation cleanup, snapshotter recovery and idempotent Helm upgrade passed. Record transient image digest/download and Pod-capacity issues separately from runtime results.
   * Lint both explicit host and nested Chart modes during release packaging; offline CI cannot resolve the default auto mode against a target cluster.

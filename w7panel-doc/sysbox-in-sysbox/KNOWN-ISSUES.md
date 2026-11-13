@@ -4,6 +4,16 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-13：v0.7.1-38 子集群安装验收与镜像下载阻塞
+
+- 目标：218 `k3k-console-164315/ckm-snapshot-1109`；仅验收该子集群，未升级 L0。
+- 提交 `2c0ba60`、tag `v0.7.1-38`；GitHub Actions `43407336213` 全部成功后下载正式 Chart、lite 二进制及 SHA256SUMS，校验通过。
+- 首次升级时新 agent 镜像长时间未下载完成，旧 agent 退出后 snapshotter socket 连接拒绝。安装等待超时，临时回滚 revision 9；清除两个尚未启动且卡在 Terminating 的升级 Pod 后恢复 Ready。
+- 本机 GHCR blob 下载也复现连接重置（包含 IPv6 链路）；使用 IPv4 Range 分片下载、逐层 SHA256 校验后导入同一正式镜像，未修改镜像源配置。镜像 digest：`sha256:a03714f01dde30166bd52b6f973465d40666acd60255d84882bbaf221e667cb0`。此次结果不代表原有网络拉取路径已修复。
+- 重试正式安装和重复安装均通过（最终 Helm revision 13），agent/admission Ready，重复安装未重启 K3s Server。安装 lite SHA256 与 release 一致：`b5b3408eeb54a7fa9785a32ae66572a5a01f6bd0207617d75fdd9c2b12b6fffa`。
+- RuntimeClass `scheduling` 与新 nginx Pod `nodeSelector` 均为空；HTTP 返回 nginx 欢迎页。local-path 空 PVC 初始化、Pod 重建后的 webroot/rootfs 特殊目录标记、CRI writableLayer 与 kubelet stats/summary 均通过；本次未做 CSI 或 L0 回归。
+- 恢复后 agent/admission 检查日志无 panic、fatal、OOM、ENOMEM。`sysbox-release-38-check` 已缩容至 0，测试 Pod 已删除；保留 `sysbox-release-38-rootfs`、`sysbox-release-38-webroot` PVC。
+
 ## 当前实施范围（2026-09-24）
 
 步骤 3（L2 workload 的 `hostUsers:false`）暂不实施，也不作为本轮验收门槛。L1 CKM
