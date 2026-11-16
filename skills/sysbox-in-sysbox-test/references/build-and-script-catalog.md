@@ -24,11 +24,15 @@ before a tag release, but only the GitHub release chart/image/binary is the
 final release input.
 
 For an ordinary code iteration prefer cached test mode. Valid components are
-`runc`, `runc-lite`, `snapshotter`, `admission`, and `inner-script`; use
+`fs`, `runc`, `runc-lite`, `snapshotter`, `admission`, and `inner-script`; use
 `TEST_TARGETS=deploy`. The resulting deploy image contains the Chart inner
 agent's script and binaries. `dist/test-images.env` records the image tag;
 select that tag through the nested Chart's `installer.image` and
 `admission.image` values. CKM does not consume a bootstrap image.
+The `fs` component builds a static sysbox-fs binary and replaces only that binary
+in the deploy image. Installing it requires a host FS restart and recreation
+of affected full-runtime Pods; installing the nested Chart alone does not
+activate the changed host daemon.
 The `runc` component updates the outer host runtime in the deploy image;
 run the L0 FUSE check before removing CKM's device mount.
 

@@ -4,6 +4,25 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-16：TAPD 1016310/1016311 最终源码候选验收（218）
+
+- 最终 `BUILD_PROFILE=release` 本地构建完成，`dist/SHA256SUMS` 全部通过；镜像 `tapd-recovery-218-20261116` 仅导入 218 与所选 CKM 的 containerd，未推送或发布 tag。这是源码候选验收，不是正式发布验收。
+- 首次连续重启发现两个恢复问题：容器挂载命名空间的 `/tmp` 不可靠，子挂载 staging 失败；历史 checkpoint 中的 FUSE 设备号可被新会话复用，单所有者路由导致 FS 拒绝启动。已改用宿主私有挂载命名空间 staging、按故障命名空间选择多个候选。短命读取进程退出导致 helper 报错，现按 `ESRCH` 计为过期事件，不再误报为挂载恢复失败。
+- 最终 deb 中 FS SHA256 为 `c1062245327144c098cdc85848f0efece2e85ea981fd2bbbdba738ffe7218cb4`。安装并重启后，所选 `k3k-console-164315/ckm-snapshot-1109` 的 UID `f2c05c72-fe9e-4725-b6a4-f52fc8ee441c`、主容器 init PID `2085883` 不变；虚拟 `/proc/uptime`、`binfmt_misc` 和内层 K3s API 可用。FS listener FD store 为 66，恢复计数在 07:28–07:30 稳定为 attempts=119、successes=69、failures=0；四项宿主服务 active，重启以来无 error 级日志。
+- L0 full/lite local-path 与 full Longhorn CSI 先前已 FUNCTIONAL PASS。最终 Chart 在所选 CKM 升级后，agent/admission Ready，CRI 默认 `runc`、lite snapshotter `sysbox`，无内层 full handler。独立 L2 nginx 测试 FUNCTIONAL PASS：空 PVC 初始化、Pod 重建后 rootfs/普通 PVC/特殊目录持久化、CRI writable-layer 与 kubelet stats/summary 均通过。相同配置重复 Helm upgrade 后 K3s PID 116、starttime 1293 不变。
+- 临时 L0 与 L2 Deployment 均缩容为 0，PVC 保留。宿主最终替换前的 FS 备份在 `/var/lib/sysbox-test/tapd-recovery-20261116/sysbox-fs.before-final`；installer 后续重新部署可能覆盖该临时安装。
+- 对照两张工单原文，本次是核心路径验收，不代表所有文字要求均已落地。1016310 的分钟兜底只检查登记的外层挂载，内层命名空间由故障事件触发；恢复统计目前写入日志，尚无独立高频 EIO 告警或量化毫秒级恢复/资源开销证据。失败后透传宿主 `/proc` 会泄露宿主视图，因此未实现该降级。1016311 仅前置登记 cgroup/PID 命名空间等稳定身份；运行时按请求者实时解析视图，以保持内层隔离，尚未前置完整初始快照种子或透传/模拟名单，也未量化高密度吞吐收益。
+
+## 2026-11-16：sysbox-fs 缓存生命周期源码验收（218）
+
+- 使用 `BUILD_PROFILE=test TEST_COMPONENTS=fs`，以 `v0.7.1-37` 为基线构建 `docker.cnb.cool/i0358/zpk/sysbox-deploy-k3s:fs-cache-218-20261116`。新 FS SHA256：`98ce143faa62742369656725259bea3e364a19843309e56346ecccb6a79e7a01`；本地 race 测试通过。本次是源码测试，未验证正式发布产物或宣称集群性能提升。
+- 经授权备份、替换宿主 FS 并重启，保留所有 PVC。旧 FUSE 会话失效，逐个重建现存目标 Pod：24 项原始清单中 22 项新 UID 且 Ready；`w7-sitemanager-site-manager-nginx` 重建后仍有原有 upstream DNS 故障（基线已不 Ready、重启 1052 次）；`w7-traditiontool-qffdahvq` Deployment 在期间消失，来源未知，未擅自重建。
+- 5 个 CKM 新 Pod Ready，meminfo/loadavg/uptime 可读。选定 `k3k-console-164315/ckm-snapshot-1109` 在部署前已存在 `Socket not connected`，重建后恢复。部分旧 CKM Pod 因 `etcdpod.k3k.io/finalizer` 保留终止对象；恢复等待以旧进程已终止和替代 Pod Ready 为准，未移除 finalizer。`ckm-bkhnk` 的部分业务另有历史 root-ca 权限故障，抽样主容器停止于 11 月 10 日；未将其计为本次回归成功。
+- L0 `02` FUSE 设备检查，以及 full/local-path、lite/local-path、full/disk-default 三组 `03` 均 FUNCTIONAL PASS。选定 CKM 内两个 cgroup 分别设置 128/256 MiB，8 个并发 worker 完成 800 次 MemTotal 隔离断言及 5600 次附加 proc 读取；临时 cgroup 已删除。
+- 测试镜像通过导入 containerd 使用，未推送。nested Chart 默认 `Always` 曾导致 ImagePullBackOff；通过 Helm 将本次安装的 installer/admission pullPolicy 设置为 `IfNotPresent` 后恢复。内层安装、agent/admission Ready、native/lite handler、`05` rootfs/PVC 初始化和重建持久化、特殊目录 bind、CRI stats 均通过；重复相同 Helm 配置后 K3s PID/starttime 不变。其余 CKM 未升级 Chart；`ckm-wulpt` 原未安装 nested runtime，不宣称其通过 lite 验收。
+- 宿主 fs/mgr/snapshotter active，替换以来 error 级日志无记录；验收窗口内层 agent/admission 日志无 panic/fatal/OOM/ENOMEM。三组 L0 测试 Deployment 与 L2 `fs-cache-1116-nginx` 已缩容到 0，保留测试 PVC。
+- 宿主是临时二进制安装：installer DaemonSet 仍指向 v0.7.1-37，后续重装可能覆盖测试 FS。旧二进制保留于 `/var/lib/sysbox-test/fs-cache-20261116/sysbox-fs.before`；证据在 `.cache/sysbox/fs-cache-218-20261116/`。本次未实现 FUSE 会话跨 FS 重启自动恢复。
+
 ## 2026-11-13：v0.7.1-38 子集群安装验收与镜像下载阻塞
 
 - 目标：218 `k3k-console-164315/ckm-snapshot-1109`；仅验收该子集群，未升级 L0。
@@ -1598,6 +1617,25 @@ Terminating 状态且容量为 20Gi。新建同名 `ckm-test` 时，CKM controll
 `sysbox-runc-lite` 并注入 sidecar；无注解 CSI 初始化复制、rootfs 持久化和 special bind
 跨 Pod 重建均通过。
 ## console-145382 升级 v0.7.1-33（2026-11-09）
+
+### ckm-2lmw8：PHP Pod 缺少 rootfs sidecar（2026-11-09）
+
+面板集群 `k3k-console-164315/ckm-2lmw8` 内，Deployment
+`default/w7-tradphp-hoejrjpt` 为 0/1。旧 Pod 使用 `sysbox-runc-lite`，有
+`sysbox/rootfs-rw-layer` 注解，但只有 PHP 容器，没有 `sysbox-rootfs`；持续报
+`failed to create containerd task: sysbox sidecar oci spec unavailable`。内层
+已安装 v0.7.1-37，agent/admission Ready。用相同注解与 PVC 做服务端 dry-run，
+当前 webhook 能正确注入 sidecar；尚未确定旧 Pod 当初为何未被注入。
+
+仅删除失败的 PHP Pod，由原 ReplicaSet 重建，保留 `default-volume` PVC
+及原持久化路径。新 Pod 起初遇到一次 sidecar 尚未就绪的启动重试，随后
+2/2 Ready、Deployment 1/1 Available；PHP-FPM 日志为 ready to handle
+connections，容器内 TCP 9000 连接检查通过。
+
+另外，同组 `w7-traditiontool-hoejrjpt` 的 ReplicaSet 报 `RuntimeClass
+"sysbox-runc" not found`；nested 集群只提供 lite，此独立问题本次未修改。
+节点还出现过镜像文件系统占用 87% 的 ImageGC 告警，没有将其误判为本次
+PHP 启动失败的直接原因，也未执行数据或镜像清理。
 
 ### 218：v0.7.1-37 正式 Release 验收（2026-11-09）
 

@@ -8,7 +8,8 @@
 	branch = w7panel
 [submodule "sysbox-ipc"]
 	path = sysbox-ipc
-	url = https://github.com/nestybox/sysbox-ipc
+	url = https://github.com/w7panel/sysbox-ipc
+	branch = w7panel
 [submodule "sysbox-mgr"]
 	path = sysbox-mgr
 	url = https://github.com/w7panel/sysbox-mgr

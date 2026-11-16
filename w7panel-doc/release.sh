@@ -279,14 +279,15 @@ build_installer_image() {
 }
 
 build_test_components() {
-    [[ -n "${TEST_COMPONENTS}" ]] || die 'BUILD_PROFILE=test requires TEST_COMPONENTS (runc,runc-lite,snapshotter,admission,host-script,inner-script)'
+    [[ -n "${TEST_COMPONENTS}" ]] || die 'BUILD_PROFILE=test requires TEST_COMPONENTS (fs,runc,runc-lite,snapshotter,admission,host-script,inner-script)'
     [[ "${SYS_ARCH}" == "${HOST_SYS_ARCH}" ]] || die 'BUILD_PROFILE=test supports only the host architecture'
+    contains_csv "${TEST_COMPONENTS}" fs && make -C "${ROOT_DIR}" sysbox-fs-static TARGET_ARCH="${SYS_ARCH}"
     contains_csv "${TEST_COMPONENTS}" runc && make -C "${ROOT_DIR}" sysbox-runc TARGET_ARCH="${SYS_ARCH}"
     contains_csv "${TEST_COMPONENTS}" runc-lite && make -C "${ROOT_DIR}" sysbox-runc-lite TARGET_ARCH="${SYS_ARCH}"
     contains_csv "${TEST_COMPONENTS}" snapshotter && make -C "${ROOT_DIR}" sysbox-snapshotter TARGET_ARCH="${SYS_ARCH}"
     contains_csv "${TEST_COMPONENTS}" admission && make -C "${ROOT_DIR}" sysbox-admission TARGET_ARCH="${SYS_ARCH}"
     for component in ${TEST_COMPONENTS//,/ }; do
-        case "${component}" in runc|runc-lite|snapshotter|admission|host-script|inner-script) ;; *) die "unknown TEST_COMPONENT entry: ${component}" ;; esac
+        case "${component}" in fs|runc|runc-lite|snapshotter|admission|host-script|inner-script) ;; *) die "unknown TEST_COMPONENT entry: ${component}" ;; esac
     done
 }
 
@@ -294,6 +295,9 @@ patch_test_image() {
     local base="$1" output="$2" kind="$3" container
     [[ -n "${base}" && -n "${output}" ]] || die "BUILD_PROFILE=test requires ${kind} base and output images"
     container="$("${DOCKER}" create "${base}" /bin/true)"
+    if contains_csv "${TEST_COMPONENTS}" fs; then
+        "${DOCKER}" cp "${ROOT_DIR}/sysbox-fs/build/${SYS_ARCH}/sysbox-fs" "${container}:/opt/sysbox/bin/generic/sysbox-fs"
+    fi
     if contains_csv "${TEST_COMPONENTS}" runc; then
         "${DOCKER}" cp "${ROOT_DIR}/sysbox-runc/build/${SYS_ARCH}/sysbox-runc" "${container}:/opt/sysbox/bin/generic/sysbox-runc"
     fi
