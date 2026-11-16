@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * Verify the recovery-duration metric on 218 with a temporary static FS: 309 successful repairs had p50 176 ms, p95 268 ms and maximum 491 ms; the target CKM kept its identity and K3s readiness. Record the installed hash and rollback binary in KNOWN-ISSUES.md. The existing vmagent is unhealthy, so platform ingestion and release validation remain unverified.
   * Export cumulative FUSE recovery duration alongside attempt counts, so a scraper can calculate average repair latency; per-repair millisecond logs alone could not provide a time-series latency measure. Platform collection and alert rules remain pending.
   * Reuse the shared raw `/proc/cpuinfo` cache when CPU-count fallback is needed. The fallback previously reread the same host file on each request, even though CPU-info rendering already cached it; per-request cgroup limits still determine the visible CPU count.
   * Expose FUSE recovery attempts, outcomes, stale-FD events, and frequent-fault process counts through a local `/run/sysbox/recovery-metrics.sock` HTTP `/metrics` endpoint. Previously these counters were only in minute logs, so monitoring could not scrape recovery success and persistent old-FD alerts independently. Local race tests and a temporary 218 binary installation verified the socket, stable recovery counters, unchanged CKM identity, and working L1 `/proc`/K3s; platform scraping and release validation remain pending.
