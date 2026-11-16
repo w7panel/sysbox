@@ -6,7 +6,7 @@
 
 ## 2026-11-16：TAPD 1016310 源码补充及 218 复测
 
-- 后续源码新增本机 `/run/sysbox/recovery-metrics.sock` 的 HTTP `/metrics`：提供恢复尝试、成功、失败、不支持、旧 FD 故障事件及高频故障进程计数。Unix socket 仅在会话自愈模式启动，权限为 `0600`；`go test -race ./cmd/sysbox-fs ./recovery` 通过。此改动尚未构建或安装到 218，平台采集与告警规则仍未接入，不能视为生产监控验收。
+- 后续源码新增本机 `/run/sysbox/recovery-metrics.sock` 的 HTTP `/metrics`：提供恢复尝试、成功、失败、不支持、旧 FD 故障事件及高频故障进程计数。`go test -race ./handler/... ./fuse/... ./state/... ./recovery/... ./cmd/sysbox-fs` 通过。静态 FS SHA256 `38d1e0236779b117b9c251934915295535720d416a1f2779aae16ae0164f782b` 已在 218 临时安装：socket 权限 `0600`，指标可读取；目标 CKM UID 与两个容器 ID 未变，L1 `/proc/meminfo`、`/proc/uptime` 和内层 K3s Ready。11:40:10、11:41:10 两轮恢复计数均为 attempts=362、successes=309、failures=0、unsupported=27，FS/mgr/snapshotter active，重启后无 error 级日志。首轮扫描约需 55 秒且遍历了大量内层 mount namespace，不能据此声称零轮询或容器数量无关；旧 FD 故障事件仍会增长。平台采集和告警规则未接入，此次也不是正式镜像发布验收。
 - 218 再测发现新增的内层分钟巡检会对使用 shared propagation 的命名空间每分钟重试，持续产生 `FUSE recovery incomplete`；曾先回退测试 FS 止损。修复后仍保留恢复器的传播拒绝，但把此类命名空间标记为不支持并停止分钟重试。本地 race 测试通过；修复版静态 FS SHA256 为 `6d51c65df7034b1ade25632e05d7208fe70505fa9cb68cc4854dd4561ce0c17a`。218 宿主重启 FS 后 CKM UID、主容器 PID 未变，L2 nginx 重建后普通 PVC 和特殊目录标记、CRI writable-layer、kubelet stats/summary 均通过。09:39、09:40、09:41 的巡检计数分别为 attempts=385/386/386、failures=0/0/0、unsupported=27/27/27；不支持挂载仅首轮警告。本次是节点二进制临时安装，不是正式镜像或发布验收。L0 三组功能测试此前通过，收尾时三组 L0 和 L2 Deployment 缩容为 0，PVC 保留。
 
 - 分钟兜底现扫描已登记容器的 cgroup 子树，按 mount namespace 去重，对静默失效的内层挂载调用既有白名单修复器；同一命名空间成功检查后不再重复修复。反复访问旧 FUSE FD 的进程每分钟达到 5 个故障事件时单独警告，修复日志新增耗时毫秒字段。本节上一条记录了修复后的构建与 218 复测。
