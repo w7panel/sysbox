@@ -4,11 +4,11 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
-## 2026-11-16：TAPD 1016310 源码补充（未构建或部署）
+## 2026-11-16：TAPD 1016310 源码补充及 218 复测
 
 - 218 再测发现新增的内层分钟巡检会对使用 shared propagation 的命名空间每分钟重试，持续产生 `FUSE recovery incomplete`；曾先回退测试 FS 止损。修复后仍保留恢复器的传播拒绝，但把此类命名空间标记为不支持并停止分钟重试。本地 race 测试通过；修复版静态 FS SHA256 为 `6d51c65df7034b1ade25632e05d7208fe70505fa9cb68cc4854dd4561ce0c17a`。218 宿主重启 FS 后 CKM UID、主容器 PID 未变，L2 nginx 重建后普通 PVC 和特殊目录标记、CRI writable-layer、kubelet stats/summary 均通过。09:39、09:40、09:41 的巡检计数分别为 attempts=385/386/386、failures=0/0/0、unsupported=27/27/27；不支持挂载仅首轮警告。本次是节点二进制临时安装，不是正式镜像或发布验收。L0 三组功能测试此前通过，收尾时三组 L0 和 L2 Deployment 缩容为 0，PVC 保留。
 
-- 分钟兜底现扫描已登记容器的 cgroup 子树，按 mount namespace 去重，对静默失效的内层挂载调用既有白名单修复器；同一命名空间成功检查后不再重复修复。反复访问旧 FUSE FD 的进程达到每分钟 5 个限流后事件时记录独立警告，修复日志新增耗时毫秒字段。源码 race 测试通过；尚未构建、部署或验证集群行为。
+- 分钟兜底现扫描已登记容器的 cgroup 子树，按 mount namespace 去重，对静默失效的内层挂载调用既有白名单修复器；同一命名空间成功检查后不再重复修复。反复访问旧 FUSE FD 的进程每分钟达到 5 个故障事件时单独警告，修复日志新增耗时毫秒字段。本节上一条记录了修复后的构建与 218 复测。
 - 分钟扫描开销随登记容器和存量进程数增长，不能同时承诺“零轮询”和“容器数量无关”。失败后透传宿主 `/proc` 仍因隔离风险不实现。高密度性能、告警接入和毫秒级恢复需部署后量化；1016311 的完整初始快照种子及透传/模拟名单仍未实现。
 
 ## 2026-11-16：TAPD 1016310/1016311 最终源码候选验收（218）
@@ -18,7 +18,7 @@
 - 最终 deb 中 FS SHA256 为 `c1062245327144c098cdc85848f0efece2e85ea981fd2bbbdba738ffe7218cb4`。安装并重启后，所选 `k3k-console-164315/ckm-snapshot-1109` 的 UID `f2c05c72-fe9e-4725-b6a4-f52fc8ee441c`、主容器 init PID `2085883` 不变；虚拟 `/proc/uptime`、`binfmt_misc` 和内层 K3s API 可用。FS listener FD store 为 66，恢复计数在 07:28–07:30 稳定为 attempts=119、successes=69、failures=0；四项宿主服务 active，重启以来无 error 级日志。
 - L0 full/lite local-path 与 full Longhorn CSI 先前已 FUNCTIONAL PASS。最终 Chart 在所选 CKM 升级后，agent/admission Ready，CRI 默认 `runc`、lite snapshotter `sysbox`，无内层 full handler。独立 L2 nginx 测试 FUNCTIONAL PASS：空 PVC 初始化、Pod 重建后 rootfs/普通 PVC/特殊目录持久化、CRI writable-layer 与 kubelet stats/summary 均通过。相同配置重复 Helm upgrade 后 K3s PID 116、starttime 1293 不变。
 - 临时 L0 与 L2 Deployment 均缩容为 0，PVC 保留。宿主最终替换前的 FS 备份在 `/var/lib/sysbox-test/tapd-recovery-20261116/sysbox-fs.before-final`；installer 后续重新部署可能覆盖该临时安装。
-- 对照两张工单原文，本次是核心路径验收，不代表所有文字要求均已落地。1016310 的分钟兜底只检查登记的外层挂载，内层命名空间由故障事件触发；恢复统计目前写入日志，尚无独立高频 EIO 告警或量化毫秒级恢复/资源开销证据。失败后透传宿主 `/proc` 会泄露宿主视图，因此未实现该降级。1016311 仅前置登记 cgroup/PID 命名空间等稳定身份；运行时按请求者实时解析视图，以保持内层隔离，尚未前置完整初始快照种子或透传/模拟名单，也未量化高密度吞吐收益。
+- 对照两张工单原文，本次是核心路径验收，不代表所有文字要求均已落地。1016310 的分钟兜底后来已扩展到登记容器 cgroup 内的 mount namespace，但 shared propagation 挂载仍不支持安全替换；恢复统计写入日志，尚无独立监控指标或量化毫秒级恢复/资源开销证据。失败后透传宿主 `/proc` 会泄露宿主视图，因此未实现该降级。1016311 仅前置登记 cgroup/PID 命名空间等稳定身份；实际到达外层 FUSE 的请求按调用者解析视图，但当前 L2 lite 工作负载不提供按 Pod 的 `/proc` 视图隔离。完整初始快照种子、透传/模拟名单及高密度吞吐收益量化仍未完成。
 
 ## 2026-11-16：sysbox-fs 缓存生命周期源码验收（218）
 
