@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * Complete the local FUSE recovery latency metric as a Prometheus histogram with buckets and a completed-attempt count, so monitoring can calculate percentiles as well as the mean; the earlier sum-only metric could not yield p95.
   * Verify the recovery-duration metric on 218 with a temporary static FS: 309 successful repairs had p50 176 ms, p95 268 ms and maximum 491 ms; the target CKM kept its identity and K3s readiness. Record the installed hash and rollback binary in KNOWN-ISSUES.md. The existing vmagent is unhealthy, so platform ingestion and release validation remain unverified.
   * Export cumulative FUSE recovery duration alongside attempt counts, so a scraper can calculate average repair latency; per-repair millisecond logs alone could not provide a time-series latency measure. Platform collection and alert rules remain pending.
   * Reuse the shared raw `/proc/cpuinfo` cache when CPU-count fallback is needed. The fallback previously reread the same host file on each request, even though CPU-info rendering already cached it; per-request cgroup limits still determine the visible CPU count.
