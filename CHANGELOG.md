@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * Cache each `/proc/swaps` virtual view through the existing short-lived proc snapshot lifecycle. Its size and usage come from the requester's cgroup, so a global output cache would mix tenants; the per-view snapshot also keeps split reads consistent and releases with the FUSE owner.
   * Stop retrying nested mount namespaces whose Sysbox FUSE mounts use shared propagation during the minute recovery scan. The recovery helper still rejects unsafe replacement; the scan now records a one-time unsupported warning instead of increasing failure counts and logging the same error every minute.
   * Extend the minute recovery fallback to nested mount namespaces found only within each registered container's cgroup, and check each namespace once after successful repair or confirmation. Previously a silent nested namespace with no FUSE read error could remain disconnected indefinitely. Warn once per minute when the same process repeatedly reads a stale Sysbox FUSE mount, and log each mount repair's duration in milliseconds; these expose long-lived old descriptors and provide timing evidence without flooding logs.
   * Track the W7Panel `sysbox-ipc` fork on its `w7panel` branch so the recovery and resource-identity protocol changes remain fetchable through the main repository's submodule URL.
