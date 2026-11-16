@@ -3,6 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * Verify the recovery metrics textfile on 218: a non-root Node Exporter reads the atomic file and exposes the Sysbox series with zero textfile scrape errors, while the selected CKM remains Ready. The live exporter argument is a temporary DaemonSet patch; its durable Chart change is proposed separately, and the existing vmagent crash still prevents verified ingestion and alerts.
+  * Publish the existing FUSE recovery counters and latency histogram atomically to a per-node textfile every 15 seconds. `/run/sysbox` is root-only, so the node's non-root exporter could not read the protected metrics socket; the separate read-only textfile path enables platform collection without a TCP listener or sidecar.
   * Complete the local FUSE recovery latency metric as a Prometheus histogram with buckets and a completed-attempt count, so monitoring can calculate percentiles as well as the mean; the earlier sum-only metric could not yield p95.
   * Verify the recovery-duration metric on 218 with a temporary static FS: 309 successful repairs had p50 176 ms, p95 268 ms and maximum 491 ms; the target CKM kept its identity and K3s readiness. Record the installed hash and rollback binary in KNOWN-ISSUES.md. The existing vmagent is unhealthy, so platform ingestion and release validation remain unverified.
   * Export cumulative FUSE recovery duration alongside attempt counts, so a scraper can calculate average repair latency; per-repair millisecond logs alone could not provide a time-series latency measure. Platform collection and alert rules remain pending.
