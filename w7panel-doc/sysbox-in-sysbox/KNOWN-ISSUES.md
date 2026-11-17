@@ -292,9 +292,23 @@ USER_NOTIF 返回 ENOSYS，与现场证据吻合。这是源码可确认的错�
 捕获两次历史故障发生时的 Revents，不能声称已证明它们均由此路径触发。
 
 当前源码已改为对暂时性 `POLLERR` 重试，并记录导致 listener 关闭的实际
-`Revents`；本地 seccomp race 测试通过。此修复尚未在 218 安装或验证，原
-`loadopt-218-1016` 的失效 listener 也不会被已运行进程中的新代码修复；需在
-明确授权的测试窗口重建受影响 CKM 后，观察 listener 生命周期及删除流程。
+`Revents`；本地 seccomp race 测试通过。历史两次失效时未采到 `Revents`，
+仍不能断言该分支就是当时的触发点。
+
+2026-11-17 在 218/server1 复测：`loadopt-218-1016` 的旧 Server 仍有失效
+listener，内层新 Pod 的 tmpfs mount 与 cgroup `openat2` 均返回
+`Function not implemented`。从 GitHub Actions 成功的 `v0.7.1-41` 下载 deb、
+Chart、lite 二进制和元数据，SHA256SUMS 全部校验通过；仅将 deb 中的正式
+`sysbox-fs`（SHA256 `ba489e056fb1b76423112df60cb55fd7c815b651f09633a41265bc5c6969457e`）
+按快测方式安装到宿主。原二进制备份在
+`/var/lib/sysbox-test/fs-listener-03cfcf3-20261117/sysbox-fs.before`。
+重建指定 CKM Server Pod 后，上述原生 runc Pod 变为 Running 并正常删除；
+再次仅重启 FS，CKM Pod/容器身份不变，新的原生 runc Pod 再次成功创建和删除，
+虚拟 `/proc` 与 K3s `/readyz` 正常。宿主 FS/mgr/snapshotter active，恢复计数
+attempts=402、successes=330、failures=0、unsupported=27；VMSingle 查到
+server1 的 attempts=402。旧 CKM Pod 仍带 `etcdpod.k3k.io/finalizer` 等待
+K3k 清理，未强制移除。宿主 Chart 仍为 `0.7.1-37`，本次不是完整 Chart 安装验收，
+也未直接诱发或观测到瞬态 `POLLERR`。
 
 ### 2026-10-16：Longhorn 限速导致单节点 CKM 的 cluster-reset 超时
 
