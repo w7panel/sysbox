@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * Document that an L2 Pod without a child user namespace may still have its own cgroup and PID namespace. Its inherited Sysbox FUSE `/proc` reads must use the requester view; the 218 L1/L2 CPU and memory measurements rule out reusing a complete L1 output snapshot, while shared raw host inputs remain safe to cache.
   * Measure each minute FUSE recovery fallback's total scan time and deduplicated checkpoint-container count. Repair duration excluded cgroup and nested-namespace discovery, so it could not show scanning cost or compare cost at different container densities; the new metrics share the existing local socket and textfile exporters.
   * Seed a new loadavg view's `lastPID` from its own PID namespace before the first five-second sample. A newly accessed L2 view previously returned `0` on its first read; the seed avoids using the outer init's PID while preserving periodic EWMA updates.
   * Verify inherited L2 FUSE proc views on 218 with a disposable 100m CPU Pod: `/proc/cpuinfo` exposes one processor versus eight in L1, and `/proc/loadavg` uses a distinct PID namespace count and lastPID. `/proc/uptime` keeps the L1 system uptime while its idle column reflects the requester. This confirms that complete L1 registration snapshots cannot seed L2 output; the Pod was deleted.

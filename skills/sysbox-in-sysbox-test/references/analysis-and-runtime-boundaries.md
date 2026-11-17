@@ -26,6 +26,17 @@ unverified, and known limitation; a code path or Ready Pod alone is not a
 functional pass. Keep L0 host, L1 CKM/K3s, and L2 workload evidence separate.
 Do not access clusters, mutate branches, or push as part of a read-only review.
 
+## L2 proc views
+
+Current L2 `sysbox-runc-lite` Pods omit `hostUsers: false`, but this says only
+that they do not create a child user namespace. Their cgroup and PID namespace
+can still differ from L1. Some L2 `/proc` files inherit the L1 Sysbox FUSE
+mount and are rendered for the process making the request; do not reuse the
+complete L1 init output as an L2 snapshot. On 218, an L1 CKM read eight
+processors and 16 GiB of memory, while a 100m CPU / 128 MiB L2 Pod read one
+processor and 128 MiB. Globally cached host inputs such as raw CPU information
+may be shared, then filtered for each requester's live cgroup/PID view.
+
 ## Native runc versus lite
 
 Read [the native-runc probe](native-runc-probe.md) for the dated 218 result.
