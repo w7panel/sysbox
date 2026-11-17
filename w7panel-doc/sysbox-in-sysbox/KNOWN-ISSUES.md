@@ -4,6 +4,12 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-17：1016311 `/proc/stat` 状态查找优化（218）
+
+- 原实现每次获取 `/proc/stat` 状态都持有全局锁遍历所有视图，逐个加锁检查五分钟过期，即使当前没有状态需要回收。现在每分钟最多清理一次；容器注销仍即时释放对应状态，输出和请求视图逻辑未变。1000 视图本地查找基准三轮为 11528/11490/11558 ns/op，改后为 13.26/13.25/13.25 ns/op（均 0 B/op）；这是状态表查找微基准，不代表 FUSE 吞吐。
+- `go test -race -count=1 ./handler/implementations ./handler ./fuse ./cmd/sysbox-fs` 通过。`BUILD_PROFILE=test TEST_COMPONENTS=fs TEST_TARGETS=deploy` 以 `tapd-fs-reaper-20261117` 为基线生成本地 `tapd-fs-procstat-20261117`，未推送。FS 二进制 SHA256 `85c44f410ba477627cdfddbad384241ec289a2938804b5bda54e394283e1b628` 已临时安装在 218/server1；旧版备份于 `/var/lib/sysbox-test/procstat-20261117/sysbox-fs.before`。
+- 替换前指定 L1 CKM 8 并发、每轮 1600 次 `/proc/stat` 只读三轮为 385/409/382 毫秒；替换后首轮恢复巡检 69 候选约 56409 毫秒、失败 0，下一轮 168 毫秒，稳态同负载为 409/388/381 毫秒。CKM Pod UID `f2c05c72-fe9e-4725-b6a4-f52fc8ee441c` 与 k3s-server 容器 ID `a02c0a5cc664a7acf21b167e246f0589750cf704fb05ae116f3f5092ed9dd787` 未变，K3s `/readyz` 为 `ok`，`/proc/stat` 有 8 行 CPU，FS/mgr/snapshotter active；FS 近十分钟无 panic/fatal/OOM/ENOMEM/waitid/error。临时调试 Pod 已删除，无 PVC。此次未证明端到端吞吐提升，也不是正式发布验收。
+
 ## 2026-11-17：FS reaper 与恢复 helper 竞争复测（218）
 
 - 当前提交的非发布本地完整 release 构建通过：deb、静态 lite 二进制、deploy 镜像和 Chart 均生成，`/tmp/sysbox-release-check-20261117/SHA256SUMS` 所列产物全部校验通过；镜像未推送，GitHub Release 未创建，因此不算正式发布工件或集群安装验收。当前源码的 `SYSBOX_RECOVERY_PRIVILEGED=1 go test -race -count=1 ./recovery -v` 也通过，包括 BPF 加载和独立 FUSE 挂载恢复测试。
