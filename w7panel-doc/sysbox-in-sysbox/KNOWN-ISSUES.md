@@ -291,6 +291,11 @@ errno，区分 poll 主动退出、FD 误关与其他释放来源。修复应针
 USER_NOTIF 返回 ENOSYS，与现场证据吻合。这是源码可确认的错误处理缺陷，但仍未
 捕获两次历史故障发生时的 Revents，不能声称已证明它们均由此路径触发。
 
+当前源码已改为对暂时性 `POLLERR` 重试，并记录导致 listener 关闭的实际
+`Revents`；本地 seccomp race 测试通过。此修复尚未在 218 安装或验证，原
+`loadopt-218-1016` 的失效 listener 也不会被已运行进程中的新代码修复；需在
+明确授权的测试窗口重建受影响 CKM 后，观察 listener 生命周期及删除流程。
+
 ### 2026-10-16：Longhorn 限速导致单节点 CKM 的 cluster-reset 超时
 
 在 218 新建 `k3k-console-117057/ckm-slowdisk-test`，其 K3s 数据位于独立的
