@@ -4,6 +4,13 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-17：FS reaper 与恢复 helper 竞争复测（218）
+
+- 同一组 24 个无 PVC 的 L0 `sysbox-runc`、`hostUsers:false` Pod 在 server1 做旧版→修复版→旧版 A/B，再恢复修复版。旧版两段首次扫描约 73.8/72.1 秒、稳态约 243/234 毫秒，并出现一次 `mount recovery helper: waitid: no child processes`；修复版首次约 71.6 秒、稳态 279/285 毫秒、恢复失败 0。不能据此声称吞吐提升。
+- 旧版故障同秒的 `reaper: reaped pid` 与全局 `Wait4(-1)` 抢走恢复 helper 子进程相符。源码现使 helper 从 `Start` 到 `Wait` 期间阻止 reaper 扫描。`go test -race ./nsenter ./recovery ./cmd/sysbox-fs` 和特权恢复测试通过。本地 `BUILD_PROFILE=test` FS 镜像 `tapd-fs-reaper-20261117` 的二进制 SHA256 为 `6c0e2c3580ae7e40b24c950d46711575ad6a317f7c69a0b0a3eb86c6b91cbf33`；临时安装后 114 候选首次扫描约 73.9 秒、稳态约 272 毫秒，失败 0，未再见 `waitid`。重启后的快速并发探针首次只有 3/24 成功，数秒后复测 24/24 首次成功；恢复有短暂窗口，不能称立即无感。
+- 全部临时 Pod 和 Deployment 已删除，无 PVC；最新监控候选数由 114 回到 66，恢复失败和队列丢弃均为 0。所选 `ckm-snapshot-1109` 仍 Ready。此次仅是源码候选验证，未证明高密度性能收益或正式发布验收。
+- 边界修正：L2 `sysbox-runc-lite` 不启动、不注册 FS/mgr，`/proc` 按已有挂载与运行时默认行为处理。继承 L1 FUSE 挂载时出现的读数差异只是现象，不作为 lite 的独立虚拟化需求或本次 FS 修复验收项；验收对象为宿主 FS 与使用完整运行时的 L1 CKM。
+
 ## 2026-11-16：TAPD 1016310 源码补充及 218 复测
 
 - 2026-11-17 checkpoint 候选滞留及修复：在 218/server1 创建 24 个临时 L0 `sysbox-runc`、`hostUsers:false` Pod，重启宿主 FS 后 24 个 Pod 的 UID/容器 ID 均未变，新打开的 FUSE `/proc` 可读，指定 CKM 保持 Ready。扫描候选由 66 增至 114，首轮含恢复耗时 72281 毫秒，后续两轮 192/247 毫秒，失败与队列丢弃为 0。删除全部临时 Pod 后，注销日志已出现，但连续两轮候选仍为 114；原因是启动时加载的 checkpoint owner map 从未随注销缩减。源码现按登记状态与原 PID start time 清理失效 owner，`go test -race ./cmd/sysbox-fs ./recovery/...` 通过。用本地测试镜像 `tapd-fs-prune-20261117` 的静态 FS SHA256 `f26024e4b9c4d3f31fc3d94a8f798051f925dc0d6a587395561fdba35f03e135` 临时安装到 server1，原版备份于 `/var/lib/sysbox-test/fs-prune-20261117/sysbox-fs.before`；另建 4 个完整运行时 Pod，重启 FS 使其进入 checkpoint 后候选数为 74，删除 4 Pod 并确认 8 个容器注销后下一轮降至 66，扫描耗时 198 毫秒、恢复失败 0。指定 CKM UID/主容器 ID 不变且 Ready，L1 `/proc/meminfo` 和 K3s `/readyz` 可读，FS/mgr/snapshotter active，FS 无 error 级日志。全部临时 Pod/Deployment 已删除，无 PVC；这是源码候选测试，不是正式发布验收。

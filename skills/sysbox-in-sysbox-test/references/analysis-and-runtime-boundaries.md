@@ -29,18 +29,18 @@ Do not access clusters, mutate branches, or push as part of a read-only review.
 ## L2 proc views
 
 `sysbox-runc-lite` neither launches nor registers with sysbox-fs or sysbox-mgr.
-The L2 `/proc` checks below exercise file mounts inherited from the L1 CKM,
-whose full `sysbox-runc` uses the host Sysbox daemons. These inherited reads
-are not lite runtime dependencies or evidence of inner FS/mgr instances.
+L2 `/proc` follows the existing mounts and default runtime behavior; it is not
+a separate Sysbox virtualization target. Some reads happen to reach FUSE mounts
+inherited from the full-runtime L1 CKM, but they do not create a lite FS/mgr
+dependency or a separate L2 acceptance requirement.
 
-Current L2 `sysbox-runc-lite` Pods omit `hostUsers: false`, but this says only
-that they do not create a child user namespace. Their cgroup and PID namespace
-can still differ from L1. Some L2 `/proc` files inherit the L1 Sysbox FUSE
-mount and are rendered for the process making the request; do not reuse the
-complete L1 init output as an L2 snapshot. On 218, an L1 CKM read eight
+Current L2 `sysbox-runc-lite` Pods omit `hostUsers: false`. Their cgroup and
+PID namespace can still differ from L1. The existing host FS request handling
+renders inherited FUSE reads for their caller; it must not replace that default
+behavior with a complete L1 init snapshot. On 218, an L1 CKM read eight
 processors and 16 GiB of memory, while a 100m CPU / 128 MiB L2 Pod read one
-processor and 128 MiB. Globally cached host inputs such as raw CPU information
-may be shared, then filtered for each requester's live cgroup/PID view.
+processor and 128 MiB. This is an observed inheritance effect, not a request
+to add L2-specific virtualized `/proc` handling.
 
 ## Native runc versus lite
 
