@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * Verify the nested `/proc/meminfo` boundary on 218: a disposable 128 MiB `sysbox-runc-lite` Pod inherited the outer Sysbox FUSE file mount and read its own 131072 kB limit, while the L1 server read 16 GiB. Correct the earlier blanket statement that L2 lacks a per-Pod proc view; this test proves request-scoped meminfo, not independent virtualization of every `/proc` file.
   * Verify recovery metrics ingestion on 218 after repairing vmagent's AppArmor self-SIGHUP denial: Node Exporter exposes the textfile, vmagent stays Running, and VMSingle returns the Sysbox recovery series. The monitoring Chart fix is pushed on `w7panel-metrics/sysbox-fs-recovery-metrics` but is not merged or released; alert evaluation and notification remain absent.
   * Verify the recovery metrics textfile on 218: a non-root Node Exporter reads the atomic file and exposes the Sysbox series with zero textfile scrape errors, while the selected CKM remains Ready. The live exporter argument is a temporary DaemonSet patch; its durable Chart change is proposed separately.
   * Publish the existing FUSE recovery counters and latency histogram atomically to a per-node textfile every 15 seconds. `/run/sysbox` is root-only, so the node's non-root exporter could not read the protected metrics socket; the separate read-only textfile path enables platform collection without a TCP listener or sidecar.
