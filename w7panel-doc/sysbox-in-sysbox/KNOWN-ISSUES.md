@@ -6,6 +6,7 @@
 
 ## 2026-11-17：FS reaper 与恢复 helper 竞争复测（218）
 
+- 当前提交的非发布本地完整 release 构建通过：deb、静态 lite 二进制、deploy 镜像和 Chart 均生成，`/tmp/sysbox-release-check-20261117/SHA256SUMS` 所列产物全部校验通过；镜像未推送，GitHub Release 未创建，因此不算正式发布工件或集群安装验收。当前源码的 `SYSBOX_RECOVERY_PRIVILEGED=1 go test -race -count=1 ./recovery -v` 也通过，包括 BPF 加载和独立 FUSE 挂载恢复测试。
 - 同一组 24 个无 PVC 的 L0 `sysbox-runc`、`hostUsers:false` Pod 在 server1 做旧版→修复版→旧版 A/B，再恢复修复版。旧版两段首次扫描约 73.8/72.1 秒、稳态约 243/234 毫秒，并出现一次 `mount recovery helper: waitid: no child processes`；修复版首次约 71.6 秒、稳态 279/285 毫秒、恢复失败 0。不能据此声称吞吐提升。
 - 旧版故障同秒的 `reaper: reaped pid` 与全局 `Wait4(-1)` 抢走恢复 helper 子进程相符。源码现使 helper 从 `Start` 到 `Wait` 期间阻止 reaper 扫描。`go test -race ./nsenter ./recovery ./cmd/sysbox-fs` 和特权恢复测试通过。本地 `BUILD_PROFILE=test` FS 镜像 `tapd-fs-reaper-20261117` 的二进制 SHA256 为 `6c0e2c3580ae7e40b24c950d46711575ad6a317f7c69a0b0a3eb86c6b91cbf33`；临时安装后 114 候选首次扫描约 73.9 秒、稳态约 272 毫秒，失败 0，未再见 `waitid`。重启后的快速并发探针首次只有 3/24 成功，数秒后复测 24/24 首次成功；恢复有短暂窗口，不能称立即无感。
 - 全部临时 Pod 和 Deployment 已删除，无 PVC；最新监控候选数由 114 回到 66，恢复失败和队列丢弃均为 0。所选 `ckm-snapshot-1109` 仍 Ready。此次仅是源码候选验证，未证明高密度性能收益或正式发布验收。
