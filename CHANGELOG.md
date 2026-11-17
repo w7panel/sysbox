@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * Reuse the 30-second shared host-input cache for CPU online/present fallback reads. When a cgroup cpuset is unavailable, repeated resource-view requests previously reread `/sys/devices/system/cpu/online`; CPU limits and output remain derived per requester.
   * Clarify the nested runtime boundary: `sysbox-runc-lite` neither launches nor registers with FS/mgr; L2 `/proc` probes only exercise FUSE file mounts inherited from the L1 CKM. This keeps recovery and cache acceptance focused on the host FS and full-runtime L1 containers instead of treating lite as a separate FS/mgr integration.
   * Record the accepted recovery boundary: keep the minute fallback for silent FUSE failures, so recovery is not described as zero-polling. A same-cgroup, different-PID-namespace probe on 218 confirmed separate inherited FUSE loadavg views; this closes the missing live isolation check without treating it as a throughput benchmark. Formal alert delivery remains pending because 218 has no Alertmanager address.
   * Record that the validated Sysbox recovery monitoring Chart changes are now on `w7panel-metrics/dev-v1`; the packaged alert resources also pass the 218 API's server-side dry-run. The chart still needs a real Alertmanager URL, installation, and release acceptance before recovery alerts are operational; this distinguishes merged configuration from deployed monitoring.

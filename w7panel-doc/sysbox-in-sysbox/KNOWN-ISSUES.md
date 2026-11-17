@@ -6,6 +6,7 @@
 
 ## 2026-11-16：TAPD 1016310 源码补充及 218 复测
 
+- 2026-11-17 L0/L1 性能基线：218 server1 仍运行 FS SHA256 `26fe20423166df7d67c84708023982f3a5c47b1894dd674671ece123efa5f13c`，指定 `ckm-snapshot-1109` Ready，L1 Server 为 `sysbox-runc`、`hostUsers:false`。仅在该 L1 内运行 8 个并发读者、每人 100 次依次打开 meminfo/stat/uptime/loadavg/pressure/cpu（每轮共 4000 次打开），三轮耗时 643/661/631 毫秒，读取均成功；FS 恢复失败及队列丢弃计数均为 0。这是单 CKM、当前候选版本的短时读基线，不是高密度旧→新→旧 A/B，也不包含本轮新增的 CPU online/present 缓存改动；未切换正在承载业务的 FS 到不兼容的旧 checkpoint 版本。
 - 2026-11-17 同 cgroup 双 PID namespace 现场验证：在指定 CKM `ckm-snapshot-1109` 的 k3s-server 容器内，用一次性静态探针仅为子进程 `clone(CLONE_NEWPID)`，未改 cgroup 或 mount namespace。父、子读取 `/proc/self/cgroup` 均为 `0::/init.scope`；PID namespace 分别为 `pid:[4026534351]`、`pid:[4026534294]`。同一继承 FUSE `/proc/loadavg` 在父视图输出 `0/344 2940053`，子视图输出 `0/1 1`，证明同 cgroup 不会串用 PID namespace 采样器。临时探针已从 CKM `/tmp` 删除，外层读数仍正常。这是单次功能隔离证据，不是高密度性能 A/B。
 - 2026-11-17 工单验收口径确认：1016310 保留分钟级静默故障兜底巡检，因此不宣称“零轮询”；218 暂无正式 Alertmanager 地址，Chart 保持可选告警配置，正式通知链路待地址确定后验收。
 - 2026-11-17 监控 Chart 后续交付：`w7panel-metrics` 的 `sysbox-fs-recovery-metrics` 分支经快进合入并推送 `dev-v1`，当前提交 `df4b4af`。在合入后的工作区重跑 `helm lint`，默认渲染仅配置 Node Exporter textfile 采集，不创建 VMAlert/VMRule；设置 `sysboxRecoveryAlerts.notifierURL` 后渲染两条恢复告警及 vmalert AppArmor 注解，均通过。本地 1.0.38 Chart 包 SHA256 `16fea6ae67520037d27c4a5811817fd54c373ea6ea304359120ef4995c913d72`，包内告警资源通过 218 API 的 server-side dry-run。218 当前仍没有 Alertmanager 服务或正式 VMAlert/VMRule；尚未配置正式通知地址、安装新 Chart 或做发布工件验收，不能称正式告警上线。
