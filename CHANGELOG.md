@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * Verify the latest FS source candidate on 218: the target CKM kept its identity and K3s readiness after an FS restart, and a new 100m/128MiB L2 Pod read its own inherited FUSE proc view with a nonzero first-read loadavg lastPID. The new fallback metrics reached Node Exporter and VMSingle; 66 checkpointed candidates took about 55 seconds on the recovery-heavy first scan and under 200 ms on each of two subsequent scans. Temporary Pods were deleted. This local-image test does not establish an equal-load performance gain or release acceptance.
   * Document that an L2 Pod without a child user namespace may still have its own cgroup and PID namespace. Its inherited Sysbox FUSE `/proc` reads must use the requester view; the 218 L1/L2 CPU and memory measurements rule out reusing a complete L1 output snapshot, while shared raw host inputs remain safe to cache.
   * Measure each minute FUSE recovery fallback's total scan time and deduplicated checkpoint-container count. Repair duration excluded cgroup and nested-namespace discovery, so it could not show scanning cost or compare cost at different container densities; the new metrics share the existing local socket and textfile exporters.
   * Seed a new loadavg view's `lastPID` from its own PID namespace before the first five-second sample. A newly accessed L2 view previously returned `0` on its first read; the seed avoids using the outer init's PID while preserving periodic EWMA updates.
