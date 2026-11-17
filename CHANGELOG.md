@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * Seed a new loadavg view's `lastPID` from its own PID namespace before the first five-second sample. A newly accessed L2 view previously returned `0` on its first read; the seed avoids using the outer init's PID while preserving periodic EWMA updates.
   * Verify inherited L2 FUSE proc views on 218 with a disposable 100m CPU Pod: `/proc/cpuinfo` exposes one processor versus eight in L1, and `/proc/loadavg` uses a distinct PID namespace count and lastPID. `/proc/uptime` keeps the L1 system uptime while its idle column reflects the requester. This confirms that complete L1 registration snapshots cannot seed L2 output; the Pod was deleted.
   * Validate optional Sysbox recovery alerts on 218 with a temporary VMAlert, VMRule, and HTTP receiver: a synthetic rule reached `/api/v2/alerts` with HTTP 200. The monitoring Chart now configures VMAlert's AppArmor exception because rule reload otherwise triggers a denied self-SIGHUP and restart. The temporary resources were removed; a production Alertmanager URL and release validation are still pending.
   * Verify the nested `/proc/meminfo` boundary on 218: a disposable 128 MiB `sysbox-runc-lite` Pod inherited the outer Sysbox FUSE file mount and read its own 131072 kB limit, while the L1 server read 16 GiB. Correct the earlier blanket statement that L2 lacks a per-Pod proc view; this test proves request-scoped meminfo, not independent virtualization of every `/proc` file.
