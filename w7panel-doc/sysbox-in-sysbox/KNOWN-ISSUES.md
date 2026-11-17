@@ -4,6 +4,11 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-17：v0.7.1-41 正式 Chart 在 218 镜像拉取超时
+
+- GitHub Actions 发布的 deb、Chart、lite 和元数据通过 `SHA256SUMS` 校验；镜像元数据指定 `ghcr.io/w7panel/sysbox-deploy-k3s:v0.7.1-41`。在 218/server1 以该正式 Chart 和镜像升级宿主 Helm release，installer 与 admission Pod 持续停在 `ContainerCreating`，事件仅显示 `Pulling`；10 分钟后 Helm revision 32 因超时失败，未进入新版组件安装或功能验收。本机拉取同一镜像也有多个层反复重试，未取得完整镜像。不能将之前仅替换正式 FS 二进制的快测算作完整发布验收。
+- 已回滚失败的 Helm 升级；回滚期间另一次操作将 release 升至 Chart/镜像 `0.7.1-40`（revision 34），宿主 installer 重新安装并重建了节点上的 Sysbox Pod。最终 installer/admission Ready，FS/mgr/snapshotter active，FS 报告 `0.7.1-40`；六个 CKM 均恢复 Ready，指定 `loadopt-218-1016` 内层 K3s `/readyz` 返回 `ok`。本次未完成 `v0.7.1-41` 的正式发布验收；重试前需先解决 GHCR 镜像分发并核对现场 revision，避免覆盖并发变更。
+
 ## 2026-11-17：1016311 `/proc/stat` 状态查找优化（218）
 
 - 后续 P1 快照表清理优化：瞬时资源快照 TTL 仍为 100–200 ms，但全表过期清理改为最多每分钟一次；每次读取仍按原 TTL 判断命中，容器注销仍即时清理所属快照。1000 视图本地微基准原版三轮约 193/192/192 ns/op，修改后约 214/160/160 ns/op（108 B/op）；首轮有波动，仅为缓存路径微基准。`go test -race -count=1 ./...` 全包通过。以本地 `fs-procstat-check-20261117` 为基线生成未推送的 `fs-snapshot-prune-20261117` 测试镜像，静态 FS SHA256 `bd898397681c366afaee8fff7fda277fc9586590fce72092471d8548b47dc069` 临时安装在 218/server1，旧版备份于 `/var/lib/sysbox-test/fs-snapshot-prune-20261117/sysbox-fs.before`。6 轮分钟巡检后候选数 69、恢复失败 0；FS/mgr/snapshotter active，指定 CKM UID 与容器 ID 未变、Ready，L1 `/proc/stat` 和 `/proc/meminfo` 可读、K3s `/readyz` 为 `ok`，FS 近十分钟无 panic/fatal/OOM/ENOMEM/waitid/error。相同 L1 8 并发、每轮 1600 次 `/proc/stat` 读取三轮为 382/368/360 ms，不能证明高密度端到端收益。本次不是正式发布工件验收。
