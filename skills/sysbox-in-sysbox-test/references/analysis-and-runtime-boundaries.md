@@ -28,6 +28,11 @@ Do not access clusters, mutate branches, or push as part of a read-only review.
 
 ## L2 proc views
 
+`sysbox-runc-lite` neither launches nor registers with sysbox-fs or sysbox-mgr.
+The L2 `/proc` checks below exercise file mounts inherited from the L1 CKM,
+whose full `sysbox-runc` uses the host Sysbox daemons. These inherited reads
+are not lite runtime dependencies or evidence of inner FS/mgr instances.
+
 Current L2 `sysbox-runc-lite` Pods omit `hostUsers: false`, but this says only
 that they do not create a child user namespace. Their cgroup and PID namespace
 can still differ from L1. Some L2 `/proc` files inherit the L1 Sysbox FUSE
