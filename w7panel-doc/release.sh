@@ -303,6 +303,7 @@ patch_test_image() {
     fi
     if contains_csv "${TEST_COMPONENTS}" host-script; then
         "${DOCKER}" cp "${K8S_DIR}/scripts/sysbox-deploy-k8s.sh" "${container}:/opt/sysbox/scripts/sysbox-deploy-k8s.sh"
+        "${DOCKER}" cp "${K8S_DIR}/scripts/sysbox-installer.sh" "${container}:/opt/sysbox/scripts/sysbox-installer.sh"
     fi
     if contains_csv "${TEST_COMPONENTS}" runc-lite; then
         "${DOCKER}" cp "${ROOT_DIR}/sysbox-runc-lite/build/${SYS_ARCH}/sysbox-runc-lite" "${container}:/opt/sysbox/bin/generic/runc-lite"
@@ -316,6 +317,7 @@ patch_test_image() {
     if contains_csv "${TEST_COMPONENTS}" inner-script; then
         "${DOCKER}" cp "${K8S_DIR}/scripts/sysbox-inner-k3s.sh" "${container}:/opt/sysbox/scripts/sysbox-inner-k3s.sh"
         "${DOCKER}" cp "${K8S_DIR}/scripts/sysbox-inner-agent.sh" "${container}:/opt/sysbox/scripts/sysbox-inner-agent.sh"
+        "${DOCKER}" cp "${K8S_DIR}/scripts/sysbox-installer.sh" "${container}:/opt/sysbox/scripts/sysbox-installer.sh"
     fi
     "${DOCKER}" commit "${container}" "${output}" >/dev/null
     "${DOCKER}" rm "${container}" >/dev/null

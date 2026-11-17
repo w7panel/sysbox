@@ -19,6 +19,9 @@ spec:
         - name: uninstall
           image: {{ printf "%s:%s" .Values.installer.image.repository (.Values.installer.image.tag | default (printf "v%s" .Chart.AppVersion)) | quote }}
           imagePullPolicy: {{ .Values.installer.image.pullPolicy }}
+          env:
+            - name: SYSBOX_INSTALL_MODE
+              value: nested
           command:
             - /bin/sh
             - -ec
@@ -28,7 +31,7 @@ spec:
                 exit 1
               fi
               kubectl -n {{ include "w7panel-sysbox.namespace" . }} delete daemonset {{ include "w7panel-sysbox.fullname" . }}-inner-agent --ignore-not-found --wait=true
-              exec /opt/sysbox/scripts/sysbox-inner-agent.sh uninstall
+              exec /opt/sysbox/scripts/sysbox-installer.sh uninstall
           securityContext:
             privileged: true
           volumeMounts:
