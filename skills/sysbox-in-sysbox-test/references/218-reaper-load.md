@@ -160,3 +160,26 @@ CPU samples; its largest resolved addresses were Go runtime GC functions, and
 the available stacks do not identify an allocation change safe to make.
 FS, mgr, and snapshotter remained active, no recent error-level service log
 entries appeared, and all six CKMs and the target Server Pod remained Ready.
+
+## 2026-11-18 cgroup v2 parse allocation candidate
+
+The live request identity parser no longer allocates a cgroup v1 controller map
+for v2-only input. Its local benchmark changed from 4 allocations / 160 B /
+about 111 ns to 3 allocations / 112 B / about 93–109 ns per parse. FS full
+and race test suites passed. The FS-only test image
+`ccr.ccs.tencentyun.com/afan-public/sysbox:fs-cgroup-map-218-20261118`
+(digest `sha256:9e4f2519fb78809c1743306984594f9cca46a9baa0d43b0c0773fdd225ed37d7`)
+installed FS SHA256 `a0ef3189af7fad41ed86d79a69945e7a1c492e870b59cca5623f9e3f7ac4d352`
+at outer Helm revision 39. Six CKMs returned Ready, and the selected CKM
+completed two single-process 40,000-open `/proc` workloads without read errors.
+
+Before installation, v0.7.1-40 used 58.49 FS CPU seconds in 29 seconds with
+six CKMs and host load 15.83→13.49. The candidate used 103.62 CPU seconds in
+32 seconds and 101.70 in 38 seconds; host load was 26.62→21.48 and
+20.87→18.90. These runs do not show a server CPU gain, but the load mismatch
+and CKM replacement prevent attributing the difference to the parser change.
+After rollback to v0.7.1-40 (Helm revision 40), a seventh CKM appeared while
+the existing CKMs were being rebuilt, so another equal-population baseline
+could not be taken. All seven CKMs and the target Server Pod became Ready;
+FS, mgr, and snapshotter were active. This was a source-image test, not a
+tagged release verification.
