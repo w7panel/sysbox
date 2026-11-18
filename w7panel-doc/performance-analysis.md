@@ -1,5 +1,7 @@
 # Sysbox 性能问题分析报告
 
+> 历史性能分析，数值不代表当前版本收益；请以 [1016311 当前版](sysbox-in-sysbox/TAPD-1016311-CURRENT.md) 和对应实测记录为准。
+
 本文记录对 `sysbox`、`sysbox-fs`、`sysbox-mgr`、`sysbox-runc`、`sysbox-ipc` 和 `sysbox-libs` 的代码级性能审查结果，并补充测试集群上的验证数据。
 
 ## 背景

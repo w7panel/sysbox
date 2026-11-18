@@ -31,6 +31,10 @@ host-view isolation are outside this flow.
 3. For a release verification, download the exact tag's chart and lite binary,
    verify `SHA256SUMS`, and install that chart/image before calling a result a
    release result. A workspace-built image is only a preliminary result.
+4. Before an FS-only binary restart, inspect the installed `sysbox-fs.service`.
+   If it lacks `--session-recovery` or systemd's FD store, install the matching
+   Chart/unit and migrate affected Pods first. A newer binary alone cannot
+   recover FUSE sessions created under that legacy unit.
 
 Read [the test matrix](references/test-matrix.md) before running tests. It
 contains the commands and the required evidence for source and release modes.

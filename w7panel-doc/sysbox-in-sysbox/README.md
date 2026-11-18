@@ -39,6 +39,8 @@ L0 宿主 Kubernetes
 | [README.md](./README.md) | 当前唯一操作手册和脚本顺序 |
 | [SYSBOX-CHART-DEPLOYMENT.md](./SYSBOX-CHART-DEPLOYMENT.md) | w7panel-sysbox chart 部署 |
 | [KNOWN-ISSUES.md](./KNOWN-ISSUES.md) | 当前能力边界、未解决项和问题根因 |
+| [TAPD-1016310-CURRENT.md](./TAPD-1016310-CURRENT.md) | sysbox-fs FUSE 会话恢复当前方案与验收边界 |
+| [TAPD-1016311-CURRENT.md](./TAPD-1016311-CURRENT.md) | sysbox-fs 调度与缓存当前方案与验收边界 |
 | [HISTORY.md](./HISTORY.md) | 旧镜像、旧 CKM 和 L2/L3 实验时间线 |
 
 ## 当前部署模型

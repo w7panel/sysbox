@@ -1,5 +1,7 @@
 # /proc/loadavg 与 LXCFS 对齐说明
 
+> 历史分析文档，当前调度与缓存方案请以 [1016311 当前版](sysbox-in-sysbox/TAPD-1016311-CURRENT.md) 为准。
+
 本文记录 Sysbox-FS 对 `/proc/loadavg` 的实现差异、之前没有对齐 LXCFS 的原因，以及本次对齐时最关键的 PID 获取问题。
 
 ## LXCFS 的基准行为

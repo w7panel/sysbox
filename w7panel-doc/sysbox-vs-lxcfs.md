@@ -1,5 +1,7 @@
 # Sysbox-FS 与 LXCFS 资源视图实现差异
 
+> 历史对比文档，不作为当前实现或验收口径；请以 [1016311 当前版](sysbox-in-sysbox/TAPD-1016311-CURRENT.md) 为准。
+
 本文对比当前 Sysbox-FS 与 LXCFS 在 procfs/sysfs 资源视图上的实现差异，并说明当前没有完全按 LXCFS 对齐的原因。LXCFS 源码核对基准为 /root/workspace/lxcfs。
 
 对比范围：
