@@ -1,4 +1,5 @@
 nodeSelector: {}
+imagePullSecrets: []
 
 # auto detects CKM's child panel agent; explicit host/nested overrides detection.
 installMode: auto
