@@ -6,6 +6,8 @@
 
 ## 2026-11-18：v0.7.1-42-rc2 源码候选在 218 的完整安装
 
+- 后续 installer 源码增加升级前预检：若任一进程的 mount namespace 仍有 `fuse sysboxfs` 挂载，只有运行中 FS 启用 `--session-recovery` 且 systemd 保留非空 FD store 才允许替换；旧 FS 会在停服务前拒绝升级。当前 218 rc2 的 unit 有 `FileDescriptorStoreMax=65536`、`FileDescriptorStorePreserve=yes`，56 个挂载和 56 个存储 FD；在 installer Pod 内只读运行新预检已通过。本地 Bats 与完整 release 构建、产物校验通过。该保护尚未推送镜像或在 218 触发安装验证，也不等于无人值守首次迁移已实现。
+
 - CCR 镜像 `ccr.ccs.tencentyun.com/afan-public/sysbox:v0.7.1-42-rc2` 已推送（digest `sha256:3045528c91f4feaa937d1bfa26a7b64121235b68da8e210c0dcc18900a6bac53`）；本地完整构建的 `dist/SHA256SUMS` 全部通过。它没有 Git tag/GitHub Release，仍是源码候选。
 - 218/server1 首次升级因 `/run/sysbox/fs-restart.json` 中遗留 56 个容器的旧 checkpoint 而被新版 FS 安全拒绝。先回滚 v40 恢复服务，再备份该文件至 `/var/lib/sysbox-test/rc2-20261118/`，停旧服务并定向卸载 58 个旧 `sysboxfs` 挂载，随后安装 rc2；installer 重建旧会话 Pod。当前 Helm revision 43，FS/mgr/snapshotter active，19/19 个现存 full-runtime Pod 和六个 CKM Ready。此过程需要人工迁移，不能称无人值守首次升级通过。
 - 新会话下连续重启 FS 两次，所选 `loadopt-218-1016` 的 Pod UID `52904ddc-5b9a-4ca4-ade4-34ed84535e51`、主容器 ID `0a84194a990aba63dc874758905a728d874db921e84ef659d5cdb790f06f2bc5` 不变；虚拟 `/proc` 与内层 `/readyz` 可用，FD store 为 56。分钟巡检近期 `failures=0`、`unsupported=26`，稳态约 157–232 ms/轮；共享父挂载仍安全拒绝。重启后无 fatal/error/panic/OOM 日志。

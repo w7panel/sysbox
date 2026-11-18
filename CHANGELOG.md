@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * Block installer replacement of a running legacy sysbox-fs while any process mount namespace still contains a Sysbox FUSE mount. The previous upgrade path stopped the old daemon before recreating its Pods, disconnecting their virtual `/proc`; the check now runs before host changes and also requires the recovery flag and preserved, populated systemd FD store for live sessions. Empty nodes remain upgradeable, while disconnected mounts or a stopped daemon with a checkpoint require manual recovery.
   * Record the 218 rc2 source-candidate installation and restart results, including the manual migration needed for stale legacy FUSE checkpoints; this prevents the tested recovery path from being mistaken for an unattended first upgrade or a formal release pass.
   * Let the CKM Chart test script pass an existing image pull Secret when validating a private CCR image; otherwise the inner installer could not start despite the image and Chart being correct.
   * Allow installer and admission Pods to use an existing image pull Secret, so the private CCR release image can be installed without changing the cluster's default ServiceAccount.
