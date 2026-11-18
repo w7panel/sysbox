@@ -122,3 +122,25 @@ Host load varied between runs, so these samples do not prove a small change,
 but they show no measurable FS CPU reduction. The candidate passed L0/L1/L2
 functional checks and was then rolled back; the test CKM's nested release was
 also restored to its original v0.7.1-32 revision.
+
+## 2026-11-18 single-process CPU follow-up
+
+To separate virtual-file reads from 10,000 `cat` process launches, one `awk`
+process reopened and fully read the same four files 10,000 times (40,000 opens).
+The first v0.7.1-40 run used 108.68 FS CPU seconds in 31 seconds with seven
+Ready CKMs and host load average 20.24→23.36. After switching to the same
+source candidate as above, the run used 126.42 CPU seconds in 36 seconds with
+six CKMs and load 40.21→32.24. One CKM was deleted during the switch, so these
+two samples are not an equal-population A/B comparison. After restoring the
+outer Helm release to v0.7.1-40 (revision 38), two runs with six Ready CKMs
+used 83.37 and 67.53 CPU seconds in 27 seconds each; load was 31.03→24.60
+and 18.95→16.25 respectively. The old-version spread alone rules out a
+credible CPU gain or regression percentage from these runs.
+
+The first perf capture inherited child processes and was unsuitable for FS
+attribution. A second capture used `--no-inherit -e cycles:u` on the FS PID;
+its hottest resolved addresses were in Go runtime GC/locking functions. This
+does not isolate a cache-specific optimization target. After the comparison,
+FS, mgr, and snapshotter were active, recent error-level service logs were
+empty, and all six remaining CKMs were Ready. The removed CKM was not
+recreated by this test.

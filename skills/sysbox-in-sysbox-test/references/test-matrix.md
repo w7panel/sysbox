@@ -127,7 +127,9 @@ and a fixed number of `/proc` reads before and after installation. Record
 `CLK_TCK`), elapsed time, and host load average. Compare CPU seconds per fixed
 workload first; throughput and load average alone cannot establish a CPU saving.
 Wait for the installer to finish rebuilding Pods and for all CKMs to return
-Ready before taking the post-install sample.
+Ready before taking the post-install sample. Use one long-lived reader that
+reopens each file; a shell loop that starts `cat` on every iteration also
+measures process creation and seccomp activity.
 
 ## Releasing test resources
 
