@@ -18,6 +18,10 @@ if [ -z "$chart_file" ]; then
 fi
 [ -r "$chart_file" ] || die "nested chart is not readable: $chart_file"
 trap '[ -z "$package_dir" ] || rm -rf "$package_dir"' EXIT
+pull_secret_args=()
+if [ -n "${SYSBOX_IMAGE_PULL_SECRET:-}" ]; then
+  pull_secret_args=(--set-string "imagePullSecrets[0].name=${SYSBOX_IMAGE_PULL_SECRET}")
+fi
 l1_copy_file "$helm_binary" /tmp
 l1_copy_file "$chart_file" /tmp
 l1_exec chmod 0755 "/tmp/$(basename "$helm_binary")"
@@ -33,6 +37,7 @@ l1_exec "/tmp/$(basename "$helm_binary")" --kubeconfig /etc/rancher/k3s/k3s.yaml
   --set admission.image.repository="$SYSBOX_IMAGE_REPO" \
   --set-string admission.image.tag="$SYSBOX_IMAGE_TAG" \
   --set admission.image.digest="" \
+  "${pull_secret_args[@]}" \
   --set snapshotter.enabled=true --timeout 5m
 log 'waiting for the chart agent to restart inner K3s and load the runtime'
 ready=false

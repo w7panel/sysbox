@@ -4,6 +4,14 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-18：v0.7.1-42-rc2 源码候选在 218 的完整安装
+
+- CCR 镜像 `ccr.ccs.tencentyun.com/afan-public/sysbox:v0.7.1-42-rc2` 已推送（digest `sha256:3045528c91f4feaa937d1bfa26a7b64121235b68da8e210c0dcc18900a6bac53`）；本地完整构建的 `dist/SHA256SUMS` 全部通过。它没有 Git tag/GitHub Release，仍是源码候选。
+- 218/server1 首次升级因 `/run/sysbox/fs-restart.json` 中遗留 56 个容器的旧 checkpoint 而被新版 FS 安全拒绝。先回滚 v40 恢复服务，再备份该文件至 `/var/lib/sysbox-test/rc2-20261118/`，停旧服务并定向卸载 58 个旧 `sysboxfs` 挂载，随后安装 rc2；installer 重建旧会话 Pod。当前 Helm revision 43，FS/mgr/snapshotter active，19/19 个现存 full-runtime Pod 和六个 CKM Ready。此过程需要人工迁移，不能称无人值守首次升级通过。
+- 新会话下连续重启 FS 两次，所选 `loadopt-218-1016` 的 Pod UID `52904ddc-5b9a-4ca4-ade4-34ed84535e51`、主容器 ID `0a84194a990aba63dc874758905a728d874db921e84ef659d5cdb790f06f2bc5` 不变；虚拟 `/proc` 与内层 `/readyz` 可用，FD store 为 56。分钟巡检近期 `failures=0`、`unsupported=26`，稳态约 157–232 ms/轮；共享父挂载仍安全拒绝。重启后无 fatal/error/panic/OOM 日志。
+- `00`、`02`、三组 `03`（full/local-path、lite/local-path、full/Longhorn `disk-default`）、所选 CKM 的 `04`、`05` 均通过；重复 `04` 后内层 K3s PID/starttime 不变。测试 Deployment 已缩容到 0，PVC 保留；内层 `default` 的 CCR 拉取 Secret 仍供 Chart 使用。
+- 单进程各重新打开四个 `/proc` 文件首行 10,000 次，共 40,000 次，rc2 一轮用 33.53 FS CPU 秒、14.10 秒墙钟；此前旧版一轮约 36.58 CPU 秒。样本和负载条件不足，不能宣称稳定 CPU 收益。尚缺同负载旧→新→旧 A/B、正式 Release 资产验收，以及没有接收地址的 Alertmanager 通知链路。
+
 ## 2026-11-18：218 从 v0.7.1-40 直接替换 FS 二进制导致旧 FUSE 会话断连（已恢复）
 
 - 在 218/server1 的 Helm revision 40、当时七个 Ready CKM 上，以单进程固定 40,000 次 `/proc` 打开读取测得旧 FS 79.74 CPU 秒、耗时约 25.4 秒；测试窗口宿主 1 分钟负载由 11.58 升至 17.69。其中一个新 CKM 随后消失，实例数量并非始终稳定。这只是旧版基线，未取得新版可比数据。

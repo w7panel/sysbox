@@ -3,6 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * Record the 218 rc2 source-candidate installation and restart results, including the manual migration needed for stale legacy FUSE checkpoints; this prevents the tested recovery path from being mistaken for an unattended first upgrade or a formal release pass.
+  * Let the CKM Chart test script pass an existing image pull Secret when validating a private CCR image; otherwise the inner installer could not start despite the image and Chart being correct.
   * Allow installer and admission Pods to use an existing image pull Secret, so the private CCR release image can be installed without changing the cluster's default ServiceAccount.
   * Replace the obsolete TAPD 1016310/1016311 design descriptions with current project documents: record the minute FUSE fallback, first-upgrade unit migration, live requester-view cache boundaries, and unverified CPU/release status so historical targets are not mistaken for implemented behavior.
   * Add a preflight check to the project Sysbox-in-Sysbox test skill: FS-only restart tests must confirm the installed systemd unit enables session recovery and FD preservation. This prevents a binary-only first upgrade from disconnecting legacy FUSE mounts, as observed on 218.
