@@ -144,3 +144,19 @@ does not isolate a cache-specific optimization target. After the comparison,
 FS, mgr, and snapshotter were active, recent error-level service logs were
 empty, and all six remaining CKMs were Ready. The removed CKM was not
 recreated by this test.
+
+## 2026-11-18 per-file CPU follow-up
+
+With v0.7.1-40 restored and six Ready CKMs, one long-lived `awk` process
+reopened and fully read each file 10,000 times. Two passes in opposite file
+orders used these FS CPU seconds (elapsed seconds): `/proc/swaps` 25.42 (11)
+and 24.40 (9), `/proc/stat` 15.80 (7) and 18.96 (8), `/proc/meminfo` 10.49
+(6) and 11.38 (5), `/proc/uptime` 6.10 (4) and 9.23 (3). Host one-minute load
+stayed between 7.71 and 10.17; a separate 10-second idle window used 5.86 FS
+CPU seconds. The repeatable `/proc/swaps` ranking identifies the next path to
+investigate, but these totals include concurrent FS work and are not a handler
+CPU breakdown. An isolated, `--no-inherit` swaps perf sample had 1,371 user
+CPU samples; its largest resolved addresses were Go runtime GC functions, and
+the available stacks do not identify an allocation change safe to make.
+FS, mgr, and snapshotter remained active, no recent error-level service log
+entries appeared, and all six CKMs and the target Server Pod remained Ready.
