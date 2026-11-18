@@ -4,6 +4,13 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-18：v0.7.1-42 正式工件在 218 的功能验收
+
+- GitHub Actions 正式发布成功；下载的 Chart、lite 二进制和镜像元数据均通过 `SHA256SUMS`。正式镜像原 manifest digest `sha256:6c5eb66c84b550a3effc7178791510bf9aaba048cacbbd97c561fc1753c7bc89` 已原样推送至 `ccr.ccs.tencentyun.com/afan-public/sysbox-deploy-k3s:v0.7.1-42`。218 外层 Helm 升至 revision 44，installer 报告安装完成并重建旧会话 Pod；宿主 FS 版本为 `0.7.1-42`，FS/mgr/snapshotter 均 active，六个 CKM Ready。
+- 正式 Chart 的 `00`、`02`、三组 `03`（lite/local-path、full/local-path、full/Longhorn `disk-default`）及指定 CKM `loadopt-218-1016` 的 `04`、`05` 均通过。覆盖 `/dev/fuse`、无注解 PVC 初始化、Pod 重建后的 PVC 与特殊目录持久化、内层 lite handler、CRI writable-layer stats 和 kubelet `/stats/summary`。重复 `04` 后 L1 `k3s-server` 容器 ID 未变；该项没有记录进程 PID/starttime，不能据此单独证明 K3s 进程未重启。
+- 升级后宿主三个 Sysbox 服务无 error 级日志，也未检出 panic、fatal、OOM、ENOMEM。升级期间 admission 有短暂的 API lease 续约错误，发生在外层 K3s 重启窗口；最终 admission Ready。三个 L0 和一个 L2 测试 Deployment 已缩容到零，PVC 保留。
+- 本次证明正式版的上述功能路径，不证明所有工单验收项完成。仍缺固定 CKM/宿主负载的旧→新→旧 FS CPU 秒 A/B、真实内核高并发故障注入，以及正式 Alertmanager 通知链路；218 尚无告警接收地址。旧会话首次升级仍需人工迁移，安全预检只阻止断连式替换。
+
 ## 2026-11-18：v0.7.1-42-rc2 源码候选在 218 的完整安装
 
 - 后续 installer 源码增加升级前预检：若任一进程的 mount namespace 仍有 `fuse sysboxfs` 挂载，只有运行中 FS 启用 `--session-recovery` 且 systemd 保留非空 FD store 才允许替换；旧 FS 会在停服务前拒绝升级。当前 218 rc2 的 unit 有 `FileDescriptorStoreMax=65536`、`FileDescriptorStorePreserve=yes`，56 个挂载和 56 个存储 FD；在 installer Pod 内只读运行新预检已通过。本地 Bats 与完整 release 构建、产物校验通过。候选镜像 `ccr.ccs.tencentyun.com/afan-public/sysbox:upgrade-precheck-20261118` 已推送（digest `sha256:1c7f172bd4a31bc4c68d659a7e173717b8b57790eb4e33e8f5e12c3a2da6a669`）；该保护尚未在 218 触发安装验证，也不等于无人值守首次迁移已实现。
