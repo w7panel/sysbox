@@ -4,6 +4,13 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-18：218 从 v0.7.1-40 直接替换 FS 二进制导致旧 FUSE 会话断连（已恢复）
+
+- 在 218/server1 的 Helm revision 40、当时七个 Ready CKM 上，以单进程固定 40,000 次 `/proc` 打开读取测得旧 FS 79.74 CPU 秒、耗时约 25.4 秒；测试窗口宿主 1 分钟负载由 11.58 升至 17.69。其中一个新 CKM 随后消失，实例数量并非始终稳定。这只是旧版基线，未取得新版可比数据。
+- `BUILD_PROFILE=test TEST_COMPONENTS=fs TEST_TARGETS=deploy` 生成静态 FS SHA256 `1ebf3d2a1f4195ef41ac7640a18ef5be9bc9ad25889af720cdeaa43d42261744`；测试镜像 `ccr.ccs.tencentyun.com/afan-public/sysbox:fs-key-silent-218-20261118` 已推送（digest `sha256:6cc2bfa759c020302e22ecbc75584abdd43459ac41d7fb1a52c50baf1290329e`）。ZPK 仓库推送被 `unauthorized` 拒绝。只替换宿主 FS 二进制并重启后，现存完整 Sysbox 容器的虚拟 `/proc` 持续返回 `Socket not connected` / `Transport endpoint is not connected`，FS 日志反复报告 unknown container；内层 K3s `/readyz` 仍为 `ok`。此候选未进入 CPU A/B。
+- 根因是当前 218 的 v0.7.1-40 `sysbox-fs.service` 仍以 `/usr/bin/sysbox-fs` 启动，且没有 `FileDescriptorStoreMax` / `FileDescriptorStorePreserve`；源码新 unit 才启用 `--session-recovery` 和 FD store。首次跨此边界仅替换二进制无法恢复旧会话，必须先按完整安装流程更新 unit 并迁移旧 Pod，后续重启才可验证同 UID 恢复。
+- 已将宿主 FS 恢复到原 SHA256 `dbb9a209ad7d2966ae42fb5d4b79fd6bd4fb68461871b6a411be9bddda8ebbb0`（备份：`/var/lib/sysbox-test/fs-key-silent-20261118/sysbox-fs.before`），并逐个重建六个受影响 CKM Server 和十三个其他完整运行时 Deployment。最终 19 个现存 `sysbox-runc` Pod 的 `/proc/meminfo` 均可读，六个 CKM Ready；所选 CKM 内层 K3s `/readyz=ok`，FS/mgr/snapshotter active。此次验证失败，不能称源码候选、正式发布或 CPU 收益验收通过。
+
 ## 2026-11-18：218 默认 AppArmor profile 拒绝 nginx 热重载（已修复）
 
 `default/nginx-osucsvlk-dd6b7455-sqf4j` 使用默认 `runc`，执行 `nginx -s reload` 时 `kill(1, 1)` 返回 `EPERM`。宿主审计确认 `cri-containerd.apparmor.d` 拒绝向 `cri-containerd.apparmor.d//&unconfined` 发送 HUP；同版本 K3s containerd `v2.3.4-k3s1` 默认模板只允许未堆叠的同名 peer。此故障不经过 Sysbox RuntimeClass。
