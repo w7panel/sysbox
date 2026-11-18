@@ -9,6 +9,7 @@
 - GitHub Actions 正式发布成功；下载的 Chart、lite 二进制和镜像元数据均通过 `SHA256SUMS`。正式镜像原 manifest digest `sha256:6c5eb66c84b550a3effc7178791510bf9aaba048cacbbd97c561fc1753c7bc89` 已原样推送至 `ccr.ccs.tencentyun.com/afan-public/sysbox-deploy-k3s:v0.7.1-42`。218 外层 Helm 升至 revision 44，installer 报告安装完成并重建旧会话 Pod；宿主 FS 版本为 `0.7.1-42`，FS/mgr/snapshotter 均 active，六个 CKM Ready。
 - 正式 Chart 的 `00`、`02`、三组 `03`（lite/local-path、full/local-path、full/Longhorn `disk-default`）及指定 CKM `loadopt-218-1016` 的 `04`、`05` 均通过。覆盖 `/dev/fuse`、无注解 PVC 初始化、Pod 重建后的 PVC 与特殊目录持久化、内层 lite handler、CRI writable-layer stats 和 kubelet `/stats/summary`。重复 `04` 后 L1 `k3s-server` 容器 ID 未变；该项没有记录进程 PID/starttime，不能据此单独证明 K3s 进程未重启。
 - 升级后宿主三个 Sysbox 服务无 error 级日志，也未检出 panic、fatal、OOM、ENOMEM。升级期间 admission 有短暂的 API lease 续约错误，发生在外层 K3s 重启窗口；最终 admission Ready。三个 L0 和一个 L2 测试 Deployment 已缩容到零，PVC 保留。
+- 正式版 FS unit 以 `--session-recovery` 启动，`FileDescriptorStoreMax=65536`、`FileDescriptorStorePreserve=yes`，重启前存储 56 个 FD。单次宿主 FS 重启后 FD store 仍为 56，所选 CKM Pod UID `1c18f6cb-dea9-4b8a-b8ae-21754e1a4655` 和 k3s-server 容器 ID `e0b2fc269731c02fa024a6179c6531f497ebd4eeebd95e96bc05ea15cb809e54` 未变；虚拟 `/proc/meminfo`、内层 `/readyz` 可读，六个 CKM Ready。该轮恢复指标 successes=22、failures=0、dropped=0，FS 近五分钟无 error 级日志。
 - 本次证明正式版的上述功能路径，不证明所有工单验收项完成。仍缺固定 CKM/宿主负载的旧→新→旧 FS CPU 秒 A/B、真实内核高并发故障注入，以及正式 Alertmanager 通知链路；218 尚无告警接收地址。旧会话首次升级仍需人工迁移，安全预检只阻止断连式替换。
 
 ## 2026-11-18：v0.7.1-42-rc2 源码候选在 218 的完整安装
