@@ -14,4 +14,4 @@
 
 首次从旧版升级时，必须完整安装匹配的 Chart/systemd unit，确认 `--session-recovery`、`FileDescriptorStoreMax` 与 `FileDescriptorStorePreserve=yes` 生效，并迁移旧 Pod。旧 unit 创建的会话没有可接管的 checkpoint/listener；仅换新二进制重启会使存量虚拟 `/proc` 断连。后续重启验收须确认 Pod UID、容器身份不变，检查新 `open`、旧 FD 行为、分钟兜底、服务日志和恢复指标。
 
-源码有本机恢复指标 socket；正式 Alertmanager 接收地址尚未提供，通知链路未验收。218 在 2026-11-18 的二进制单换测试触发断连；随后完整安装 rc2 源码候选，先人工迁移陈旧 checkpoint 和旧挂载，由 installer 重建旧会话 Pod。新会话连续两次重启恢复通过，所选 CKM 身份不变；分钟巡检失败 0。首次升级仍缺无人值守迁移，rc2 也不是正式 Release 验收。详情见 [KNOWN-ISSUES.md](KNOWN-ISSUES.md) 和 [恢复实现说明](../../sysbox-fs/recovery/README.md)。
+源码有本机恢复指标 socket；正式 Alertmanager 接收地址尚未提供，通知链路未验收。218 在 2026-11-18 的二进制单换测试触发断连；随后完整安装 rc2 源码候选，先人工迁移陈旧 checkpoint 和旧挂载，由 installer 重建旧会话 Pod。新会话连续两次重启恢复通过。正式 `v0.7.1-42` Chart 和镜像随后安装在 218，L0/L2 功能回归通过；正式 FS 重启一次后，所选 CKM 的 Pod UID/容器 ID 不变，新打开的虚拟 `/proc` 可读，恢复失败 0。首次升级仍缺无人值守迁移，高并发故障注入与正式告警通知链路未验收。详情见 [KNOWN-ISSUES.md](KNOWN-ISSUES.md) 和 [恢复实现说明](../../sysbox-fs/recovery/README.md)。
