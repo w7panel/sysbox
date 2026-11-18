@@ -4,6 +4,12 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-18：218 默认 AppArmor profile 拒绝 nginx 热重载（已修复）
+
+`default/nginx-osucsvlk-dd6b7455-sqf4j` 使用默认 `runc`，执行 `nginx -s reload` 时 `kill(1, 1)` 返回 `EPERM`。宿主审计确认 `cri-containerd.apparmor.d` 拒绝向 `cri-containerd.apparmor.d//&unconfined` 发送 HUP；同版本 K3s containerd `v2.3.4-k3s1` 默认模板只允许未堆叠的同名 peer。此故障不经过 Sysbox RuntimeClass。
+
+218/server1 已基于该版本默认模板在 `/etc/apparmor.d/cri-containerd.apparmor.d` 增加 `signal (send,receive) peer=cri-containerd.apparmor.d//&unconfined,`，保留其余规则；原模板及修改稿备份于 `/var/lib/sysbox-test/apparmor-nginx-20261118/`。宿主 `apparmor_parser -QK` 校验及 `-r` 加载通过；原 Pod reload 成功、仍 Ready、重启 0，内核未再记录该次 nginx signal 拒绝。此规则适用于该宿主所有使用 containerd 默认 profile 的容器，其他节点未修改。
+
 ## 2026-11-17：v0.7.1-41 正式 Chart 在 218 镜像拉取超时
 
 - GitHub Actions 发布的 deb、Chart、lite 和元数据通过 `SHA256SUMS` 校验；镜像元数据指定 `ghcr.io/w7panel/sysbox-deploy-k3s:v0.7.1-41`。在 218/server1 以该正式 Chart 和镜像升级宿主 Helm release，installer 与 admission Pod 持续停在 `ContainerCreating`，事件仅显示 `Pulling`；10 分钟后 Helm revision 32 因超时失败，未进入新版组件安装或功能验收。本机拉取同一镜像也有多个层反复重试，未取得完整镜像。不能将之前仅替换正式 FS 二进制的快测算作完整发布验收。

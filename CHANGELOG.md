@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * On 218/server1, persist the containerd default AppArmor profile with an additional signal rule for its `cri-containerd.apparmor.d//&unconfined` stacked label. The default same-profile rule rejected nginx `SIGHUP` during `nginx -s reload`; the host parser accepted the updated profile, reload succeeded, and the Pod stayed Ready without a restart. The original template is retained under `/var/lib/sysbox-test/apparmor-nginx-20261118/` for rollback.
   * Remove per-container `sysbox/resource-cache-ttl` annotation handling and its registration/restart state; Sysbox-FS now uses only its resource defaults or daemon flag, avoiding a policy path that was not needed. FUSE recovery now rejects shared propagation on the target's parent mount, where a replacement can reach peers, instead of rejecting a shared target itself; isolated namespace tests cover both cases.
   * Document CPU seconds per fixed `/proc` workload as the primary cache-performance comparison, because request throughput and load average alone did not show whether the work saved Sysbox-FS CPU on 218.
   * Render host and nested installer DaemonSets from one Pod template and start both through the same installer entrypoint. The two previously separate templates and commands could drift; mode-specific host mounts, nested K3s mounts, readiness, and installation logic remain distinct where required.
