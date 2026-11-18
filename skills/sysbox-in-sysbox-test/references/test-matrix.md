@@ -119,6 +119,16 @@ directory-exchange requirements. These source tests do not replace release tests
 5. Re-run the L0 matrix and then the L2 matrix using the downloaded lite
    binary. Only then describe the tag as verified.
 
+## Performance comparison
+
+For scheduler or cache performance changes, compare the same CKM population
+and a fixed number of `/proc` reads before and after installation. Record
+`sysbox-fs` CPU seconds from `/proc/<pid>/stat` (`utime + stime`, divided by
+`CLK_TCK`), elapsed time, and host load average. Compare CPU seconds per fixed
+workload first; throughput and load average alone cannot establish a CPU saving.
+Wait for the installer to finish rebuilding Pods and for all CKMs to return
+Ready before taking the post-install sample.
+
 ## Releasing test resources
 
 The test names begin with `sysbox-l0-rootfs-` or `sysbox-full-`. After evidence

@@ -109,3 +109,16 @@ ratio, not a causal CPU or fleet-wide performance measurement.
 For another rollout, compare CPU, child creation, and path-specific requests
 over at least two five-minute bursts with equal CKM populations. Confirm
 `/sys/class/net` symlinks resolve and `threads-max` reads match the host.
+
+## 2026-11-18 CPU comparison
+
+With six Ready CKMs, one test CKM read `/proc/meminfo`, `/proc/stat`,
+`/proc/swaps`, and `/proc/uptime` 10,000 times. The installed v0.7.1-40 FS
+used 240.5 CPU seconds in 39 seconds. A source-built candidate image
+`ccr.ccs.tencentyun.com/afan-public/sysbox:ttlprop-218-20261118` used 247.7
+and 252.6 CPU seconds in two 44-second runs. After rolling the outer Chart
+back to v0.7.1-40, the same workload used 248.1 CPU seconds in 46 seconds.
+Host load varied between runs, so these samples do not prove a small change,
+but they show no measurable FS CPU reduction. The candidate passed L0/L1/L2
+functional checks and was then rolled back; the test CKM's nested release was
+also restored to its original v0.7.1-32 revision.
