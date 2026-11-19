@@ -6,7 +6,7 @@
 
 ## 2026-11-19：PID namespace 按需读取未取得稳定 FS CPU 收益
 
-- 在 218/server1 隔离 QEMU VM 中恢复 v47 Chart 后，同一 8 Pod、16 容器、16,000 次成功 `/proc` 读取的基线为 FS CPU 56.76 秒。实验候选仅让 `/proc/loadavg` 读取 PID namespace，其他资源文件仍逐请求读取 cgroup，保持请求视图隔离；相关 race 测试通过，候选二进制 SHA256 `8f0cb17d64edcd3c0a9b3e488a6489c9c2c2efd91fb0f810cd069af4896160b5`，镜像 digest `sha256:77c6ab0a204cbe7a4d400db8f9d0a8e55fd6e47172c3e680806db0424dbd39b7`。两轮同负载 CPU 为 55.16、56.60 秒，无法证明稳定收益；实验代码已撤回，不能算 1016311 CPU 目标完成。
+- 此前 PID namespace 按需读取实验使用 shell 内建 read 的逐字节压力方式；旧基线 56.76 秒、候选 55.16/56.60 秒不能代表常规缓冲读取的 CPU 收益。候选无稳定改进且已撤回；1016311 CPU 降耗仍待正确口径 A/B。
 - 隔离 VM 已恢复 v47 原 FS 和 Chart，测试 Deployment 缩容至零；FS/mgr/snapshotter 与聚合服务均 active，K3s 节点 Ready，近五分钟相关服务无 error 日志。此次仅为隔离 VM 源码实验，未改 218 宿主业务运行时。
 
 ## 2026-11-19：断连 FUSE 挂载注销失败阻断下一次恢复
@@ -21,10 +21,10 @@
 - 该轮同时出现一个 eBPF 故障事件，不能将其作为“完全没有读故障事件，仅靠分钟巡检恢复”的独立证明。测试时曾为写出 CPU profile 单独停止 FS，systemd 联动停掉 mgr/snapshotter；仅单独重启 FS 留下不完整的聚合服务状态，导致新 Pod 的 snapshotter socket 拒绝连接。已将该轮作废，并仅在隔离 VM 重启后确认完整 Sysbox 服务和节点恢复，再用聚合 `sysbox.service` 重启取得上述有效结果。
 - VM 恢复原 v47 后再次以一个双容器测试 Pod 正常重启聚合服务：重启后 attempts/successes/fault_events/scan_count 全为 0；首次分钟扫描记录 attempts=4、successes=3、failures=0、fault_events=1、scan_count=1。Pod UID `78d1ac91-fabf-4c49-8590-520a8e165453`、两容器 ID 和 restartCount=0 均未变，两容器重开 `/proc/meminfo` 均读到 65536 kB。测试 Pod 已缩容为零，四个服务 active，本轮服务 error 日志为空。再次出现一个故障事件，仍不能声称完全无事件的兜底已独立验收。
 
-## 2026-11-19：隔离 VM 的 FS CPU A/B 显示 v47 回退
+## 2026-11-19：旧逐字节 CPU 压力测法不能作为降耗验收
 
-- 218/server1 的独立 QEMU VM 中固定 8 个双容器 Pod。每个容器在同一 shell 中反复打开 meminfo/stat/uptime/loadavg 各 250 次，合计 16,000 次，失败样本作废。v40 升级前为 FS CPU 26.57 秒、墙钟 33.44 秒；v47 源码候选为 56.28/56.12 秒，复测为 59.18/58.80 秒；回退 v40 且 VM 重启后为 26.32/32.70 秒。各轮读取全部成功。v47 在该隔离负载下约多用 2.2 倍 FS CPU，1016311 的 CPU 目标未达成。
-- 同样 8 Pod/16 容器，各文件单独打开 250 次、每组 4,000 次成功读取：v40→v47 的 FS CPU 秒为 meminfo 7.63→16.46、stat 8.04→15.45、uptime 3.91→6.92、loadavg 5.80→11.90。回退不限于 loadavg。v47 每次请求实时解析 cgroup/PID namespace 是维持内层请求视图的必要边界；仍需针对具体成本做优化与重测，不能复用旧版外层 init 快照。隔离 VM 不代表 218 业务负载，也不是正式 Release 验收。
+- 旧脚本在 8 个双容器 Pod 中用 shell 内建 read 反复读取首行。strace 证实每个字符对应一次 read(…, 1)，文件行长和 FUSE 请求数严重影响结果。原 v40 26.57/26.32 秒、v47 56.28/59.18 秒的 16,000 次对照仅能说明该逐字节压力方式下 CPU 增加，不能证明常规缓冲读取退化 2.2 倍；旧 CPU 降耗验收结论作废。
+- 旧逐文件数值也受逐字节读取影响，尤其 swaps 的 44.74/44.36 秒是长表头放大的假热点。修正为单进程 open/read(8 KiB)/close 完整文件、每文件 4,000 次成功读取后，原 v47 的 swaps/meminfo/stat/loadavg/cpuinfo/uptime FS CPU 秒分别为 1.75/1.67/1.65/1.79/1.73/1.74；当前源码同源构建为 1.63/1.56/1.69/1.57/1.60/1.70。六项差异很小，不能认定 swaps 特别耗 CPU。v40 正确口径基线尚未补测，CPU 降耗目标仍未验收。
 - 再次从 v40 切到 v47 时，8 副本 Deployment 不断补建旧运行时 Pod，installer 因残留 FUSE 挂载多次拒绝替换旧 FS。仅在这台可丢弃 VM 将测试 Deployment 缩到零、重启 VM 清除旧 mount namespace 后，v47 unit 才装入 `--session-recovery`/FD store；重新扩到 8 副本后全部 Ready，取样后再次缩容到零。FS/mgr active，节点 Ready，最近十分钟 FS error 日志为空。此轮说明持续自补的高密度首次升级仍有迁移缺口；不能宣称原 Pod 无重启或无人值守迁移在此场景通过。当前隔离 VM 运行 v47 候选，218 宿主仍为此前验证的 v47 候选。
 
 ## 2026-11-19：v46 正式升级被旧 K3k Pod finalizer 阻塞
