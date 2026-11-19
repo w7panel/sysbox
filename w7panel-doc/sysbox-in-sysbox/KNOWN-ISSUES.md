@@ -30,6 +30,7 @@
 - 再次从 v40 切到 v47 时，8 副本 Deployment 不断补建旧运行时 Pod，installer 因残留 FUSE 挂载多次拒绝替换旧 FS。仅在这台可丢弃 VM 将测试 Deployment 缩到零、重启 VM 清除旧 mount namespace 后，v47 unit 才装入 `--session-recovery`/FD store；重新扩到 8 副本后全部 Ready，取样后再次缩容到零。FS/mgr active，节点 Ready，最近十分钟 FS error 日志为空。此轮说明持续自补的高密度首次升级仍有迁移缺口；不能宣称原 Pod 无重启或无人值守迁移在此场景通过。当前隔离 VM 运行 v47 候选，218 宿主仍为此前验证的 v47 候选。
 
 - 正确口径下，同源原实现六文件 CPU 总和两组为 9.75、9.42 秒，固定缓冲 cgroup 读取实验候选为 9.08 秒（每文件 4,000 次成功读取）。差异约 3–7% 且接近环境波动，远不足以抵消五文件回退；实验代码保持撤回。测试结束恢复原 v47，测试 Deployment 为 0，四项服务 active、节点 Ready。
+- 2026-11-19 在隔离 VM 对正确缓冲读取的 `/proc/meminfo` 补做函数级 `perf`：8 Pod/16 容器共 16,000 次完整成功读取；带 `perf` 时原剥离符号的 v47 FS CPU 为 12.14 秒，当前源码未剥离构建为 12.06 秒，无法据此认定 CPU 已降耗。当前源码的约 12K 个 cycles 样本中，约 23% 的累计调用链经过逐请求资源视图读取，约 54% 经过 FUSE Serve，`readMemInfo` 约 7%；这些累计比例重叠，不能相加。旧 `swaps` perf 文件早于缓冲读取脚本，不能用于当前热点判断。测试后已等 8 个 Pod 全部删除，VM 恢复原 v47 SHA256 `33479bb0a11ecb0a9471ef38273bb228dabaad7f43ab44d07cc3db4b59ba9d65`，FUSE 挂载为 0，四项服务 active。
 
 ## 2026-11-19：v46 正式升级被旧 K3k Pod finalizer 阻塞
 
