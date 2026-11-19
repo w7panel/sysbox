@@ -6,9 +6,11 @@
 
 ## 2026-11-19：隔离 VM 首次升级与 K3s CNI 模板
 
+- 正式 `v0.7.1-45` GitHub Actions 已成功，但其 CNI 模板补丁只使用 `bin_dir`；218/server1 运行 K3s v1.37.1/containerd 2.3.4，而该字段从 containerd 2.3 起移除。因此未将 v45 安装到 218，改为按节点 containerd 版本选择 2.0 的 `bin_dir` 或更新版本的 `bin_dirs`，等待下一正式标签验证。
 - 在 218/server1 的独立 QEMU VM（K3s v1.32.4、containerd 2.0.4）中，官方 v0.7.1-40 Chart/镜像的摘要校验通过。旧 unit 无会话恢复或 FD store；可丢弃的双容器 `sysbox-runc` Pod 使用虚拟 `/proc`。用完整 v45 源码候选升级时，installer 自动迁移旧 Pod，安装新 unit，重启 K3s，节点恢复 Ready，新 Pod 双容器均正常。这验证旧 unit 首次升级路径，但仅限隔离 VM 和源码候选。
 - v40 宿主 containerd 模板遗漏 CNI 路径；无临时修正时，重启后的节点会 NotReady。先在 VM 加入 `bin_dir`/`conf_dir` 临时 drop-in 建立旧版基线；随后移除该 drop-in，使用只更新宿主安装脚本的测试镜像 `ccr.ccs.tencentyun.com/afan-public/sysbox-deploy-k3s:cni-template-v45-test2-20261119`（digest `sha256:96a4e76f1320205cd0eb4ffb46c038ce4ceb8c33a0436d27020f9f308a291b0c`）重新执行更新。installer 为已有模板写入 K3s CNI 路径并实际重启 K3s；CRI 加载 `binDir=/var/lib/rancher/k3s/data/cni`、`confDir=/var/lib/rancher/k3s/agent/etc/cni/net.d`，节点 Ready，新建双容器 Pod 的虚拟 `/proc/meminfo` 均为 65536 kB。此轮尚非完整新工件发布验收。
 - 完整源码候选镜像 `ccr.ccs.tencentyun.com/afan-public/sysbox-deploy-k3s:legacy-upgrade-cni-rbac-v45-test-20261119`（digest `sha256:4c3d01176713818b71f395e54ecf43aab67dbbd8264a408ebae7a3665ac88a9d`）及 Chart、deb、lite 等产物通过 `SHA256SUMS`。VM Helm revision 5 安装该 Chart 后，installer ServiceAccount 的 `pods/watch` 权限为 yes；版本更新实际重启 K3s、重建双容器 Pod，最终升级完成，日志无 `forbidden`，宿主服务日志无相关异常，节点 Ready、CRI CNI 路径正确，两个容器的虚拟 `/proc/meminfo` 均为 65536 kB。临时 Deployment 已缩容到零，VM 保留以供后续隔离 A/B。此测试仍是源码候选，正式 GitHub 工件和 218 发布验收未完成。
+- 版本适配补丁的 `bin_dir`/`bin_dirs` 两个分支通过 Bats；只替换宿主脚本的候选镜像 `ccr.ccs.tencentyun.com/afan-public/sysbox-deploy-k3s:cni-version-v46-test-20261119`（digest `sha256:0d96c356b533c142a7bb4fce5a45c421547f1d1d6b3e677aa8dfd1680e3cc415`）在 VM 删除旧 CNI 节后重新生成 `bin_dir`，实际重启 K3s，CRI 加载正确目录、节点 Ready；新建双容器 Pod 两边的虚拟 `/proc/meminfo` 均为 65536 kB。测试 Pod 已再次缩容到零。containerd 2.3 分支尚待 218 正式工件安装验证。
 
 ## 2026-11-19：双容器故障并发下的 binfmt_misc 子挂载恢复
 
