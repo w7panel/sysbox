@@ -6,7 +6,8 @@
 
 ## 2026-11-19：PID namespace 按需读取未取得稳定 FS CPU 收益
 
-- 此前 PID namespace 按需读取实验使用 shell 内建 read 的逐字节压力方式；旧基线 56.76 秒、候选 55.16/56.60 秒不能代表常规缓冲读取的 CPU 收益。候选无稳定改进且已撤回；1016311 CPU 降耗仍待正确口径 A/B。
+- 2026-11-19 正确缓冲读取的分配 profile 定位到 `fuse.File.Read` 每次额外分配 8 KiB；16,000 次 `/proc/meminfo` 读取中该处分配约 217 MB，占测试窗口分配字节约 34%。Bazil 已预分配同尺寸响应缓冲，源码改为直接复用。相关包 race 测试通过；隔离 VM 8 Pod/16 容器、每轮 16,000 次成功读取的同源基线→候选→基线 FS CPU 秒数分别为 6.29/6.40→5.84/5.90→6.08/5.83，区间重叠，尚不能认定整进程 CPU 降耗。测试后恢复原 v47 FS SHA256 `33479bb0a11ecb0a9471ef38273bb228dabaad7f43ab44d07cc3db4b59ba9d65`；Deployment/Pod/FUSE 挂载/FD store 均为 0，Sysbox 服务 active、节点 Ready，近五分钟相关服务无 error 日志。
+- 此前 PID namespace 按需读取实验使用 shell 内建 read 的逐字节压力方式；旧基线 56.76 秒、候选 55.16/56.60 秒不能代表常规缓冲读取的 CPU 收益。候选无稳定改进且已撤回；1016311 整体 CPU 降耗仍未验收。
 - 隔离 VM 已恢复 v47 原 FS 和 Chart，测试 Deployment 缩容至零；FS/mgr/snapshotter 与聚合服务均 active，K3s 节点 Ready，近五分钟相关服务无 error 日志。此次仅为隔离 VM 源码实验，未改 218 宿主业务运行时。
 
 ## 2026-11-19：断连 FUSE 挂载注销失败阻断下一次恢复
