@@ -4,6 +4,11 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-19：PID namespace 按需读取未取得稳定 FS CPU 收益
+
+- 在 218/server1 隔离 QEMU VM 中恢复 v47 Chart 后，同一 8 Pod、16 容器、16,000 次成功 `/proc` 读取的基线为 FS CPU 56.76 秒。实验候选仅让 `/proc/loadavg` 读取 PID namespace，其他资源文件仍逐请求读取 cgroup，保持请求视图隔离；相关 race 测试通过，候选二进制 SHA256 `8f0cb17d64edcd3c0a9b3e488a6489c9c2c2efd91fb0f810cd069af4896160b5`，镜像 digest `sha256:77c6ab0a204cbe7a4d400db8f9d0a8e55fd6e47172c3e680806db0424dbd39b7`。两轮同负载 CPU 为 55.16、56.60 秒，无法证明稳定收益；实验代码已撤回，不能算 1016311 CPU 目标完成。
+- 隔离 VM 已恢复 v47 原 FS 和 Chart，测试 Deployment 缩容至零；FS/mgr/snapshotter 与聚合服务均 active，K3s 节点 Ready，近五分钟相关服务无 error 日志。此次仅为隔离 VM 源码实验，未改 218 宿主业务运行时。
+
 ## 2026-11-19：隔离 VM 分钟兜底巡检端到端补测
 
 - v47 源码候选、218/server1 的隔离 QEMU VM 中，仅保留一个双容器 `sysbox-runc` 测试 Pod，正常重启聚合 `sysbox.service`。重启后恢复指标为 attempts=0、successes=0、failures=0、fault_events=0、scan_count=0。下一轮分钟巡检在 08:35:24 扫描 3 个登记候选，记录 attempts=4、successes=3、failures=0、fault_events=1、scan_count=1；同一时间日志记录 3 个容器的 FUSE 挂载恢复。原测试 Pod UID `52147215-a233-4085-9c67-684af89b7251`、两个 container ID 均未变化，restartCount 均为 0，双容器重开 `/proc/meminfo`、`/proc/stat` 成功。同期 FS/mgr/snapshotter 无 error 日志；测试后 Deployment 缩容到零。
