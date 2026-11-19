@@ -4,6 +4,13 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-19：v0.7.1-44 正式工件在 218 的功能验收
+
+- GitHub Actions run `44446923969` 成功；下载的 Chart、lite 二进制和镜像元数据通过 `SHA256SUMS`。`ghcr.nju.edu.cn` 返回的正式镜像 manifest digest 为 `sha256:4e0b0521f7c474e39965e7cf0592c69a6151d642fb0b3a7f4a23cb4674c81bc0`；拉取后推送至 `ccr.ccs.tencentyun.com/afan-public/sysbox-deploy-k3s:v0.7.1-44`，CCR 回读 digest 相同。DaoCloud 镜像入口因白名单拒绝该仓库，直连 GHCR 拉取反复重试层下载。
+- 218 外层 Helm 升至 revision 45，installer 完成宿主 `0.7.1-44` 安装并重建旧会话 Pod。正式 Chart 的 `00`、`02`、三组 `03`（lite/local-path、full/local-path、full/Longhorn `disk-default`）及指定 `loadopt-218-1016` 的 `04`、`05` 均通过：无显式 Pod 挂载的 `/dev/fuse`、无注解空 PVC 初始化、Pod 重建后的 PVC 和特殊目录持久化、内层 lite handler、CRI writable-layer 与 kubelet `/stats/summary` 可用。重复 `04` 后 L1 K3s 进程 PID/starttime 仍为 `188/821`、`332/1113`，没有因相同配置重启。
+- 正式 FS 以 `--session-recovery` 运行，重启前 FD store 为 62。单次重启后所选 CKM Pod UID `f7b84666-214f-44b4-8a4f-f78cf8aaccf4` 和 k3s-server 容器 ID `566442903b6d5adcb91edc978a2ea0a48af865cebf06e2f5f01f9c0ac5bc784a` 未变；虚拟 `/proc/meminfo`、内层 `/readyz` 可读，六个 CKM Ready。FD store 为 63，恢复指标 attempts=22、successes=22、failures=0、unsupported=0、dropped=0；FS/mgr/snapshotter 近 15 分钟无 error 级日志。三组 L0 和一组 L2 测试 Deployment 均缩容到零，PVC 保留。
+- 此次验证了包含并发 eBPF 冷却键修复的正式版本安装及正常重启恢复；64 路故障并发和双设备批量修复的直接证据仍是隔离 mount namespace 的内核测试，不是 218 业务多容器故障注入。固定负载旧→新→旧 FS CPU 秒 A/B、旧 unit 首次升级的无人值守迁移、正式 Alertmanager 通知仍未完成；218 未提供告警接收地址。
+
 ## 2026-11-19：正式版分钟巡检持续运行与并发故障本机回归
 
 - 后续源码修复了 eBPF 冷却键首次故障和到期故障的并发重复上报竞态；本地私有 mount namespace 中两个独立断连 FUSE 设备的批量修复、64 路首次并发故障去重和到期后去重在真实内核下通过三轮 race 测试。同一测试二进制在 218/server1 的 privileged installer 容器中，临时创建的私有 mount namespace 挂载 tracefs 后又通过三轮；首次直接运行因容器缺 tracefs 而未加载 tracepoint。测试后临时二进制已删除，installer 未重启，FS/mgr/snapshotter active，六个 CKM Ready。此改动尚未构建正式发布工件或替换 218 正在运行的 FS，不能算正式版高密度故障验收。
