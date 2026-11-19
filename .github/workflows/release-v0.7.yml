@@ -23,6 +23,7 @@ env:
   UBUNTU_MIRROR: http://archive.ubuntu.com/ubuntu
   DOCKER_APT_MIRROR: https://download.docker.com/linux/ubuntu
   GOPROXY: https://proxy.golang.org,direct
+  GITHUB_PROXY: ""
   GITHUB_TOKEN: ${{ github.token }}
   GITHUB_REPOSITORY: ${{ github.repository }}
   TARGET_COMMITISH: ${{ github.sha }}

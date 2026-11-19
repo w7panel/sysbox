@@ -56,7 +56,7 @@ if [[ "${MIRROR_PROFILE}" == "china" ]]; then
     UBUNTU_MIRROR="${UBUNTU_MIRROR:-http://mirrors.aliyun.com/ubuntu}"
     DOCKER_APT_MIRROR="${DOCKER_APT_MIRROR:-https://mirrors.aliyun.com/docker-ce/linux/ubuntu}"
     GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
-    GITHUB_PROXY="${GITHUB_PROXY:-https://gh-proxy.org/}"
+    GITHUB_PROXY="${GITHUB_PROXY-https://gh-proxy.org/}"
 fi
 
 # China mirror alternative:
@@ -80,7 +80,7 @@ SYSBOX_RUNC_LITE_BINARY="${SYSBOX_RUNC_LITE_BINARY:-}"
 UBUNTU_MIRROR="${UBUNTU_MIRROR:-http://archive.ubuntu.com/ubuntu}"
 DOCKER_APT_MIRROR="${DOCKER_APT_MIRROR:-https://download.docker.com/linux/ubuntu}"
 GOPROXY="${GOPROXY:-https://proxy.golang.org,direct}"
-GITHUB_PROXY="${GITHUB_PROXY:-https://gh-proxy.org/}"
+GITHUB_PROXY="${GITHUB_PROXY-https://gh-proxy.org/}"
 
 DOCKER="${DOCKER:-docker}"
 GIT="${GIT:-git}"
@@ -357,7 +357,13 @@ push_images() {
     [[ "${PUSH_IMAGE}" == "true" ]] || return 0
 
     info "Push deploy image ${IMAGE}"
-    "${DOCKER}" push "${IMAGE}"
+    for attempt in 1 2 3; do
+        if "${DOCKER}" push "${IMAGE}"; then
+            return 0
+        fi
+        [[ "${attempt}" -lt 3 ]] || die "failed to push ${IMAGE} after 3 attempts"
+        sleep 5
+    done
 
 }
 
