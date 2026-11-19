@@ -4,6 +4,12 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-19：v46 正式升级被旧 K3k Pod finalizer 阻塞
+
+- GitHub Actions run `44468919805` 成功；v46 正式 Chart、lite、镜像元数据通过 `SHA256SUMS`，镜像从 `ghcr.nju.edu.cn` 拉取并按相同 manifest digest `sha256:46758bbfe6a0e3faf06cfa97933ea590642eda452cb277f24d4caf7e858e5bfd` 推至 CCR。218 Helm revision 46 安装后，FS 版本为 0.7.1-46，FS/mgr/snapshotter active，K3s 节点 Ready，六个 CKM 重建后均 Ready；containerd 2.3.4 的模板使用 `bin_dirs`。
+- installer 在 `kubectl delete` 的默认等待行为下卡在旧 `ckm-snapshot-1109` Pod 的 `etcdpod.k3k.io/finalizer`；旧 Pod 为 Failed/Terminating，新 CKM 已 Ready，但 installer 无法写入完成标记，节点标签仍为 `installing`。因此 revision 46 不能算完整发布验收。直接重启原 installer 导致重新安装和重复删 Pod，已停止这种处理。
+- 仅替换宿主脚本的同版本候选镜像 `ccr.ccs.tencentyun.com/afan-public/sysbox-deploy-k3s:finalizer-nowait-v46-hotfix-20261119`（digest `sha256:70157371c07a3ba67fabb6cf0fd990aa42bde0f3e5e78a79395a54510c44605a`）在 218 Helm revision 47 完成安装，节点标签恢复 `running`，FS/mgr/snapshotter active、FD store 为 56，六个 CKM 最终均 Ready。旧 Failed Pod 的 K3k finalizer 仍由控制器负责，未手动移除。源码将删除命令改为 `--wait=false` 并撤回不再需要的 Pod watch 权限；Bats 16 项及 Helm lint 通过。该修复尚待正式工件验证。
+
 ## 2026-11-19：隔离 VM 首次升级与 K3s CNI 模板
 
 - 正式 `v0.7.1-45` GitHub Actions 已成功，但其 CNI 模板补丁只使用 `bin_dir`；218/server1 运行 K3s v1.37.1/containerd 2.3.4，而该字段从 containerd 2.3 起移除。因此未将 v45 安装到 218，改为按节点 containerd 版本选择 2.0 的 `bin_dir` 或更新版本的 `bin_dirs`，等待下一正式标签验证。
