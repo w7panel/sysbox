@@ -19,7 +19,8 @@
 
 - v47 源码候选、218/server1 的隔离 QEMU VM 中，仅保留一个双容器 `sysbox-runc` 测试 Pod，正常重启聚合 `sysbox.service`。重启后恢复指标为 attempts=0、successes=0、failures=0、fault_events=0、scan_count=0。下一轮分钟巡检在 08:35:24 扫描 3 个登记候选，记录 attempts=4、successes=3、failures=0、fault_events=1、scan_count=1；同一时间日志记录 3 个容器的 FUSE 挂载恢复。原测试 Pod UID `52147215-a233-4085-9c67-684af89b7251`、两个 container ID 均未变化，restartCount 均为 0，双容器重开 `/proc/meminfo`、`/proc/stat` 成功。同期 FS/mgr/snapshotter 无 error 日志；测试后 Deployment 缩容到零。
 - 该轮同时出现一个 eBPF 故障事件，不能将其作为“完全没有读故障事件，仅靠分钟巡检恢复”的独立证明。测试时曾为写出 CPU profile 单独停止 FS，systemd 联动停掉 mgr/snapshotter；仅单独重启 FS 留下不完整的聚合服务状态，导致新 Pod 的 snapshotter socket 拒绝连接。已将该轮作废，并仅在隔离 VM 重启后确认完整 Sysbox 服务和节点恢复，再用聚合 `sysbox.service` 重启取得上述有效结果。
-- VM 恢复原 v47 后再次以一个双容器测试 Pod 正常重启聚合服务：重启后 attempts/successes/fault_events/scan_count 全为 0；首次分钟扫描记录 attempts=4、successes=3、failures=0、fault_events=1、scan_count=1。Pod UID `78d1ac91-fabf-4c49-8590-520a8e165453`、两容器 ID 和 restartCount=0 均未变，两容器重开 `/proc/meminfo` 均读到 65536 kB。测试 Pod 已缩容为零，四个服务 active，本轮服务 error 日志为空。再次出现一个故障事件，仍不能声称完全无事件的兜底已独立验收。
+- VM 恢复原 v47 后再次以一个双容器测试 Pod 正常重启聚合服务：重启后 attempts/successes/fault_events/scan_count 全为 0；首次分钟扫描记录 attempts=4、successes=3、failures=0、fault_events=1、scan_count=1。Pod UID `78d1ac91-fabf-4c49-8590-520a8e165453`、两容器 ID 和 restartCount=0 均未变，两容器重开 `/proc/meminfo` 均读到 65536 kB。测试 Pod 已缩容为零，四个服务 active，本轮服务 error 日志为空。该轮仍有一个故障事件，不能单独证明零事件兜底。
+- 2026-11-19 再在 218/server1 隔离 QEMU VM 的 v47 FS 上验证静默兜底。双容器 Pod UID 为 `b993ae3a-2ee5-4b26-941d-5c30680fea28`；正常重启首次巡检修复 3 个挂载，同时有 1 个事件。第二次重启后临时清空该 FS 进程的 eBPF `allowed` map，巡检在 `fault_events=0` 下记录 attempts=3、successes=3、failures=0、scan_candidates=3。Pod UID、两个 container ID 和 restartCount=0 均不变，两个容器可重开 `/proc/meminfo`、`/proc/stat`，内存均为 65536 kB。测试后 Deployment 缩至 0 并重启 Sysbox 恢复事件 map；挂载为 0，四项服务 active、K3s 节点 Ready，最近五分钟服务日志无 panic/fatal/OOM/ENOMEM/error。这仅证明受控 VM 的零事件巡检路径，未覆盖 218 业务高密度或正式工件。
 
 ## 2026-11-19：旧逐字节 CPU 压力测法不能作为降耗验收
 
