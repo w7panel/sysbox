@@ -4,6 +4,12 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-19：隔离 VM 的 FS CPU A/B 显示 v47 回退
+
+- 218/server1 的独立 QEMU VM 中固定 8 个双容器 Pod。每个容器在同一 shell 中反复打开 meminfo/stat/uptime/loadavg 各 250 次，合计 16,000 次，失败样本作废。v40 升级前为 FS CPU 26.57 秒、墙钟 33.44 秒；v47 源码候选为 56.28/56.12 秒，复测为 59.18/58.80 秒；回退 v40 且 VM 重启后为 26.32/32.70 秒。各轮读取全部成功。v47 在该隔离负载下约多用 2.2 倍 FS CPU，1016311 的 CPU 目标未达成。
+- 同样 8 Pod/16 容器，各文件单独打开 250 次、每组 4,000 次成功读取：v40→v47 的 FS CPU 秒为 meminfo 7.63→16.46、stat 8.04→15.45、uptime 3.91→6.92、loadavg 5.80→11.90。回退不限于 loadavg。v47 每次请求实时解析 cgroup/PID namespace 是维持内层请求视图的必要边界；仍需针对具体成本做优化与重测，不能复用旧版外层 init 快照。隔离 VM 不代表 218 业务负载，也不是正式 Release 验收。
+- 再次从 v40 切到 v47 时，8 副本 Deployment 不断补建旧运行时 Pod，installer 因残留 FUSE 挂载多次拒绝替换旧 FS。仅在这台可丢弃 VM 将测试 Deployment 缩到零、重启 VM 清除旧 mount namespace 后，v47 unit 才装入 `--session-recovery`/FD store；重新扩到 8 副本后全部 Ready，取样后再次缩容到零。FS/mgr active，节点 Ready，最近十分钟 FS error 日志为空。此轮说明持续自补的高密度首次升级仍有迁移缺口；不能宣称原 Pod 无重启或无人值守迁移在此场景通过。当前隔离 VM 运行 v47 候选，218 宿主仍为此前验证的 v47 候选。
+
 ## 2026-11-19：v46 正式升级被旧 K3k Pod finalizer 阻塞
 
 - GitHub Actions run `44468919805` 成功；v46 正式 Chart、lite、镜像元数据通过 `SHA256SUMS`，镜像从 `ghcr.nju.edu.cn` 拉取并按相同 manifest digest `sha256:46758bbfe6a0e3faf06cfa97933ea590642eda452cb277f24d4caf7e858e5bfd` 推至 CCR。218 Helm revision 46 安装后，FS 版本为 0.7.1-46，FS/mgr/snapshotter active，K3s 节点 Ready，六个 CKM 重建后均 Ready；containerd 2.3.4 的模板使用 `bin_dirs`。
