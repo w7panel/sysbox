@@ -4,6 +4,12 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-19：正式版分钟巡检持续运行与并发故障本机回归
+
+- 218/server1 的正式 `v0.7.1-42` FS 持续 active，FD store 为 56；分钟兜底指标已有 761 轮、当前候选 56，恢复 attempts=412、successes=340、failures=0、dropped=0。六个 CKM Ready，FS/mgr/snapshotter 近一小时无 error 级日志。这证明巡检在正式版运行，不等于静默故障已现场触发并修复。
+- 在隔离 mount namespace 的真实 FUSE/eBPF 特权测试中，将旧挂载断开后的顺序重复读取改为 64 个并发读取者，验证它们均失败且内核冷却期间不重复上报。该测试在 race 模式下连续三次通过；相关恢复器和事件队列 race 测试通过。这覆盖单一挂载的并发故障，尚不是 218 多容器高密度真实故障注入。
+- 现有 218 业务会话不适合直接回滚 v41 做旧→新→旧 CPU A/B：v41 会拒绝 v42 可修复的 shared/slave 目标挂载，回滚可能使这些视图断连。严格 A/B 仍需隔离、可丢弃的会话和相同负载，不能用现有单轮数据宣称 FS CPU 下降。
+
 ## 2026-11-18：v0.7.1-42 正式工件在 218 的功能验收
 
 - GitHub Actions 正式发布成功；下载的 Chart、lite 二进制和镜像元数据均通过 `SHA256SUMS`。正式镜像原 manifest digest `sha256:6c5eb66c84b550a3effc7178791510bf9aaba048cacbbd97c561fc1753c7bc89` 已原样推送至 `ccr.ccs.tencentyun.com/afan-public/sysbox-deploy-k3s:v0.7.1-42`。218 外层 Helm 升至 revision 44，installer 报告安装完成并重建旧会话 Pod；宿主 FS 版本为 `0.7.1-42`，FS/mgr/snapshotter 均 active，六个 CKM Ready。

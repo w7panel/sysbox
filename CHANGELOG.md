@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * Exercise 64 concurrent reads against a disconnected FUSE mount in the isolated privileged eBPF recovery test, replacing the sequential fault loop to cover a real same-mount fault burst. Three race-mode runs passed; record the formal v0.7.1-42 minute-scan health and why rolling back v41 on 218 business sessions is unsafe for CPU A/B.
   * Bring the current TAPD 1016310/1016311 project documents up to date after the published v0.7.1-42 218 functional and FS-restart checks; retain the explicit migration, CPU A/B, fault-injection, and notification gaps so readers do not treat historical candidate-only status as current.
   * Validate one published v0.7.1-42 host FS restart with preserved FD store on 218: the selected CKM retained its Pod and container IDs, virtual `/proc` and inner K3s stayed available, all six CKMs were Ready, and recovery reported 22 successes with zero failures. This checks the formal image's live-session recovery path after the unit migration.
   * Verify the published v0.7.1-42 Chart, lite binary, and CCR image on 218: the L0 RuntimeClasses, local-path and Longhorn PVC persistence, and selected CKM L2 lite workload passed after a full host upgrade. Record the remaining CPU A/B, fault-injection, and Alertmanager validation gaps so this functional release pass is not mistaken for complete TAPD acceptance.

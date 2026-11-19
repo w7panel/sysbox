@@ -12,9 +12,9 @@
 ## 不采用与未完成
 
 - 不采用容器 TTL 注解；不把所有 handler 改为统一 `procCache`/`RWMutex`，也不把 cpuinfo、swaps 等最终输出一概做全局长 TTL 缓存。缓存边界按原始数据和请求视图区分。
-- 未实现 runc 创建期完整 uptime/loadavg/cpuinfo 快照种子，也未新增 runc 下发的透传/模拟文件名单。短 TTL 种子可能首读前过期；外层 init 种子不能代表不同 cgroup/PID namespace 的请求者。现有 handler 注册和实时请求者解析仍负责分流。
+- 不采用旧稿中的 runc 创建期完整 uptime/loadavg/cpuinfo 最终输出种子及 runc 下发透传/模拟文件名单。短 TTL 种子可能首读前过期，外层 init 种子不能代表不同 cgroup/PID namespace 的请求者；名单会与现有 FS handler 分流重复，还需扩大跨组件协议。现有 handler 注册和实时请求者解析继续负责分流。
 - L2 `sysbox-runc-lite` 不启动、登记或依赖独立 sysbox-fs/mgr；其 `/proc` 走既有挂载与默认运行时行为，部分读取可碰到继承的 L1 FUSE 挂载，不增加 L2 专用虚拟化逻辑。
 
 ## 验收状态
 
-本地相关测试和 218 rc2 源码候选功能验证已通过；正式 `v0.7.1-42` Chart/镜像的 L0/L2 功能回归也通过。40,000 次 `/proc` 打开的单轮对比，旧版约 36.58 FS CPU 秒、rc2 约 33.53 秒；样本不足，且稳定背景负载、相同 CKM 数量下的旧版→新版→旧版 A/B 尚未完成，不能宣称 CPU 收益。性能结论以服务 CPU 秒数、宿主负载和恢复开销为主，不以吞吐量单项推断。详情见 [KNOWN-ISSUES.md](KNOWN-ISSUES.md)。
+本地相关测试和 218 rc2 源码候选功能验证已通过；正式 `v0.7.1-42` Chart/镜像的 L0/L2 功能回归也通过。40,000 次 `/proc` 打开的单轮对比，旧版约 36.58 FS CPU 秒、rc2 约 33.53 秒；样本不足，且稳定背景负载、相同 CKM 数量下的旧版→新版→旧版 A/B 尚未完成，不能宣称 CPU 收益。218 现有业务会话不能直接回滚 v41 做 A/B：旧版会拒绝新版可恢复的 shared/slave 目标挂载，回退有断连风险。性能结论以服务 CPU 秒数、宿主负载和恢复开销为主，不以吞吐量单项推断。详情见 [KNOWN-ISSUES.md](KNOWN-ISSUES.md)。
