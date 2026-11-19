@@ -4,6 +4,12 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-19：隔离 VM 首次升级与 K3s CNI 模板
+
+- 在 218/server1 的独立 QEMU VM（K3s v1.32.4、containerd 2.0.4）中，官方 v0.7.1-40 Chart/镜像的摘要校验通过。旧 unit 无会话恢复或 FD store；可丢弃的双容器 `sysbox-runc` Pod 使用虚拟 `/proc`。用完整 v45 源码候选升级时，installer 自动迁移旧 Pod，安装新 unit，重启 K3s，节点恢复 Ready，新 Pod 双容器均正常。这验证旧 unit 首次升级路径，但仅限隔离 VM 和源码候选。
+- v40 宿主 containerd 模板遗漏 CNI 路径；无临时修正时，重启后的节点会 NotReady。先在 VM 加入 `bin_dir`/`conf_dir` 临时 drop-in 建立旧版基线；随后移除该 drop-in，使用只更新宿主安装脚本的测试镜像 `ccr.ccs.tencentyun.com/afan-public/sysbox-deploy-k3s:cni-template-v45-test2-20261119`（digest `sha256:96a4e76f1320205cd0eb4ffb46c038ce4ceb8c33a0436d27020f9f308a291b0c`）重新执行更新。installer 为已有模板写入 K3s CNI 路径并实际重启 K3s；CRI 加载 `binDir=/var/lib/rancher/k3s/data/cni`、`confDir=/var/lib/rancher/k3s/agent/etc/cni/net.d`，节点 Ready，新建双容器 Pod 的虚拟 `/proc/meminfo` 均为 65536 kB。此轮尚非完整新工件发布验收。
+- 完整源码候选镜像 `ccr.ccs.tencentyun.com/afan-public/sysbox-deploy-k3s:legacy-upgrade-cni-rbac-v45-test-20261119`（digest `sha256:4c3d01176713818b71f395e54ecf43aab67dbbd8264a408ebae7a3665ac88a9d`）及 Chart、deb、lite 等产物通过 `SHA256SUMS`。VM Helm revision 5 安装该 Chart 后，installer ServiceAccount 的 `pods/watch` 权限为 yes；版本更新实际重启 K3s、重建双容器 Pod，最终升级完成，日志无 `forbidden`，宿主服务日志无相关异常，节点 Ready、CRI CNI 路径正确，两个容器的虚拟 `/proc/meminfo` 均为 65536 kB。临时 Deployment 已缩容到零，VM 保留以供后续隔离 A/B。此测试仍是源码候选，正式 GitHub 工件和 218 发布验收未完成。
+
 ## 2026-11-19：双容器故障并发下的 binfmt_misc 子挂载恢复
 
 - 218/server1 的正式 v0.7.1-44 FS 重启后，8 个临时双容器 Pod 的 64 路首次 `/proc/meminfo` 读取均先返回 `Transport endpoint is not connected`。这是 eBPF 在失败读取后异步触发修复的时序；但五个容器随后连续三轮恢复失败，日志为 `open staged child target /proc/sys/fs/binfmt_misc: no such file or directory`，失败计数达到 15。旧 FUSE 下的 binfmt_misc 子挂载必须保留，不能跳过；这些临时容器最终重启，故原轮验收失败。临时 Deployment 已删除。

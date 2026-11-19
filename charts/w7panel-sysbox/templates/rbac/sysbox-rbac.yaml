@@ -21,7 +21,7 @@ rules:
 {{- end }}
 - apiGroups: [""]
   resources: ["pods"]
-  verbs: ["get", "list", "delete"]
+  verbs: ["get", "list", "watch", "delete"]
 {{- if eq (include "w7panel-sysbox.installMode" .) "host" }}
 - apiGroups: [""]
   resources: ["replicationcontrollers"]
