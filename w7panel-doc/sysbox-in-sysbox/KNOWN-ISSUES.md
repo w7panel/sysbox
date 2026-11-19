@@ -13,7 +13,8 @@
 
 - 仅在 218/server1 的隔离 QEMU VM 中，对上一轮已恢复的测试容器 FUSE 连接执行 `abort`；该连接不属于当前恢复器的旧 checkpoint 设备，分钟扫描两轮后恢复计数未变，不能以此判定原工单的旧会话兜底失败。
 - 测试 Pod 缩容时，FS 对该容器宿主挂载执行 `fusermount3 -u` 返回 `Invalid argument`，日志报告挂载未能卸载。再次扩容一个双容器测试 Pod 后重启聚合 `sysbox.service`，FS 停止阶段又因同一旧挂载卸载失败退出，新进程检测到 `Clean=false` 的 checkpoint 后按安全策略拒绝启动。此轮无事件巡检验收因此未运行，不能算通过。
-- 已将测试 Deployment 缩容至零，仅重启隔离 VM 清除断连挂载和运行期 checkpoint；四个 Sysbox 服务均 active，K3s 节点 Ready。宿主业务 Pod 未受影响。源码候选在 `fusermount3 -u` 失败时对已断连挂载尝试延迟卸载，若目标已无挂载则清理目录。本机受影响包 race 测试通过；隔离 VM 中中止一个新建双容器 Pod 的 FUSE 连接后，Pod 注销完成、对应宿主挂载目录消失，聚合服务随后重启成功。VM 已恢复原 v47 二进制、四个服务 active、节点 Ready、测试 Deployment 为零。此结果尚未覆盖恢复后再次断连的路径，也不是正式工件验收；完全无 eBPF 事件的分钟巡检仍未独立证明。
+- 已将测试 Deployment 缩容至零，仅重启隔离 VM 清除断连挂载和运行期 checkpoint；四个 Sysbox 服务均 active，K3s 节点 Ready。宿主业务 Pod 未受影响。源码候选在 `fusermount3 -u` 失败时对已断连挂载尝试延迟卸载，若目标已无挂载则清理目录。本机受影响包 race 测试通过；隔离 VM 中中止一个新建双容器 Pod 的 FUSE 连接后，Pod 注销完成、对应宿主挂载目录消失，聚合服务随后重启成功。
+- 2026-11-19 从当前 `sysbox-fs` 源码构建 FS（SHA256 `bf58b43e9d0bf6d0230fdd705dba62b5d41a4d0b1652e24e9ec8716c8a6f16b7`），仅在隔离 VM 安装。一个双容器 Pod 在聚合服务重启后恢复 3 个挂载（successes=3、failures=0）；两个容器的 `/proc/meminfo` 可读。对容器 `a` 的已恢复新连接 `174` 执行 `abort`，测试 Pod 缩容注销后目标目录消失、FUSE 挂载为 0；聚合服务再次重启成功，FS/mgr/snapshotter/K3s active，节点 Ready，无卸载、脏 checkpoint、panic/fatal/OOM/ENOMEM/error 日志。相关包 race 测试通过。VM 已恢复原 v47 FS SHA256 `33479bb0a11ecb0a9471ef38273bb228dabaad7f43ab44d07cc3db4b59ba9d65`，测试 Deployment 为 0、FUSE 挂载为 0。该修复尚未进行正式工件验收。
 
 ## 2026-11-19：隔离 VM 分钟兜底巡检端到端补测
 
