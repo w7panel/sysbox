@@ -9,6 +9,12 @@
 - 在 218/server1 隔离 QEMU VM 中恢复 v47 Chart 后，同一 8 Pod、16 容器、16,000 次成功 `/proc` 读取的基线为 FS CPU 56.76 秒。实验候选仅让 `/proc/loadavg` 读取 PID namespace，其他资源文件仍逐请求读取 cgroup，保持请求视图隔离；相关 race 测试通过，候选二进制 SHA256 `8f0cb17d64edcd3c0a9b3e488a6489c9c2c2efd91fb0f810cd069af4896160b5`，镜像 digest `sha256:77c6ab0a204cbe7a4d400db8f9d0a8e55fd6e47172c3e680806db0424dbd39b7`。两轮同负载 CPU 为 55.16、56.60 秒，无法证明稳定收益；实验代码已撤回，不能算 1016311 CPU 目标完成。
 - 隔离 VM 已恢复 v47 原 FS 和 Chart，测试 Deployment 缩容至零；FS/mgr/snapshotter 与聚合服务均 active，K3s 节点 Ready，近五分钟相关服务无 error 日志。此次仅为隔离 VM 源码实验，未改 218 宿主业务运行时。
 
+## 2026-11-19：断连 FUSE 挂载注销失败阻断下一次恢复
+
+- 仅在 218/server1 的隔离 QEMU VM 中，对上一轮已恢复的测试容器 FUSE 连接执行 `abort`；该连接不属于当前恢复器的旧 checkpoint 设备，分钟扫描两轮后恢复计数未变，不能以此判定原工单的旧会话兜底失败。
+- 测试 Pod 缩容时，FS 对该容器宿主挂载执行 `fusermount3 -u` 返回 `Invalid argument`，日志报告挂载未能卸载。再次扩容一个双容器测试 Pod 后重启聚合 `sysbox.service`，FS 停止阶段又因同一旧挂载卸载失败退出，新进程检测到 `Clean=false` 的 checkpoint 后按安全策略拒绝启动。此轮无事件巡检验收因此未运行，不能算通过。
+- 已将测试 Deployment 缩容至零，仅重启隔离 VM 清除断连挂载和运行期 checkpoint；四个 Sysbox 服务均 active，K3s 节点 Ready。宿主业务 Pod 未受影响。源码候选在 `fusermount3 -u` 失败时对已断连挂载尝试延迟卸载，若目标已无挂载则清理目录。本机受影响包 race 测试通过；隔离 VM 中中止一个新建双容器 Pod 的 FUSE 连接后，Pod 注销完成、对应宿主挂载目录消失，聚合服务随后重启成功。VM 已恢复原 v47 二进制、四个服务 active、节点 Ready、测试 Deployment 为零。此结果尚未覆盖恢复后再次断连的路径，也不是正式工件验收；完全无 eBPF 事件的分钟巡检仍未独立证明。
+
 ## 2026-11-19：隔离 VM 分钟兜底巡检端到端补测
 
 - v47 源码候选、218/server1 的隔离 QEMU VM 中，仅保留一个双容器 `sysbox-runc` 测试 Pod，正常重启聚合 `sysbox.service`。重启后恢复指标为 attempts=0、successes=0、failures=0、fault_events=0、scan_count=0。下一轮分钟巡检在 08:35:24 扫描 3 个登记候选，记录 attempts=4、successes=3、failures=0、fault_events=1、scan_count=1；同一时间日志记录 3 个容器的 FUSE 挂载恢复。原测试 Pod UID `52147215-a233-4085-9c67-684af89b7251`、两个 container ID 均未变化，restartCount 均为 0，双容器重开 `/proc/meminfo`、`/proc/stat` 成功。同期 FS/mgr/snapshotter 无 error 日志；测试后 Deployment 缩容到零。
