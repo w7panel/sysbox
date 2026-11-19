@@ -4,6 +4,12 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-19：双容器故障并发下的 binfmt_misc 子挂载恢复
+
+- 218/server1 的正式 v0.7.1-44 FS 重启后，8 个临时双容器 Pod 的 64 路首次 `/proc/meminfo` 读取均先返回 `Transport endpoint is not connected`。这是 eBPF 在失败读取后异步触发修复的时序；但五个容器随后连续三轮恢复失败，日志为 `open staged child target /proc/sys/fs/binfmt_misc: no such file or directory`，失败计数达到 15。旧 FUSE 下的 binfmt_misc 子挂载必须保留，不能跳过；这些临时容器最终重启，故原轮验收失败。临时 Deployment 已删除。
+- 源码候选在 `ProcSysFs.Lookup` 中为 sysbox-mgr 固定挂载的 `binfmt_misc` 提供目录，保持恢复器原有的子挂载 ID、传播校验和原子替换。本地 handler/recovery 测试及私有 mount namespace 的特权 FUSE 测试通过。以正式 v44 镜像为底只替换 FS 二进制构建测试镜像 `ccr.ccs.tencentyun.com/afan-public/sysbox-deploy-k3s:fs-binfmt-recovery-v44b-20261119`（digest `sha256:24bfc7575b48859b213d69f52fe530e7603fab5febd1b6067c32bf9c2996cea6`）；在 218 备份原 FS SHA256 `c33c478136ead672e8a035f72e43c7a9b1d512ec8a3addf5f1a41043c15897fc` 至 `/var/lib/sysbox-test/binfmt-recovery-20261119/sysbox-fs.before`，安装候选 SHA256 `1332cdc9e27e544c85227747f023be53a27a6c1f1e10c40cd6c3a7cb06f23656`。
+- 候选下重建 8 个双容器 Pod，再重启 FS 并并发读取：16 个原容器的 UID、容器 ID 和重启次数均不变，后续各自的 `/proc/meminfo` 均读到 65536 kB，binfmt_misc 子挂载仍在。随后的分钟巡检指标为 attempts=449、successes=361、failures=0、unsupported=26；六个 CKM Ready，指定 `loadopt-218-1016` 的 Pod UID 和 k3s-server 容器 ID 未变，FS/mgr/snapshotter 均 active，未见 panic/fatal/OOM/ENOMEM 或恢复失败日志。8 个临时 Pod 已删除。此次是源码候选的 FS-only 验证，尚非正式发布工件验收。
+
 ## 2026-11-19：v0.7.1-44 正式工件在 218 的功能验收
 
 - GitHub Actions run `44446923969` 成功；下载的 Chart、lite 二进制和镜像元数据通过 `SHA256SUMS`。`ghcr.nju.edu.cn` 返回的正式镜像 manifest digest 为 `sha256:4e0b0521f7c474e39965e7cf0592c69a6151d642fb0b3a7f4a23cb4674c81bc0`；拉取后推送至 `ccr.ccs.tencentyun.com/afan-public/sysbox-deploy-k3s:v0.7.1-44`，CCR 回读 digest 相同。DaoCloud 镜像入口因白名单拒绝该仓库，直连 GHCR 拉取反复重试层下载。
