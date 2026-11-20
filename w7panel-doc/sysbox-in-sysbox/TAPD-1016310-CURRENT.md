@@ -22,4 +22,4 @@
 
 随后在同一隔离 VM 验证旧 FD：持有重启前打开的 `/proc/meminfo` FD，分钟巡检恢复 3/3 挂载后读取该 FD 返回 `Transport endpoint is not connected`（exit 1），同一探针重新打开该文件成功（`MemTotal: 65536 kB`，exit 0）。最初两轮使用 `sh -c 'sleep 3600'` 作为 PID 1，探针 `kubectl exec` 结束约一秒后容器 a 意外以 exit 0 重建；改为直接 `sleep 3600` 作为 PID 1 后，探针结束 15 秒时 Pod UID、两个容器 ID 和 restartCount 均不变。这支持先前重建与测试启动壳相关，具体信号机制未证实。最终一轮 FS 指标 attempts=5、successes=3、failures=0、old_fd_events=2、dropped=0，服务无 error 日志。已恢复原测试模板并缩容至 0，Pod/FUSE 挂载/FD store 均为 0，服务 active、节点 Ready；PVC 保留。
 
-2026-11-20 针对 64 路并发测试中偶发的 `binfmt_misc` 子挂载重接 `ENOENT`，源码候选将固定父目录 `/proc/sys/fs` 也直接解析，避免恢复助手为它启动 namespace 代理。隔离 VM 的 8 Pod/16 容器两轮 64 路断连首读，恢复均为 16 成功、0 失败，Pod UID、容器 ID、重启次数不变，`binfmt_misc` 子挂载仍在。首读仍可能在异步恢复前失败，不能称同步无错；候选测试后已回滚原 VM FS。正式发布工件和 218 业务高密度故障注入仍未验收。
+2026-11-20 针对 64 路并发测试中偶发的 `binfmt_misc` 子挂载重接 `ENOENT`，源码候选将固定父目录 `/proc/sys/fs` 也直接解析，避免恢复助手为它启动 namespace 代理。首个候选在隔离 VM 的两轮 64 路测试均恢复 16/16 容器、0 失败，但把父目录真实 `0555` 权限误设为 `0755`；修正版限定精确路径并保留 `0555`，同一 VM 再测两轮也均恢复 16/16、0 失败，Pod UID、容器 ID、重启次数不变。首读仍可能在异步恢复前失败，不能称同步无错；测试后已回滚原 VM FS。正式发布工件和 218 业务高密度故障注入仍未验收。

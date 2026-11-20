@@ -8,6 +8,7 @@
 
 - 源码候选使固定 `/proc/sys/fs` 父目录和已有的 `binfmt_misc` 挂载点都由 FS handler 直接解析，恢复助手拼接新 FUSE 树时不再为父目录启动 namespace 代理；子挂载保留、ID 校验及原子替换逻辑不变。`handler/implementations`、`recovery`、`fuse` 的 race 测试通过。
 - 218/server1 隔离 VM 安装仅替换 FS 的候选 SHA256 `007080fc6cb668516f2ce1f9532aa5c117033bde2689bc76deb73066d930b5cc`，8 个双容器测试 Pod 两次重启 FS 后各进行 64 路并发首读。两轮首读分别为 54/64、38/64 成功；异步恢复后 16/16 容器都能重新读取，Pod UID、容器 ID、restartCount 不变。两轮恢复均为 attempts=16、successes=16、failures=0，fault_events=16/17、dropped=0；容器内 `binfmt_misc` 子挂载仍在，FS 无 error 级日志。首读失败仍符合故障事件触发后异步恢复的现有时序。测试后 Deployment/Pod、FUSE 挂载和 FD store 均为 0，原 FS SHA256 `33479bb0a11ecb0a9471ef38273bb228dabaad7f43ab44d07cc3db4b59ba9d65` 已恢复，四项服务 active、K3s 节点 Ready。此为源码候选的隔离 VM 回归，不证明正式发布或业务节点零失败。
+- 复核发现第一候选把真实权限为 `0555` 的 `/proc/sys/fs` 合成为 `0755`。修正版仅匹配固定父路径并保留 `0555`，相关包 race 测试通过。修正版 SHA256 `06f91e64a2f0aa787e279260287a4ea614ba81c82a6b2dabf370591105c3659b` 在相同 VM 新建 8 Pod/16 容器后再跑两轮 64 路故障首读，分别 42/64、49/64 成功；两轮异步恢复均 16/16 成功、failures=0、dropped=0，身份不变，容器内父目录权限实测 `0555`。最终原 FS 已恢复，测试 Pod/FUSE 挂载/FD store 为 0，四项服务 active、节点 Ready、FS 当日无 error 日志。
 
 ## 2026-11-20：隔离 VM 64 路 FUSE 故障读取与空闲 CPU
 
