@@ -4,6 +4,10 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-20：高密度旧 unit 首次升级复测
+
+- 218/server1 隔离 VM 从官方 v0.7.1-40 Chart/镜像实际装入无 `--session-recovery`/FD store 的旧 FS unit，启动 8 个 `sysbox-runc` 双容器 Pod；8/8 Ready，虚拟 `/proc/meminfo` 可读。随后 Helm 回升到含 `migrate_legacy_fs_pods` 的 v47 源码候选 Chart/镜像。installer 日志依次记录 cordon、删除全部 8 个旧 Pod、安装新服务、重启 K3s、uncordon 和完成；8 个新 Pod/16 个容器全部 Ready，旧 Pod UID 复用数为 0，16 个容器的 `/proc/meminfo`、`/proc/stat` 读取失败数为 0，新 FS unit 启用会话恢复并存储 24 个 FD。节点 Ready，四项 Sysbox 服务 active。测试 Deployment 缩至 0 后 Pod、宿主 FUSE 挂载、FD store 均为 0，相关服务近十分钟无 error 日志。此次证明可丢弃 VM 的高密度旧 unit 首次升级自动迁移；旧 Pod 按设计被删除重建，**不证明旧容器无重启**，也不是 218 业务节点或正式发布工件验收。
+
 ## 2026-11-19：PID namespace 按需读取未取得稳定 FS CPU 收益
 
 - 2026-11-19 正确缓冲读取的分配 profile 定位到 `fuse.File.Read` 每次额外分配 8 KiB；16,000 次 `/proc/meminfo` 读取中该处分配约 217 MB，占测试窗口分配字节约 34%。Bazil 已预分配同尺寸响应缓冲，源码改为直接复用。相关包 race 测试通过；隔离 VM 8 Pod/16 容器、每轮 16,000 次成功读取的同源基线→候选→基线 FS CPU 秒数分别为 6.29/6.40→5.84/5.90→6.08/5.83，区间重叠，尚不能认定整进程 CPU 降耗。测试后恢复原 v47 FS SHA256 `33479bb0a11ecb0a9471ef38273bb228dabaad7f43ab44d07cc3db4b59ba9d65`；Deployment/Pod/FUSE 挂载/FD store 均为 0，Sysbox 服务 active、节点 Ready，近五分钟相关服务无 error 日志。
@@ -30,7 +34,7 @@
 
 - 旧脚本在 8 个双容器 Pod 中用 shell 内建 read 反复读取首行。strace 证实每个字符对应一次 read(…, 1)，文件行长和 FUSE 请求数严重影响结果。原 v40 26.57/26.32 秒、v47 56.28/59.18 秒的 16,000 次对照仅能说明该逐字节压力方式下 CPU 增加，不能证明常规缓冲读取退化 2.2 倍；旧 CPU 降耗验收结论作废。
 - 旧逐文件数值也受逐字节读取影响，尤其 swaps 的 44.74/44.36 秒是长表头放大的假热点。修正为单进程 open/read(8 KiB)/close 完整文件、每文件 4,000 次成功读取后，原 v47 的 swaps/meminfo/stat/loadavg/cpuinfo/uptime FS CPU 秒分别为 1.75/1.67/1.65/1.79/1.73/1.74；当前源码同源构建为 1.63/1.56/1.69/1.57/1.60/1.70。六项差异很小，不能认定 swaps 特别耗 CPU。v40 FS 单组件正确口径基线已补测：swaps/meminfo/stat/loadavg/cpuinfo/uptime 分别为 2.52/0.86/0.76/0.79/0.80/0.89 秒；v47 对应为 1.75/1.67/1.65/1.79/1.73/1.74 秒。除 swaps 外五项约增加 1.9–2.3 倍。v40 二进制来自官方 deb，SHA256SUMS 校验通过，临时匹配 v40 FS 启动参数；其余 mgr/runc 仍为 v47，因此这只是 FS 单组件 A/B，完整发布组合和业务负载 CPU 降耗仍未验收。
-- 再次从 v40 切到 v47 时，8 副本 Deployment 不断补建旧运行时 Pod，installer 因残留 FUSE 挂载多次拒绝替换旧 FS。仅在这台可丢弃 VM 将测试 Deployment 缩到零、重启 VM 清除旧 mount namespace 后，v47 unit 才装入 `--session-recovery`/FD store；重新扩到 8 副本后全部 Ready，取样后再次缩容到零。FS/mgr active，节点 Ready，最近十分钟 FS error 日志为空。此轮说明持续自补的高密度首次升级仍有迁移缺口；不能宣称原 Pod 无重启或无人值守迁移在此场景通过。当前隔离 VM 运行 v47 候选，218 宿主仍为此前验证的 v47 候选。
+- 此前再次从 v40 切到 v47 时，8 副本 Deployment 不断补建旧运行时 Pod，installer 因残留 FUSE 挂载多次拒绝替换旧 FS。仅在这台可丢弃 VM 将测试 Deployment 缩到零、重启 VM 清除旧 mount namespace 后，v47 unit 才装入 `--session-recovery`/FD store；重新扩到 8 副本后全部 Ready，取样后再次缩容到零。FS/mgr active，节点 Ready，最近十分钟 FS error 日志为空。该轮不能宣称无人值守迁移通过；后续使用含自动迁移逻辑的 v47 候选重新完成高密度复测，见 2026-11-20 记录。
 
 - 正确口径下，同源原实现六文件 CPU 总和两组为 9.75、9.42 秒，固定缓冲 cgroup 读取实验候选为 9.08 秒（每文件 4,000 次成功读取）。差异约 3–7% 且接近环境波动，远不足以抵消五文件回退；实验代码保持撤回。测试结束恢复原 v47，测试 Deployment 为 0，四项服务 active、节点 Ready。
 - 2026-11-19 在隔离 VM 对正确缓冲读取的 `/proc/meminfo` 补做函数级 `perf`：8 Pod/16 容器共 16,000 次完整成功读取；带 `perf` 时原剥离符号的 v47 FS CPU 为 12.14 秒，当前源码未剥离构建为 12.06 秒，无法据此认定 CPU 已降耗。当前源码的约 12K 个 cycles 样本中，约 23% 的累计调用链经过逐请求资源视图读取，约 54% 经过 FUSE Serve，`readMemInfo` 约 7%；这些累计比例重叠，不能相加。旧 `swaps` perf 文件早于缓冲读取脚本，不能用于当前热点判断。测试后已等 8 个 Pod 全部删除，VM 恢复原 v47 SHA256 `33479bb0a11ecb0a9471ef38273bb228dabaad7f43ab44d07cc3db4b59ba9d65`，FUSE 挂载为 0，四项服务 active。
