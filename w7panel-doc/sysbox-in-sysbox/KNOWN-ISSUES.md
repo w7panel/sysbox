@@ -4,6 +4,11 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-20：隔离 VM 64 路 FUSE 故障读取与空闲 CPU
+
+- 在 218/server1 隔离 VM 的 v47 FS、8 个双容器 Pod 上，聚合 Sysbox 服务重启后并发执行 64 路 `/proc/meminfo` 首读。第一轮 47 成功、17 个旧会话读取失败；eBPF 报告 28 个故障事件、丢弃 0，恢复尝试 17 次、成功 16 次、失败 1 次。唯一失败是保留 `/proc/sys/fs/binfmt_misc` 子挂载时新 FUSE 树暂时返回 `ENOENT`；随后同一容器重试成功，16 个容器均可重新打开虚拟 `/proc`。第二轮首读 29 成功、35 失败，故障事件 30、丢弃 0，16 次恢复全部成功、失败 0。两轮后 8 个 Pod UID、16 个容器 ID 与重启次数均未变化，FD store 为 24，节点 Ready。此结果证明并发故障最终恢复，但第一轮有一次可重试错误，不能称零失败稳定通过；也不是正式发布或 218 业务节点故障注入。
+- 同一 v47 VM，测试 Deployment 为 0 时，FS 30 秒空闲消耗 0.17 CPU 秒；8 个双容器 Pod 各读取一次 `/proc/loadavg` 激活采样后，30 秒空闲消耗 0.53 CPU 秒。仅是 16 个视图的单轮观测，不能外推高密度整机 CPU 收益。测试后 Deployment/Pod、宿主 FUSE 挂载和 FD store 均为 0，四项服务 active、节点 Ready。
+
 ## 2026-11-20：高密度旧 unit 首次升级复测
 
 - 218/server1 隔离 VM 从官方 v0.7.1-40 Chart/镜像实际装入无 `--session-recovery`/FD store 的旧 FS unit，启动 8 个 `sysbox-runc` 双容器 Pod；8/8 Ready，虚拟 `/proc/meminfo` 可读。随后 Helm 回升到含 `migrate_legacy_fs_pods` 的 v47 源码候选 Chart/镜像。installer 日志依次记录 cordon、删除全部 8 个旧 Pod、安装新服务、重启 K3s、uncordon 和完成；8 个新 Pod/16 个容器全部 Ready，旧 Pod UID 复用数为 0，16 个容器的 `/proc/meminfo`、`/proc/stat` 读取失败数为 0，新 FS unit 启用会话恢复并存储 24 个 FD。节点 Ready，四项 Sysbox 服务 active。测试 Deployment 缩至 0 后 Pod、宿主 FUSE 挂载、FD store 均为 0，相关服务近十分钟无 error 日志。此次证明可丢弃 VM 的高密度旧 unit 首次升级自动迁移；旧 Pod 按设计被删除重建，**不证明旧容器无重启**，也不是 218 业务节点或正式发布工件验收。
