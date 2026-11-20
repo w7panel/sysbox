@@ -4,6 +4,11 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-20：binfmt_misc 父目录查找依赖移除
+
+- 源码候选使固定 `/proc/sys/fs` 父目录和已有的 `binfmt_misc` 挂载点都由 FS handler 直接解析，恢复助手拼接新 FUSE 树时不再为父目录启动 namespace 代理；子挂载保留、ID 校验及原子替换逻辑不变。`handler/implementations`、`recovery`、`fuse` 的 race 测试通过。
+- 218/server1 隔离 VM 安装仅替换 FS 的候选 SHA256 `007080fc6cb668516f2ce1f9532aa5c117033bde2689bc76deb73066d930b5cc`，8 个双容器测试 Pod 两次重启 FS 后各进行 64 路并发首读。两轮首读分别为 54/64、38/64 成功；异步恢复后 16/16 容器都能重新读取，Pod UID、容器 ID、restartCount 不变。两轮恢复均为 attempts=16、successes=16、failures=0，fault_events=16/17、dropped=0；容器内 `binfmt_misc` 子挂载仍在，FS 无 error 级日志。首读失败仍符合故障事件触发后异步恢复的现有时序。测试后 Deployment/Pod、FUSE 挂载和 FD store 均为 0，原 FS SHA256 `33479bb0a11ecb0a9471ef38273bb228dabaad7f43ab44d07cc3db4b59ba9d65` 已恢复，四项服务 active、K3s 节点 Ready。此为源码候选的隔离 VM 回归，不证明正式发布或业务节点零失败。
+
 ## 2026-11-20：隔离 VM 64 路 FUSE 故障读取与空闲 CPU
 
 - 在 218/server1 隔离 VM 的 v47 FS、8 个双容器 Pod 上，聚合 Sysbox 服务重启后并发执行 64 路 `/proc/meminfo` 首读。第一轮 47 成功、17 个旧会话读取失败；eBPF 报告 28 个故障事件、丢弃 0，恢复尝试 17 次、成功 16 次、失败 1 次。唯一失败是保留 `/proc/sys/fs/binfmt_misc` 子挂载时新 FUSE 树暂时返回 `ENOENT`；随后同一容器重试成功，16 个容器均可重新打开虚拟 `/proc`。第二轮首读 29 成功、35 失败，故障事件 30、丢弃 0，16 次恢复全部成功、失败 0。两轮后 8 个 Pod UID、16 个容器 ID 与重启次数均未变化，FD store 为 24，节点 Ready。此结果证明并发故障最终恢复，但第一轮有一次可重试错误，不能称零失败稳定通过；也不是正式发布或 218 业务节点故障注入。

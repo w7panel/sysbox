@@ -1,6 +1,6 @@
 # 1016310：sysbox-fs FUSE 会话恢复（当前方案）
 
-> 2026-11-19 更新。TAPD 1016310 原正文为废弃设计稿；以本文和实际发布验收记录为准。
+> 2026-11-20 更新。TAPD 1016310 原正文为废弃设计稿；以本文和实际发布验收记录为准。
 
 ## 行为与边界
 
@@ -21,3 +21,5 @@
 同日以隔离 VM 的原 v47 FS 对 8 Pod/16 容器执行聚合 `sysbox.service` 重启：重启前后 Pod UID、容器 ID 和 restartCount 全部不变，16/16 容器新打开 `/proc/meminfo` 成功；分钟巡检统计 24 个候选，attempts=31、successes=24、failures=0，期间 old_fd_events=7、fault_events=9、dropped=0，FD store 为 24→24。测试后 Deployment/Pod/FUSE 挂载均为 0，FD store=0，四项服务 active、VM 节点 Ready，重启后服务无 error 日志。该结果验证受控 VM 的高密度正常重启恢复；未测试正式工件、业务节点高密度故障注入、旧 FD 的长期持有行为或旧版首次升级自动迁移。
 
 随后在同一隔离 VM 验证旧 FD：持有重启前打开的 `/proc/meminfo` FD，分钟巡检恢复 3/3 挂载后读取该 FD 返回 `Transport endpoint is not connected`（exit 1），同一探针重新打开该文件成功（`MemTotal: 65536 kB`，exit 0）。最初两轮使用 `sh -c 'sleep 3600'` 作为 PID 1，探针 `kubectl exec` 结束约一秒后容器 a 意外以 exit 0 重建；改为直接 `sleep 3600` 作为 PID 1 后，探针结束 15 秒时 Pod UID、两个容器 ID 和 restartCount 均不变。这支持先前重建与测试启动壳相关，具体信号机制未证实。最终一轮 FS 指标 attempts=5、successes=3、failures=0、old_fd_events=2、dropped=0，服务无 error 日志。已恢复原测试模板并缩容至 0，Pod/FUSE 挂载/FD store 均为 0，服务 active、节点 Ready；PVC 保留。
+
+2026-11-20 针对 64 路并发测试中偶发的 `binfmt_misc` 子挂载重接 `ENOENT`，源码候选将固定父目录 `/proc/sys/fs` 也直接解析，避免恢复助手为它启动 namespace 代理。隔离 VM 的 8 Pod/16 容器两轮 64 路断连首读，恢复均为 16 成功、0 失败，Pod UID、容器 ID、重启次数不变，`binfmt_misc` 子挂载仍在。首读仍可能在异步恢复前失败，不能称同步无错；候选测试后已回滚原 VM FS。正式发布工件和 218 业务高密度故障注入仍未验收。
