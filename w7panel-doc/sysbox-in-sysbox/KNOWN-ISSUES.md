@@ -4,6 +4,12 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-20：FS CPU 尖峰与 FUSE 缓冲分配
+
+- 218 业务宿主保持原 FS SHA256 `33479bb0a11ecb0a9471ef38273bb228dabaad7f43ab44d07cc3db4b59ba9d65`，只读 20 秒 `perf --no-inherit` 捕获 700 个用户态 cycles 样本，最高的采样地址是 Go GC/调度函数；近期恢复计数未同步增长，日志无恢复错误。这指向分配压力，但尚未定位真实业务的触发者。
+- 隔离 VM 原 v47、8 个双容器 Pod，各完整读取 cpuinfo/meminfo/stat/uptime/loadavg/swaps 16,000 次，96,000 次均成功；堆画像 `alloc_space` 总计约 3.92 GB，`fuse.File.Read` 和 bazil `handleRequest` 直接分配分别约 1.52/1.49 GB。复用两层读响应缓冲但尚未增加清零的源码候选，同口径约 0.90 GB，`handleRequest` 直接分配约 10 MB。该候选的 v47→候选→v47 每段两轮、每轮六文件各 4,000 次成功读取的 FS CPU 合计为 10.66/11.43→8.54/9.16→10.77/11.09 秒；候选含其它未发布优化，此数字不能单独归因于缓冲池，也不是业务节点降耗验收。
+- 首个缓冲池候选只为普通文件 Read 分配缓冲，忽略目录/ReadAll 也调用 `fuseutil.HandleRead`，隔离 VM 恢复时一次目录读取因容量 0 触发可恢复的 handler panic。已立即恢复原 v47，修正版将缓冲分配移到所有 Read 分支之前。最终候选还清零复用缓冲，保留旧版新分配缓冲的语义；定向 bazil race 测试和 VM 同组测试通过。清零版 v47→候选→v47 六文件各 4,000 次成功读取的 FS CPU 合计为 10.50→8.29/8.93→10.93 秒，候选 16 个容器重启数均为 0，无新增错误日志。单独停止 FS 写 profile 会联动停掉 mgr/snapshotter，曾使下一轮临时 Pod 因 snapshotter socket 拒绝连接而卡在创建阶段；该轮作废，缩容测试 Pod 后启动聚合服务恢复。候选 profile 前的首批读取早于异步 FUSE 修复而返回 ENOTCONN，亦作废，待 24 个挂载全部恢复后重测成功。最终 VM 恢复原 v47 SHA256 `33479bb0a11ecb0a9471ef38273bb228dabaad7f43ab44d07cc3db4b59ba9d65`，测试副本、FUSE 挂载、FD store 为 0，Sysbox 服务 active、节点 Ready。
+
 ## 2026-11-20：按文件跳过无用 PID namespace 查询的 CPU 对照
 
 - `/proc/loadavg` 的进程计数和 lastPID 仍按每个请求者的 cgroup/PID namespace 解析；`meminfo`、`stat`、`uptime`、`swaps`、`cpuinfo` 等输出只使用请求者实时 cgroup，快照键不再为这些文件读取无用的 PID namespace。缺失请求者 cgroup 时仍拒绝用外层 init/宿主视图代替。相关 domain、handler、fuse、cmd race 测试和 cgroup/PIDns 键隔离用例通过。
