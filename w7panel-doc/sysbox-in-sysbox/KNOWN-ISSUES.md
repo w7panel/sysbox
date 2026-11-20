@@ -4,6 +4,12 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-20：218 正式 v0.7.1-49 快速部署与功能回归
+
+- Release 的 Chart、lite 二进制和镜像元数据通过 `SHA256SUMS` 校验。GHCR/CCR 的 kubelet 远端拉取停滞后，将同一正式镜像 digest `sha256:5ce1b42de3963989132b4c6124ec487a63a440ad16d79a30ab923a3a06e08c4b` 导入 218 节点与指定 CKM 的 containerd，并使用仅供本地缓存命中的 `v0.7.1-49-218cached` 标签、`IfNotPresent` 策略。宿主 Helm revision 58、`loadopt-218-1016` 内层 revision 14 均为 `deployed`；两层 installer/agent 与 admission Ready，运行镜像 ID 同为 `sha256:f90150e67bc15626f05704e3f42f1174f285d70b8d4606967ae6ea97b36ea20e`。宿主 FS 与正式镜像内二进制 SHA256 同为 `4f93e72192b0845991fa5ca3fd04dfe05e7f9ea70037e038e1aae7dea30050f9`，内层已安装 lite 与 Release 文件 SHA256 同为 `8f73d421bc1e9c92a4a4f75b4905781f263e061cfc38f69635befbfca9f4d855`。
+- 宿主 L0 RuntimeClass/FUSE、full/lite 的 `local-path` 以及 full 的 Longhorn `disk-default` PVC 回归通过；指定 CKM 的 L2 lite 空 PVC 初始化、Pod 重建后持久化、特殊目录挂载与 CRI stats 为 `FUNCTIONAL PASS`。安装后九个 CKM 均 Ready，相关服务无新增 panic/fatal/OOM/ENOMEM 日志。临时宿主调试 Pod 已删除，L2 测试 Deployment 缩容到 0，PVC 保留。首次 L2 创建曾出现已知的 `sysbox sidecar oci spec unavailable` 暂态，重试后 Ready 且完整功能断言通过。
+- 正式 v49 镜像上又创建 8 Pod/16 容器，聚合 `sysbox.service` 受控重启后 64 路首读全部在异步修复前返回 `Transport endpoint is not connected`，无其他错误；随后 16/16 原容器重新打开 `/proc/meminfo` 成功，`binfmt_misc` 子挂载、Pod UID、容器 ID 和重启计数逐项不变。重启后恢复指标最终 attempts=398、successes=206、failures=0、dropped=0；FS/mgr/snapshotter 均 active，三项服务近十分钟错误级日志为空，九个 CKM Ready。8 个临时 Pod 与宿主检查 Pod 已全部删除。此项关闭正式镜像在业务测试节点的高密度正常重启恢复缺口，但不能宣称首次读取无错。其他 CKM 的内层 Chart 尚未逐一升级验证。整进程 CPU 降耗与压测按当前安排暂停，仍不能宣称达标。
+
 ## 2026-11-20：218 快速安装最新 FS 源码候选
 
 - `v0.7.1-49` 的 Chart、lite 二进制及镜像元数据已按 Release `SHA256SUMS` 校验。218 从 GHCR 拉取正式镜像长时间停在 `ContainerCreating`，未完成正式镜像安装；取消升级并回滚到原 `v0.7.1-47` Chart（Helm revision 53，deployed），installer 与 admission 均 Ready。
