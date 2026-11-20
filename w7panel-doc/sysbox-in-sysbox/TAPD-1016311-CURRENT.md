@@ -57,4 +57,8 @@ L0/L2 功能回归已通过。先前 v40 约 26 秒、v47 约 56–59 秒的 16,
 
 218 随后做了 A/B/A 对照：将 `k3k-console-117057/ckm-bkhnk` 内 21 个原本未 Ready 的 Deployment 从 1 临时缩到 0，稳定后 FS 消耗 8.81 CPU 秒/30 秒、`openat2` 约 6.8–7.0 千次/10 秒；恢复全部原副本并批量创建新 Pod 后分别升至 42.58 CPU 秒/30 秒和 17.2→23.6→35.9 千次/10 秒。eBPF 单独捕获该 CKM 内层 agent 的 `fuse-overlayfs` 进程 10 秒发出 6424 次 `openat2`，同时 rootfs snapshotter 正在复制镜像目录。故**批量创建容器**是已验证的显著放大源；不能将恢复副本时的创建峰直接视作旧 Pod 稳态 BackOff 的贡献。缩容后仍有其他请求源，且当前没有各路径分配画像。21 个 Deployment 已恢复 1 副本，miniapp/traditiontool 及 7 个 prov 新 Pod 最终均 Ready，prov PVC 均 Bound；`sysbox sidecar oci spec unavailable` 符合已有创建暂态约定。FS/mgr/snapshotter 均 active。下一步核查旧卷/挂载状态，并验证本地 FS 解析优化的实际收益。
 
-全部新 Pod Ready 后再测，FS 消耗 12.45 CPU 秒/30 秒，`openat2` 为 8731、8285、8227 次/10 秒，明显低于批量创建期，但仍有稳态通知和 GC 开销。FS 近五分钟无 error，三个 Sysbox 服务 active。下一步对稳态请求按来源及分配点拆分；目前的 `/proc/<pid>/stat` 解析优化只通过本地测试，不能声称已降低 218 CPU。
+全部新 Pod Ready 后再测，FS 消耗 12.45 CPU 秒/30 秒，`openat2` 为 8731、8285、8227 次/10 秒，明显低于批量创建期，但仍有稳态通知和 GC 开销。FS 近五分钟无 error，三个 Sysbox 服务 active。彼时的 `/proc/<pid>/stat` 解析优化只通过本地测试，不能据此声称已降低 218 CPU。
+
+随后用 `BUILD_PROFILE=test` 构建并推送包含 mountinfo 与 `/proc/<pid>/stat` 减分配的 FS 测试镜像。218 Helm revision 51 已更新镜像，但同版本 installer 未重装宿主 FS；核对哈希后，按单组件测试方式备份并替换 FS。选定 CKM 每轮 32,000 次完整缓冲 `/proc/meminfo` 读取全部成功，旧候选两轮 FS CPU 为 28.60/29.33 秒，新源码两轮为 26.94/27.04 秒；回切旧候选第三轮升至 47.55 秒，表明宿主并发负载发生显著变化，不能据前两组差值证明降耗。最终恢复新源码 FS SHA256 `5713cfb932d8249008578ee0af912d70d4202967228932f86e358b298336fd91`；7 个 CKM Ready，目标 Pod 身份及重启数未变，虚拟文件可读，服务 active、近五分钟无 FS error。当前仍未验证整体 CPU 尖峰消除或正式工件。
+
+针对高频非受管相对 `openat2`，`50fc6a0` 将调用者属性读取延后到路径确认为 Sysbox-FS 管理范围之后；本地 `go test -race -count=1 ./...` 通过。快速测试镜像 `fs-openat2-50fc6a0-test-20261120` 已推送（digest `sha256:dd229547e419588db436b5233b863e05c4bd39b7fd844c051e988c6ee6224f73`），尚未在 218 替换运行中 FS，因此不能宣称实际 CPU 降耗或受管路径集成回归通过。

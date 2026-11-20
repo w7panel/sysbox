@@ -33,6 +33,12 @@ The `fs` component builds a static sysbox-fs binary and replaces only that binar
 in the deploy image. Installing it requires a host FS restart and recreation
 of affected full-runtime Pods; installing the nested Chart alone does not
 activate the changed host daemon.
+The host installer compares Sysbox version, kernel and configuration, not the image tag.
+With an unchanged version, a Helm upgrade can leave the old host binary running;
+verify `/usr/bin/sysbox-fs` SHA256 before testing. For an FS-only source A/B,
+back up the current host binary, atomically replace it with the built binary,
+restart the recovery-enabled FS service, and confirm the new SHA256 and CKM
+health. A Helm revision alone is not installation proof.
 The `runc` component updates the outer host runtime in the deploy image;
 run the L0 FUSE check before removing CKM's device mount.
 
