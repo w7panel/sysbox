@@ -4,6 +4,12 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-20：按文件跳过无用 PID namespace 查询的 CPU 对照
+
+- `/proc/loadavg` 的进程计数和 lastPID 仍按每个请求者的 cgroup/PID namespace 解析；`meminfo`、`stat`、`uptime`、`swaps`、`cpuinfo` 等输出只使用请求者实时 cgroup，快照键不再为这些文件读取无用的 PID namespace。缺失请求者 cgroup 时仍拒绝用外层 init/宿主视图代替。相关 domain、handler、fuse、cmd race 测试和 cgroup/PIDns 键隔离用例通过。
+- 218/server1 隔离 VM 仅换 FS 候选 SHA256 `88852d659c1946f57f0890bfb9e8013421d32a6342c0ed85f35e2349e164edfc`，每轮 8 Pod/16 容器共 16,000 次完整缓冲 `/proc/meminfo` 读取全部成功。同源原版→候选→原版的 FS CPU 秒依次为 6.54/6.83→5.91/5.68→6.78/6.27。每文件 4,000 次的六文件原版/候选 CPU 秒：swaps 1.78/1.92，meminfo 1.74/1.50，stat 1.80/1.37，loadavg 1.68/1.59，cpuinfo 1.71/1.67，uptime 1.66/1.47；六项合计 10.37/9.52，但测量时宿主负载波动，且 swaps 变差，不能据此宣称整体 CPU 降耗达标。候选 8 Pod/16 容器均 Ready、重启 0，FS 当日无 error 日志；收尾恢复原 FS SHA256 `33479bb0a11ecb0a9471ef38273bb228dabaad7f43ab44d07cc3db4b59ba9d65`，测试 Pod/FUSE 挂载/FD store 均为 0，节点 Ready。
+- 最终源码仅把 `loadavg` 分支改为避免额外构造无用的 cgroup-only 键；最终 FS SHA256 `8da2a802092115758beb89c8eb7c2b20d7bc1512213a93d0372816269fe3ffb2` 在相同 VM 新建 8 Pod/16 容器后，六文件各 4,000 次完整读取全部成功，FS CPU 秒依次为 swaps 1.54、meminfo 1.51、stat 1.50、loadavg 1.49、cpuinfo 1.57、uptime 1.58（合计 9.19）；另 16,000 次 meminfo 为 5.57 秒。两次候选的 swaps 差异显示单轮逐文件排序受环境影响；这仍是隔离 VM 微负载，不能代替业务混合负载或正式发布验收。测试后再度恢复原 FS，Pod/FUSE 挂载/FD store 为 0，四项服务 active、节点 Ready，FS 当日无 error 日志。
+
 ## 2026-11-20：binfmt_misc 父目录查找依赖移除
 
 - 源码候选使固定 `/proc/sys/fs` 父目录和已有的 `binfmt_misc` 挂载点都由 FS handler 直接解析，恢复助手拼接新 FUSE 树时不再为父目录启动 namespace 代理；子挂载保留、ID 校验及原子替换逻辑不变。`handler/implementations`、`recovery`、`fuse` 的 race 测试通过。
