@@ -6,7 +6,7 @@
 # BUILD_PROFILE=test TEST_COMPONENTS=runc-lite,snapshotter,inner-script \
 # TEST_BASE_IMAGE=repo/deploy:base TEST_IMAGE=repo/deploy:test \
 # ./w7panel-doc/release.sh
-#   1. build the generic sysbox-ce deb
+#   1. build Sysbox binaries (optionally package the generic sysbox-ce deb)
 #   2. build and verify the K3s deploy image
 #   3. write release artifacts under dist/
 #   4. publish a GitHub Release when GITHUB_TOKEN is set
@@ -20,6 +20,7 @@ CHART_DIR="${CHART_DIR:-${ROOT_DIR}/charts/w7panel-sysbox}"
 DIST_DIR="${DIST_DIR:-${ROOT_DIR}/dist}"
 CACHE_DIR="${SYSBOX_CACHE_DIR:-${ROOT_DIR}/.cache/sysbox}"
 BUILD_PROFILE="${BUILD_PROFILE:-release}"
+BUILD_DEB="${BUILD_DEB:-false}"
 TEST_COMPONENTS="${TEST_COMPONENTS:-}"
 TEST_BASE_IMAGE="${TEST_BASE_IMAGE:-}"
 TEST_IMAGE="${TEST_IMAGE:-}"
@@ -201,15 +202,25 @@ find_deb() {
     find "${PKGR_DIR}/deb/build" -type f -name "sysbox-ce_*_${SYS_ARCH}.deb" | sort | tail -1
 }
 
-collect_deb_artifacts() {
-    local deb="$1"
+collect_release_artifacts() {
+    local deb="${1:-}"
 
-    info "Collect deb artifacts"
+    info "Collect release artifacts"
     rm -rf "${DIST_DIR}"
     mkdir -p "${DIST_DIR}"
-    cp "${deb}" "${DIST_DIR}/"
-    cp "${PKGR_DIR}/deb/build/${SYS_ARCH}/ubuntu-jammy"/sysbox-ce_* "${DIST_DIR}/" 2>/dev/null || true
+    if [[ -n "${deb}" ]]; then
+        cp "${deb}" "${DIST_DIR}/"
+        cp "${PKGR_DIR}/deb/build/${SYS_ARCH}/ubuntu-jammy"/sysbox-ce_* "${DIST_DIR}/" 2>/dev/null || true
+    fi
     cp "${ROOT_DIR}/sysbox-runc-lite/build/${SYS_ARCH}/sysbox-runc-lite" "${DIST_DIR}/sysbox-runc-lite-${RELEASE_TAG}-${SYS_ARCH}"
+}
+
+build_source_bins() {
+    info "Build static Sysbox binaries for ${SYS_ARCH}"
+    for component in sysbox-runc sysbox-fs sysbox-mgr sysbox-snapshotter sysbox-admission; do
+        rm -f "${ROOT_DIR}/${component}/build/${SYS_ARCH}/${component}"
+    done
+    make -C "${ROOT_DIR}" sysbox-static-local TARGET_ARCH="${SYS_ARCH}" VERSION="${SYSBOX_VERSION}"
 }
 
 build_sysbox_runc_lite() {
@@ -222,26 +233,31 @@ build_sysbox_runc_lite() {
         install -m 0755 "${SYSBOX_RUNC_LITE_BINARY}" "${output}"
     else
         [[ "${SYS_ARCH}" == "${HOST_SYS_ARCH}" ]] || die "cross-arch sysbox-runc-lite build requires SYSBOX_RUNC_LITE_BINARY"
-        make -C "${ROOT_DIR}" sysbox-runc-lite TARGET_ARCH="${SYS_ARCH}"
+        make -C "${ROOT_DIR}" sysbox-runc-lite TARGET_ARCH="${SYS_ARCH}" VERSION="${SYSBOX_VERSION}"
     fi
     [[ -x "${output}" ]] || die "sysbox-runc-lite binary not found: ${output}"
 }
 
-extract_bins() {
-    local deb="$1"
+stage_bins() {
+    local deb="${1:-}"
     local tmpdir
 
-    tmpdir="$(mktemp -d)"
-    info "Extract Sysbox binaries from ${deb}"
-    "${DPKG}" -x "${deb}" "${tmpdir}"
+    if [[ -n "${deb}" ]]; then
+        tmpdir="$(mktemp -d)"
+        info "Extract Sysbox binaries from ${deb}"
+        "${DPKG}" -x "${deb}" "${tmpdir}"
+        tmpdir="${tmpdir}/usr/bin"
+    else
+        tmpdir="${ROOT_DIR}"
+    fi
     mkdir -p "${K8S_DIR}/bin/sysbox-ce/generic"
-	install -m 0755 \
-	    "${tmpdir}/usr/bin/sysbox-runc" \
-	    "${tmpdir}/usr/bin/sysbox-fs" \
-	    "${tmpdir}/usr/bin/sysbox-mgr" \
-	    "${tmpdir}/usr/bin/sysbox-snapshotter" \
-	    "${tmpdir}/usr/bin/sysbox-admission" \
-	    "${K8S_DIR}/bin/sysbox-ce/generic/"
+    for component in sysbox-runc sysbox-fs sysbox-mgr sysbox-snapshotter sysbox-admission; do
+        if [[ -n "${deb}" ]]; then
+            install -m 0755 "${tmpdir}/${component}" "${K8S_DIR}/bin/sysbox-ce/generic/"
+        else
+            install -m 0755 "${tmpdir}/${component}/build/${SYS_ARCH}/${component}" "${K8S_DIR}/bin/sysbox-ce/generic/"
+        fi
+    done
 # sysbox-inner-k3s.sh uses sysbox-runc-lite for K3s' default runc handler,
 # while the generic payload also exposes runc-lite. Keep both aliases in sync
 # so a release cannot silently leave the configured runtime stale.
@@ -249,7 +265,9 @@ install -m 0755 "${ROOT_DIR}/sysbox-runc-lite/build/${SYS_ARCH}/sysbox-runc-lite
 	    "${K8S_DIR}/bin/sysbox-ce/generic/runc-lite"
 install -m 0755 "${ROOT_DIR}/sysbox-runc-lite/build/${SYS_ARCH}/sysbox-runc-lite" \
 	    "${K8S_DIR}/bin/sysbox-ce/generic/sysbox-runc-lite"
-    rm -rf "${tmpdir}"
+    if [[ -n "${deb}" ]]; then
+        rm -rf "${tmpdir%/usr/bin}"
+    fi
 }
 
 build_installer_image() {
@@ -559,19 +577,24 @@ main() {
         return
     fi
 
-    need_cmd "${DPKG}"
+    if [[ "${BUILD_DEB}" == true ]]; then
+        need_cmd "${DPKG}"
+    fi
     need_cmd "${GIT}"
     need_cmd sha256sum
 
-    build_deb
+    if [[ "${BUILD_DEB}" == true ]]; then
+        build_deb
+        deb="$(find_deb)"
+        [[ -n "${deb}" ]] || die "deb package not found"
+        info "Built deb: ${deb}"
+    else
+        build_source_bins
+    fi
     build_sysbox_runc_lite
 
-    deb="$(find_deb)"
-    [[ -n "${deb}" ]] || die "deb package not found"
-    info "Built deb: ${deb}"
-
-    collect_deb_artifacts "${deb}"
-    extract_bins "${deb}"
+    collect_release_artifacts "${deb:-}"
+    stage_bins "${deb:-}"
     build_installer_image
     verify_images
     push_images

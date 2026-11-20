@@ -7,7 +7,7 @@ this Skill dispatch to it so a build or test always uses the current source.
 
 | Script | Role | Important inputs | Output / proof |
 | --- | --- | --- | --- |
-| `w7panel-doc/release.sh` | `release` builds deb, static lite binary, deploy image and chart; `test` incrementally patches selected binaries into explicit base images | `BUILD_PROFILE`, `TEST_COMPONENTS`, `TEST_TARGETS`, base/output images, `RELEASE_TAG`, `IMAGE_REPO`, `IMAGE_TAG`, `PUSH_IMAGE`, `MIRROR_PROFILE`, `PACKAGE_CHART` | `dist/`, registry image, optional GitHub release |
+| `w7panel-doc/release.sh` | `release` builds static Sysbox binaries, static lite binary, deploy image and chart; `BUILD_DEB=true` additionally builds a deb; `test` incrementally patches selected binaries into explicit base images | `BUILD_PROFILE`, `BUILD_DEB`, `TEST_COMPONENTS`, `TEST_TARGETS`, base/output images, `RELEASE_TAG`, `IMAGE_REPO`, `IMAGE_TAG`, `PUSH_IMAGE`, `MIRROR_PROFILE`, `PACKAGE_CHART` | `dist/`, registry image, optional GitHub release |
 | `skills/sysbox-in-sysbox-test/scripts/build-release.sh` | Skill entrypoint for the above script | Passes all environment and arguments through unchanged | Same as `release.sh` |
 
 Use a China mirror profile when appropriate:
