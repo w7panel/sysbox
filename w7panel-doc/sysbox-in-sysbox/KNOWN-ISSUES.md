@@ -4,6 +4,12 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-20：218 快速安装最新 FS 源码候选
+
+- `v0.7.1-49` 的 Chart、lite 二进制及镜像元数据已按 Release `SHA256SUMS` 校验。218 从 GHCR 拉取正式镜像长时间停在 `ContainerCreating`，未完成正式镜像安装；取消升级并回滚到原 `v0.7.1-47` Chart（Helm revision 53，deployed），installer 与 admission 均 Ready。
+- 按 FS-only 快速测试方式，将当前 `ae223ae` 源码构建的 `sysbox-fs`（SHA256 `6c4a7dfecc99de628b7bc31544a5a90dc147ab5c0b79eff72411a96203758f91`，二进制版本 `0.7.1-48`）原子替换到 218/server1，旧文件 SHA256 `0ba97c9173ed28082995c6b95ead109bb53b52b5f2a8005ffe6902ac6704e681` 备份于 `/var/lib/sysbox-test/fast-v49-source-20261120/sysbox-fs.before`。服务单元已具备 `--session-recovery` 和 FD store；重启 FS 后 `loadopt-218-1016` 保持 Ready，Server Pod UID、k3s-server 容器 ID 与重启次数不变，虚拟 `/proc/meminfo`、`stat`、`loadavg` 可读且 `binfmt_misc` 目录存在。恢复指标 failures=0、dropped=0，三项服务 active，验收窗口无 warning 级 FS 日志。
+- L0 RuntimeClass/FUSE 检查、full-runtime `local-path` PVC 首次初始化和重建持久化、L2 lite PVC/特殊目录/CRI stats 回归均 `FUNCTIONAL PASS`。临时 L0/L2 Deployment 已缩容到 0，PVC 保留。这是源码二进制快速验证；installer 仍使用原镜像，未来重新安装可覆盖手工替换的 FS。正式 `v0.7.1-49` 镜像安装与 218 高密度故障注入仍未验收。
+
 ## 2026-11-20：最新 FS 候选两轮 64 路并发恢复
 
 - 218/server1 隔离 VM 安装当前 `ae223ae` FS SHA256 `c31b446e3d882a51f4f3ad8922da934ac329299ad67fd8fa5b39452c05831f0f`，8 Pod/16 容器各轮重启聚合 `sysbox.service` 后同时发起 64 次 `/proc/meminfo` 打开。两轮首读成功/断连分别为 46/18、39/25；断连发生在异步恢复前，不能宣称首读零失败。两轮分钟巡检均修复 24/24 挂载，恢复失败 0；16/16 容器随后重新打开成功，`binfmt_misc` 子挂载存在，Pod/容器身份哈希不变且重启数 0，相关服务错误级日志为空。

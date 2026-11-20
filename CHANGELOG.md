@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * Record a fast 218 source-binary installation of the latest sysbox-fs after a GitHub Registry image pull stalled. The recovery-enabled FS restarted with the selected CKM identity unchanged, virtual proc readable, zero recovery failures, and L0/L2 functional regressions passing; the Helm release was restored to v0.7.1-47, so v0.7.1-49 image validation remains open.
   * Build K8s release binaries directly with the existing static Sysbox target and skip DEB packaging by default. The deploy image consumes binaries, not a DEB, so the old mandatory package build delayed releases and blocked on unused DEB builder images; `BUILD_DEB=true` retains the package path when needed. Pin the release workflow's Go toolchain for direct builds.
   * Install Protobuf generation tools in the release runner. The first DEB-free tag failed immediately because a clean checkout lacks the ignored sysbox-ipc `.pb.go` files; the new source-build path needs `protoc` and its Go plugin before compiling.
   * Verify two 64-reader FUSE fault bursts with the latest FS source in the isolated 218 VM. First reads can return ENOTCONN before asynchronous recovery (18/64 and 25/64), but both restarts recovered all 24 mounts with zero recovery failures; all 16 original containers reopened virtual proc, retained binfmt_misc mounts, and stayed running. Restore the VM's original binary and clear test resources afterward; tagged-artifact and business-node validation remain open.
