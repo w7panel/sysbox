@@ -50,3 +50,11 @@ L0/L2 功能回归已通过。先前 v40 约 26 秒、v47 约 56–59 秒的 16,
 218 后续直接装入带符号源码候选 FS SHA256 `964a37d685fa004db17962d415b365c4fbe048c50f040d97902f14aec963c1ec`，原 v47 已备份。容器抖动期间候选的 30 秒 CPU 约 257%–497%，与不同时间的 v47 60 秒窗口不可直接比较；10 秒无丢失 perf 显示 Go GC 和 mountinfo 解析调用链突出。测试 Pod 消失后，15 秒 CPU 仍约 44%–91%，另一份 758 样本 perf 以 GC 标记为主，mountinfo 直接采样很少；分钟恢复扫描约 0.2 秒且无失败。7 个 CKM Ready、目标 L1 身份不变、虚拟 `/proc` 可读、FS 无近期 error，候选暂留 218 观察。
 
 针对容器创建/卸载的局部路径，源码改用 `strings.Cut` 解析 mountinfo 选项并避免为不存在的可选字段分配 map；同机基准由 954 次分配 / 87.7 KB / 44–47 µs 降至 421 次分配 / 72.4 KB / 38–40 µs，FS 全量 race 测试通过。该解析器改动尚未装入 218，隔离 VM 当前无法连接；整体 CPU 尖峰和稳态 GC 分配来源仍未解决，需在相同容器创建速率下做带 profile 的 A/B。
+
+218 后续只读采样定位到一类突发来源：`k3k-console-117057/ckm-bkhnk` 的内层 `fuse-overlayfs` 短时大量发起相对路径 `openat2`，10 秒内 FS 处理约 1.57 万次，路径样本包括镜像中的 `usr/share/zoneinfo/...`。同一 CKM 的多个旧业务 Pod 的 `w7panel-root-ca-bundle` init container 持续 BackOff；抽查 Pod 已重启 2166 次。两者时间和归属吻合，但尚不能把整机全部 CPU 或每次尖峰都归因于这些重试。分钟恢复巡检单次约 0.16–0.20 秒、恢复计数基本不变，解释不了非巡检时段的短峰。详情见 [KNOWN-ISSUES.md](KNOWN-ISSUES.md)。后续重建新 Pod 后，部分未改模板即 Ready，故旧 Pod 的 CA 写入失败原因仍需单独核查。
+
+追加 90 秒逐秒采样：FS 消耗约 39.4 CPU 秒，单秒最高约 2.49 核，尖峰与分钟巡检计数无关。运行中 FS 的 eBPF 入口计数连续四个 5 秒窗口分别有 7427、13120、12008、2794 次 `openat2`，几乎都走完整相对路径；同期每 5 秒 FS 消耗约 3.69–5.17 CPU 秒。20 秒 `perf` 的 689 个无丢样本仍主要落在 Go GC。已确认高频请求和 GC 是当前主要排查方向；还需在请求重试停止前后做同条件对照，才能量化因果和优化收益。
+
+218 随后做了 A/B/A 对照：将 `k3k-console-117057/ckm-bkhnk` 内 21 个原本未 Ready 的 Deployment 从 1 临时缩到 0，稳定后 FS 消耗 8.81 CPU 秒/30 秒、`openat2` 约 6.8–7.0 千次/10 秒；恢复全部原副本并批量创建新 Pod 后分别升至 42.58 CPU 秒/30 秒和 17.2→23.6→35.9 千次/10 秒。eBPF 单独捕获该 CKM 内层 agent 的 `fuse-overlayfs` 进程 10 秒发出 6424 次 `openat2`，同时 rootfs snapshotter 正在复制镜像目录。故**批量创建容器**是已验证的显著放大源；不能将恢复副本时的创建峰直接视作旧 Pod 稳态 BackOff 的贡献。缩容后仍有其他请求源，且当前没有各路径分配画像。21 个 Deployment 已恢复 1 副本，miniapp/traditiontool 及 7 个 prov 新 Pod 最终均 Ready，prov PVC 均 Bound；`sysbox sidecar oci spec unavailable` 符合已有创建暂态约定。FS/mgr/snapshotter 均 active。下一步核查旧卷/挂载状态，并验证本地 FS 解析优化的实际收益。
+
+全部新 Pod Ready 后再测，FS 消耗 12.45 CPU 秒/30 秒，`openat2` 为 8731、8285、8227 次/10 秒，明显低于批量创建期，但仍有稳态通知和 GC 开销。FS 近五分钟无 error，三个 Sysbox 服务 active。下一步对稳态请求按来源及分配点拆分；目前的 `/proc/<pid>/stat` 解析优化只通过本地测试，不能声称已降低 218 CPU。
