@@ -62,12 +62,14 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.25.0'
+          cache: false
 
-      # Sysbox runtimes are linked statically with the seccomp build tag.
-      # GitHub's base runner does not guarantee the pkg-config development
-      # metadata for libseccomp is present.
+      # A fresh checkout has no generated sysbox-ipc protobuf files.
       - name: Install static runtime build dependencies
-        run: sudo apt-get update && sudo apt-get install -y libseccomp-dev
+        run: |
+          sudo apt-get update && sudo apt-get install -y libseccomp-dev protobuf-compiler
+          go install github.com/golang/protobuf/protoc-gen-go@v1.5.4
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Build and publish release
         run: ./w7panel-doc/release.sh
