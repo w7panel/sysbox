@@ -4,6 +4,12 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-20：218 sysbox-fs 偶发 CPU 尖峰的请求来源
+
+- 218/server1 仍运行 FS SHA256 `964a37d685fa004db17962d415b365c4fbe048c50f040d97902f14aec963c1ec`，尚未安装本地 `5f6cf0d` 的 mountinfo 解析器改动。只读逐秒采样见约 3.5 核的短峰；同一时段分钟兜底扫描单次约 0.16–0.20 秒，恢复计数基本不变，因此该峰不能归因于恢复巡检。20 秒、515 个无丢失样本的 `perf --no-inherit` 中，最高的直接采样函数是 Go GC；此采样不能单独确定分配源。
+- eBPF 对 FS 函数入口计数时，`processOpenat2` 短时达到约 600–3700 次/秒；另一 10 秒窗口记录 15,685 次，几乎全部进入完整相对路径处理。内核 `openat2` 追踪显示其中两个短生命周期 `fuse-overlayfs` 进程在 10 秒内分别发出 2,992、3,297 次调用，路径样本大量落在 `usr/share/zoneinfo/...`。这些进程属于 `k3k-console-117057/k3k-ckm-bkhnk-server-6d9774f5bd-z98rj` 中内层 `default/w7panel-sysbox-inner-agent-rqkr9` 的 cgroup。相对路径需解析 dirfd，当前 FS 的绝对路径快速放行不能跳过这部分通知；处理过程反复读取请求进程属性。此来源能解释一类非巡检尖峰，但还未量化其对整机 FS CPU 的全部贡献。
+- 该 CKM 多个内层 Pod 的 `w7panel-root-ca-bundle` init container 持续 BackOff；抽查 `default/w7-miniapp-gfqmmyhh-774656d78f-pv5p4` 已重启 2166 次，其上次日志为 `/bin/sh: 4: cannot create /var/run/w7panel-root-ca/ca.crt: Permission denied`，事件显示 24 小时内 284 次镜像复用/容器重试。需由该业务的 Pod 模板修复空卷写权限，并在同等 CKM 数量下对照重试停止前后的 FS CPU、`openat2` 通知率及 GC。此次仅只读观测，未改动业务资源或安装新 FS。
+
 ## 2026-11-20：218 候选 FS 持续 CPU 采样与 mountinfo 解析
 
 - 218/server1 当前直接安装源码 FS SHA256 `964a37d685fa004db17962d415b365c4fbe048c50f040d97902f14aec963c1ec`，原 v47 备份于宿主 `/var/lib/sysbox-test/sysbox-fs-v47-20261120-pre-cpu`。这是已运行的临时候选，不是 Helm 发布验收；同版本镜像 Helm upgrade 曾跳过安装，不能当作候选测试。候选保留在宿主继续观察：7 个 CKM Ready，目标 L1 Pod UID、两个容器 ID 和重启次数与替换前一致，虚拟 `/proc/meminfo` 可读，近 15 分钟 FS error 日志为空，恢复 failures 和 dropped 均为 0。
