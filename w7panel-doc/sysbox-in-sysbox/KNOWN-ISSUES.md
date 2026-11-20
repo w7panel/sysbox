@@ -4,6 +4,13 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-20：218 候选 FS 持续 CPU 采样与 mountinfo 解析
+
+- 218/server1 当前直接安装源码 FS SHA256 `964a37d685fa004db17962d415b365c4fbe048c50f040d97902f14aec963c1ec`，原 v47 备份于宿主 `/var/lib/sysbox-test/sysbox-fs-v47-20261120-pre-cpu`。这是已运行的临时候选，不是 Helm 发布验收；同版本镜像 Helm upgrade 曾跳过安装，不能当作候选测试。候选保留在宿主继续观察：7 个 CKM Ready，目标 L1 Pod UID、两个容器 ID 和重启次数与替换前一致，虚拟 `/proc/meminfo` 可读，近 15 分钟 FS error 日志为空，恢复 failures 和 dropped 均为 0。
+- 此前 36 个 `csm-template-ssh-test` Pod 创建/失败/重试时，原 v47 FS 的 60 秒采样约 206%–492% CPU；源码候选仍有一次 30 秒采样平均约 335%（257%–497%）。负载窗口不同，不能计算降耗比例。候选带符号的 10 秒 `perf --no-inherit` 在该抖动期取得 5,163 个无丢失样本，约 73% 的累计用户态调用链经 Go `gcDrain`，约 14% 经 `NewMountInfoParser`；累计比例不可相加。原 v47 剥离符号，不能拿其地址误映射后的函数名作对照。
+- 测试 Pod 消失后，FS 15 秒 CPU 为约 44%–91%；同期 10 秒 perf 的 758 个无丢失样本仍以 GC 标记为主，mountinfo 解析直接样本很少。分钟兜底扫描约 0.18–0.22 秒、59 个候选，恢复计数基本稳定。因此容器抖动会放大挂载解析负载，但持续 GC 的分配来源和全部 CPU 尖峰尚未定位。
+- mountinfo 解析器源码候选保留每次 syscall 的实时挂载树读取，只将选项解析的 `Split` 改为 `Cut`，无可选字段时不建空 map。相同本机基准由 954 次分配、约 87.7 KB、44–47 µs 降至 421 次、约 72.4 KB、38–40 µs；FS 全量 race 测试通过。此改动尚未装入 218；隔离 VM 的 `127.0.0.1:2224` 当前拒绝连接，尚无同负载业务 A/B，不应宣称 CPU 尖峰已修复。
+
 ## 2026-11-20：218 业务宿主高 CPU 与容器抖动
 
 - 218 保持原 v47 FS 二进制；60 秒逐秒只读采样显示 FS 用量约 206%–492%，且同一时段 `csm-template-ssh-test` 中数十个系统容器测试 Pod 频繁创建、失败和重试。近期事件含 `sysbox sidecar oci spec unavailable` 及 `/dev/full` chown EIO；不能据此认定它们是全部 FS CPU 的唯一原因。
