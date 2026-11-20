@@ -4,6 +4,12 @@
 [README.md](./README.md) 为准；旧 CKM、旧镜像和 L3 实验过程见
 [HISTORY.md](./HISTORY.md)。
 
+## 2026-11-20：218 业务宿主高 CPU 与容器抖动
+
+- 218 保持原 v47 FS 二进制；60 秒逐秒只读采样显示 FS 用量约 206%–492%，且同一时段 `csm-template-ssh-test` 中数十个系统容器测试 Pod 频繁创建、失败和重试。近期事件含 `sysbox sidecar oci spec unavailable` 及 `/dev/full` chown EIO；不能据此认定它们是全部 FS CPU 的唯一原因。
+- FS 最近一分钟记录 1,008 条 `Rejected unmount of sysbox-fs managed submount` Info 日志，以及 22 次预注册、21 次注册、15 次注销。该拒绝是保护受管子挂载的预期分支，源码仅将其日志降为 Debug，维持 `EINVAL` 返回。`seccomp` race 测试通过；隔离 VM 只换 FS 候选后，双容器测试 Pod 的 `/proc/meminfo` 卸载仍返回 `Invalid argument`，文件仍可读，近一分钟该 Info 日志为 0。测试结束缩容至 0，FUSE 挂载和 FD store 均为 0，恢复原 v47 SHA，Sysbox 服务 active、节点 Ready。此项尚无同负载 CPU A/B，不能宣称解决业务尖峰。
+- 同时段 `perf --no-inherit` 采集 10 秒、5,246 个 cycles 样本且无丢失；最高用户态采样位置仍集中在 Go GC/调度，内核样本出现 mountinfo 与 `/proc` 路径查询。当前二进制无 perf 符号，调用栈不能可靠归因到单个 handler。下一步需在相同容器创建速率下分开对照生命周期路径与虚拟文件读取路径。
+
 ## 2026-11-20：FS CPU 尖峰与 FUSE 缓冲分配
 
 - 218 业务宿主保持原 FS SHA256 `33479bb0a11ecb0a9471ef38273bb228dabaad7f43ab44d07cc3db4b59ba9d65`，只读 20 秒 `perf --no-inherit` 捕获 700 个用户态 cycles 样本，最高的采样地址是 Go GC/调度函数；近期恢复计数未同步增长，日志无恢复错误。这指向分配压力，但尚未定位真实业务的触发者。
