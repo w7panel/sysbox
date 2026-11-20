@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - unreleased
 ### Changed
+  * Verify the latest FS source on 218 with eight temporary two-container Pods: after a controlled Sysbox restart all 64 immediate virtual-proc opens hit the expected asynchronous disconnect, then all 64 reopens succeeded. All 16 container identities and binfmt_misc submounts remained intact, with zero recovery failures; remove the temporary Pods afterward. The tagged image remains unverified on 218.
   * Record a fast 218 source-binary installation of the latest sysbox-fs after a GitHub Registry image pull stalled. The recovery-enabled FS restarted with the selected CKM identity unchanged, virtual proc readable, zero recovery failures, and L0/L2 functional regressions passing; the Helm release was restored to v0.7.1-47, so v0.7.1-49 image validation remains open.
   * Build K8s release binaries directly with the existing static Sysbox target and skip DEB packaging by default. The deploy image consumes binaries, not a DEB, so the old mandatory package build delayed releases and blocked on unused DEB builder images; `BUILD_DEB=true` retains the package path when needed. Pin the release workflow's Go toolchain for direct builds.
   * Install Protobuf generation tools in the release runner. The first DEB-free tag failed immediately because a clean checkout lacks the ignored sysbox-ipc `.pb.go` files; the new source-build path needs `protoc` and its Go plugin before compiling.

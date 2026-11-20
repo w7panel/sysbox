@@ -8,7 +8,8 @@
 
 - `v0.7.1-49` 的 Chart、lite 二进制及镜像元数据已按 Release `SHA256SUMS` 校验。218 从 GHCR 拉取正式镜像长时间停在 `ContainerCreating`，未完成正式镜像安装；取消升级并回滚到原 `v0.7.1-47` Chart（Helm revision 53，deployed），installer 与 admission 均 Ready。
 - 按 FS-only 快速测试方式，将当前 `ae223ae` 源码构建的 `sysbox-fs`（SHA256 `6c4a7dfecc99de628b7bc31544a5a90dc147ab5c0b79eff72411a96203758f91`，二进制版本 `0.7.1-48`）原子替换到 218/server1，旧文件 SHA256 `0ba97c9173ed28082995c6b95ead109bb53b52b5f2a8005ffe6902ac6704e681` 备份于 `/var/lib/sysbox-test/fast-v49-source-20261120/sysbox-fs.before`。服务单元已具备 `--session-recovery` 和 FD store；重启 FS 后 `loadopt-218-1016` 保持 Ready，Server Pod UID、k3s-server 容器 ID 与重启次数不变，虚拟 `/proc/meminfo`、`stat`、`loadavg` 可读且 `binfmt_misc` 目录存在。恢复指标 failures=0、dropped=0，三项服务 active，验收窗口无 warning 级 FS 日志。
-- L0 RuntimeClass/FUSE 检查、full-runtime `local-path` PVC 首次初始化和重建持久化、L2 lite PVC/特殊目录/CRI stats 回归均 `FUNCTIONAL PASS`。临时 L0/L2 Deployment 已缩容到 0，PVC 保留。这是源码二进制快速验证；installer 仍使用原镜像，未来重新安装可覆盖手工替换的 FS。正式 `v0.7.1-49` 镜像安装与 218 高密度故障注入仍未验收。
+- L0 RuntimeClass/FUSE 检查、full-runtime `local-path` PVC 首次初始化和重建持久化、L2 lite PVC/特殊目录/CRI stats 回归均 `FUNCTIONAL PASS`。临时 L0/L2 Deployment 已缩容到 0，PVC 保留。这是源码二进制快速验证；installer 仍使用原镜像，未来重新安装可覆盖手工替换的 FS。正式 `v0.7.1-49` 镜像安装仍未验收。
+- 随后在同一 218/server1 宿主创建 8 个临时 `sysbox-runc` 双容器 Pod，全部 Ready 后重启 `sysbox.service` 并发起 64 路虚拟 `/proc/meminfo` 首读：64/64 在异步修复前返回 `Transport endpoint is not connected`；稍后重新打开 64/64 成功。16/16 容器的 `binfmt_misc` 子挂载仍在，Pod UID、容器 ID、restartCount 与重启前逐项一致；所选 CKM 仍 Ready，FS/mgr/snapshotter active，恢复 failures=0、dropped=0，FS 错误级日志为空。宿主同时记录其他 namespace 的 shared 父挂载安全跳过和持续读取旧 FD 的告警，这些边界不能记作测试容器恢复失败。临时 Deployment/Pod 已删除。此项补齐当前源码候选在 218 业务节点的 8 Pod/16 容器受控重启验证；正式 `v0.7.1-49` 镜像安装仍未验收。
 
 ## 2026-11-20：最新 FS 候选两轮 64 路并发恢复
 
